@@ -271,6 +271,10 @@ public final class HotSpotGraalRuntime implements HotSpotGraalRuntimeProvider {
         return mBean.optionsFor(options, forMethod);
     }
 
+    Object getMBean() {
+        return mBean;
+    }
+
     @Override
     public Group createSnippetCounterGroup(String name) {
         if (snippetCounterGroups != null) {

@@ -22,10 +22,8 @@
  */
 package org.graalvm.compiler.hotspot;
 
-import java.lang.management.ManagementFactory;
 import java.lang.ref.Reference;
 import java.lang.ref.WeakReference;
-import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
@@ -34,16 +32,11 @@ import javax.management.Attribute;
 import javax.management.AttributeList;
 import javax.management.AttributeNotFoundException;
 import javax.management.DynamicMBean;
-import javax.management.InstanceAlreadyExistsException;
 import javax.management.MBeanAttributeInfo;
 import javax.management.MBeanException;
 import javax.management.MBeanInfo;
 import javax.management.MBeanOperationInfo;
 import javax.management.MBeanParameterInfo;
-import javax.management.MBeanRegistrationException;
-import javax.management.MBeanServer;
-import javax.management.MalformedObjectNameException;
-import javax.management.NotCompliantMBeanException;
 import javax.management.ObjectName;
 import javax.management.ReflectionException;
 import jdk.vm.ci.hotspot.HotSpotCompilationRequest;
@@ -66,7 +59,6 @@ import org.graalvm.util.Equivalence;
 import org.graalvm.util.UnmodifiableEconomicMap;
 
 public final class HotSpotGraalMBean implements DynamicMBean {
-    private static Object mBeanServerField;
     private final HotSpotGraalCompiler compiler;
     private final OptionValues options;
     private final EconomicMap<OptionKey<?>, Object> changes;
@@ -85,53 +77,14 @@ public final class HotSpotGraalMBean implements DynamicMBean {
         this.loaders = systemLoaderSet;
     }
 
-    private static boolean isMXServerOn() {
-        if (mBeanServerField == null) {
-            try {
-                final Field field = ManagementFactory.class.getDeclaredField("platformMBeanServer");
-                field.setAccessible(true);
-                mBeanServerField = field;
-            } catch (Exception ex) {
-                mBeanServerField = ManagementFactory.class;
-            }
-        }
-        if (mBeanServerField instanceof Field) {
-            try {
-                return ((Field) mBeanServerField).get(null) != null;
-            } catch (Exception ex) {
-                return true;
-            }
-        } else {
-            return false;
-        }
-    }
-
     public static HotSpotGraalMBean create(HotSpotGraalCompiler compiler) {
         OptionValues options = HotSpotGraalOptionValues.HOTSPOT_OPTIONS;
         HotSpotGraalMBean mbean = new HotSpotGraalMBean(compiler, options);
         return mbean;
     }
 
+    @SuppressWarnings("unused")
     public ObjectName ensureRegistered(boolean check) {
-        for (int cnt = 0;; cnt++) {
-            if (registered != null) {
-                return registered;
-            }
-            if (check && !isMXServerOn()) {
-                return null;
-            }
-            try {
-                MBeanServer mbs = ManagementFactory.getPlatformMBeanServer();
-                ObjectName name = new ObjectName("org.graalvm.compiler.hotspot:type=Options" + (cnt == 0 ? "" : cnt));
-                mbs.registerMBean(this, name);
-                registered = name;
-                break;
-            } catch (MalformedObjectNameException | MBeanRegistrationException | NotCompliantMBeanException ex) {
-                throw new IllegalStateException(ex);
-            } catch (InstanceAlreadyExistsException ex) {
-                continue;
-            }
-        }
         return registered;
     }
 

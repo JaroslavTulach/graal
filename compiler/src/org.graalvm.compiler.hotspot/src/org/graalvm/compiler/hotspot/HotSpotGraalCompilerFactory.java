@@ -132,6 +132,17 @@ public final class HotSpotGraalCompilerFactory extends HotSpotJVMCICompilerFacto
         }
     }
 
+    @SuppressWarnings("static-method")
+    public String mbeanName() {
+        return "org.graalvm.compiler.hotspot:type=Options";
+    }
+
+    public Object mbean() {
+        HotSpotGraalCompiler compiler = createCompiler(HotSpotJVMCIRuntime.runtime());
+        Object bean = ((HotSpotGraalRuntime) compiler.getGraalRuntime()).getMBean();
+        return bean;
+    }
+
     @Override
     public CompilationLevelAdjustment getCompilationLevelAdjustment() {
         if (graalCompileOnlyFilter != null) {
