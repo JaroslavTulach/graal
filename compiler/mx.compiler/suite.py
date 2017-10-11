@@ -1121,6 +1121,20 @@ suite = {
       "isTestProject" : True,
     },
 
+    "org.graalvm.compiler.javaout.test" : {
+      "subDir" : "src",
+      "sourceDirs" : ["src"],
+      "dependencies" : [
+        "org.graalvm.compiler.core.test",
+      ],
+      "checkstyle" : "org.graalvm.compiler.graph",
+      "javaCompliance" : "1.8",
+      "workingSets" : "Graal,Test",
+      "jacoco" : "exclude",
+      "findbugs" : "false",
+      "isTestProject" : True,
+    },
+
     # ------------- GraalTruffle -------------
 
     "org.graalvm.compiler.truffle" : {
@@ -1391,6 +1405,7 @@ suite = {
         "org.graalvm.compiler.hotspot.amd64.test",
         "org.graalvm.compiler.hotspot.lir.test",
         "org.graalvm.compiler.options.test",
+        "org.graalvm.compiler.javaout.test",
         "org.graalvm.compiler.jtt",
         "org.graalvm.compiler.lir.jtt",
         "org.graalvm.compiler.lir.test",

@@ -951,6 +951,9 @@ public abstract class GraalCompilerTest extends GraalTest {
                 CompilationPrinter printer = CompilationPrinter.begin(options, id, installedCodeOwner, INVOCATION_ENTRY_BCI);
                 CompilationResult compResult = compile(installedCodeOwner, graphToCompile, new CompilationResult(graphToCompile.compilationId()), id, options);
                 printer.finish(compResult);
+                if (compResult == null) {
+                    return null;
+                }
 
                 try (DebugContext.Scope s = debug.scope("CodeInstall", getCodeCache(), installedCodeOwner, compResult);
                                 DebugContext.Activation a = debug.activate()) {
