@@ -373,6 +373,10 @@ public class Graph {
         return debug;
     }
 
+    final void dump() {
+        getDebug().forceDump(this, "Debug");
+    }
+
     /**
      * Resets the {@link DebugContext} for this graph to a new value. This is useful when a graph is
      * "handed over" from its creating thread to another thread.
