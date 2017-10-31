@@ -62,6 +62,7 @@ public abstract class JavaOutputTest extends GraalCompilerTest {
      */
     Object[] argsToBind;
     private StructuredGraph optimizedGraph;
+    private String code;
 
     @SuppressWarnings("try")
     protected StructuredGraph optimize(ResolvedJavaMethod installedCodeOwner, StructuredGraph graph, CompilationResult compilationResult, CompilationIdentifier compilationId, OptionValues options) {
@@ -113,7 +114,7 @@ public abstract class JavaOutputTest extends GraalCompilerTest {
         executeActualCheckDeopt(options, method, shouldNotDeopt, receiver, args);
         assertNotNull("Optimized graph generated", optimizedGraph);
 
-        JavaOutput code = new JavaOutput(optimizedGraph);
+        JavaOutput generator = new JavaOutput(optimizedGraph);
 
         StringBuilder sb = new StringBuilder();
         sb.append("\npublic class Generated {\n");
@@ -129,14 +130,15 @@ public abstract class JavaOutputTest extends GraalCompilerTest {
         }
         sb.append(") {\n");
         try {
-            code.generate(sb, "    ");
+            generator.generate(sb, "    ");
         } catch (IOException ex) {
             throw new IllegalStateException(ex);
         }
         sb.append("\n  }");
         sb.append("\n}");
 
-        byte[] generated = assertCompile(sb.toString());
+        code = sb.toString();
+        byte[] generated = assertCompile(code);
         assertNotNull("Bytes found", generated);
 
         Method generatedMethod = assertMethod("Generated", generated, "test");

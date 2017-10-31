@@ -26,8 +26,10 @@ import java.io.IOException;
 import java.util.Iterator;
 import org.graalvm.compiler.graph.Node;
 import org.graalvm.compiler.graph.iterators.NodeIterable;
+import org.graalvm.compiler.nodes.BeginNode;
 import org.graalvm.compiler.nodes.BinaryOpLogicNode;
 import org.graalvm.compiler.nodes.ConstantNode;
+import org.graalvm.compiler.nodes.IfNode;
 import org.graalvm.compiler.nodes.ParameterNode;
 import org.graalvm.compiler.nodes.ReturnNode;
 import org.graalvm.compiler.nodes.StartNode;
@@ -93,10 +95,20 @@ public final class JavaOutput {
             out.append(";");
             return;
         }
-        if (at instanceof StartNode) {
+        if (at instanceof StartNode || at instanceof BeginNode) {
             for (Node next : at.cfgSuccessors()) {
                 dump(out, next, sep);
             }
+            return;
+        }
+        if (at instanceof IfNode) {
+            out.append(sep).append("if (");
+            dump(out, ((IfNode) at).condition(), "");
+            out.append(") {\n");
+            dump(out, ((IfNode) at).trueSuccessor(), moreSep);
+            out.append("\n").append(sep).append("} else {\n");
+            dump(out, ((IfNode) at).falseSuccessor(), moreSep);
+            out.append("\n").append(sep).append("}\n");
             return;
         }
 
