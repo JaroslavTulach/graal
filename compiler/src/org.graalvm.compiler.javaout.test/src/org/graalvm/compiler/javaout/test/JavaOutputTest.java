@@ -40,9 +40,21 @@ import org.graalvm.compiler.options.OptionValues;
 import org.graalvm.compiler.phases.OptimisticOptimizations;
 import org.junit.Assert;
 import static org.junit.Assert.assertNotNull;
+import org.junit.Assume;
+import org.junit.BeforeClass;
 
 public abstract class JavaOutputTest extends GraalCompilerTest {
-    protected static final Set<DeoptimizationReason> EMPTY = Collections.<DeoptimizationReason> emptySet();
+    static final Set<DeoptimizationReason> EMPTY = Collections.<DeoptimizationReason> emptySet();
+
+    @BeforeClass
+    public static void skipIfNoTool() {
+        try {
+            Class.forName("javax.tools.JavaFileObject");
+            // OK
+        } catch (ClassNotFoundException ex) {
+            Assume.assumeNoException("Skipping as Javac compiler cannot be found", ex);
+        }
+    }
 
     /**
      * The arguments which, if non-null, will replace the Locals in the test method's graph.
