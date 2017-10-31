@@ -43,6 +43,7 @@ public class Java_ifne extends JavaOutputTest {
     @Test
     public void run0() throws Throwable {
         runTest("test", 0);
+        assertCode("Currently three checks for zero", "arg0 == 0", 1, 3);
     }
 
     @Test

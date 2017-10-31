@@ -44,7 +44,6 @@ import org.graalvm.compiler.code.CompilationResult;
 import org.graalvm.compiler.core.GraalCompiler;
 import org.graalvm.compiler.core.common.CompilationIdentifier;
 import org.graalvm.compiler.core.test.GraalCompilerTest;
-import static org.graalvm.compiler.core.test.GraalCompilerTest.getInitialOptions;
 import org.graalvm.compiler.debug.DebugContext;
 import org.graalvm.compiler.lir.asm.CompilationResultBuilderFactory;
 import org.graalvm.compiler.nodes.StructuredGraph;
@@ -161,8 +160,8 @@ public abstract class JavaOutputTest extends GraalCompilerTest {
                 }
 
                 @Override
-                public boolean isNameCompatible(String simpleName, JavaFileObject.Kind kind) {
-                    if (!kind.equals(getKind())) {
+                public boolean isNameCompatible(String simpleName, JavaFileObject.Kind aKind) {
+                    if (!aKind.equals(getKind())) {
                         return false;
                     }
                     return "Generated".equals(simpleName);
@@ -224,5 +223,20 @@ public abstract class JavaOutputTest extends GraalCompilerTest {
         } catch (ClassNotFoundException ex) {
             throw new IllegalStateException(ex);
         }
+    }
+
+    protected final void assertCode(String msg, String snippet, int minCount, int maxCount) {
+        assertNotNull(msg, code);
+        int cnt = 0;
+        int at = -1;
+        for (;;) {
+            int next = code.indexOf(snippet, at + 1);
+            if (next == -1) {
+                break;
+            }
+            cnt++;
+            at = next;
+        }
+        assertTrue(msg + " found " + cnt + " in\n" + code, minCount <= cnt && maxCount >= cnt);
     }
 }
