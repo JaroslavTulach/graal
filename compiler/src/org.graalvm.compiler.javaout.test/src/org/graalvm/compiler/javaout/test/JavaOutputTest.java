@@ -88,6 +88,7 @@ public abstract class JavaOutputTest extends GraalCompilerTest {
         runTest(getInitialOptions(), shouldNotDeopt, true, false, name, args);
     }
 
+    @SuppressWarnings("unused")
     protected void runTest(OptionValues options, Set<DeoptimizationReason> shouldNotDeopt, boolean bind, boolean noProfile, String name, Object... args) {
         ResolvedJavaMethod method = getResolvedJavaMethod(name);
         Object receiver = method.isStatic() ? null : this;
