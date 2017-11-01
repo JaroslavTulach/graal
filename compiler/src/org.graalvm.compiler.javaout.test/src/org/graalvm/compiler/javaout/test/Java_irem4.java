@@ -29,6 +29,10 @@ public class Java_irem4 extends JavaOutputTest {
         return a % 8;
     }
 
+    public static int rem6(int a) {
+        return a % 6;
+    }
+
     @Test
     public void run13() throws Throwable {
         runTest("test", 13);
@@ -39,6 +43,18 @@ public class Java_irem4 extends JavaOutputTest {
     public void run64() throws Throwable {
         runTest("test", 64);
         assertCode("% has been eliminated", "%", 0, 0);
+    }
+
+    @Test
+    public void rem6to13() throws Throwable {
+        runTest("rem6", 13);
+        assertCode("% has to stay there", "% 6", 1, 1);
+    }
+
+    @Test
+    public void rem6to64() throws Throwable {
+        runTest("rem6", 64);
+        assertCode("% has to stay there", "% 6", 1, 1);
     }
 
 }

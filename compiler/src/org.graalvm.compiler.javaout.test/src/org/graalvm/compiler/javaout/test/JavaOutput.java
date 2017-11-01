@@ -36,6 +36,7 @@ import org.graalvm.compiler.nodes.StartNode;
 import org.graalvm.compiler.nodes.StructuredGraph;
 import org.graalvm.compiler.nodes.calc.BinaryNode;
 import org.graalvm.compiler.nodes.calc.ConditionalNode;
+import org.graalvm.compiler.nodes.calc.FixedBinaryNode;
 import org.graalvm.compiler.nodes.calc.NegateNode;
 import org.graalvm.compiler.nodes.calc.UnaryNode;
 
@@ -75,12 +76,13 @@ public final class JavaOutput {
             return;
         }
 
+        out.append(sep).append("/* node: ");
+        out.append(sep).append(at.toString()).append("\n");
         for (Node in : at.inputs()) {
-            out.append(sep).append(" in ").append(in.toString()).append("\n");
             expr(out, in, moreSep);
             out.append("\n");
         }
-        out.append(sep).append(at.toString()).append("\n");
+        out.append("*/\n");
         for (Node next : at.cfgSuccessors()) {
             dump(out, next, moreSep);
         }
@@ -99,7 +101,7 @@ public final class JavaOutput {
             out.append(value);
             return;
         }
-        if (at instanceof BinaryOpLogicNode || at instanceof BinaryNode) {
+        if (at instanceof BinaryOpLogicNode || at instanceof BinaryNode || at instanceof FixedBinaryNode) {
             NodeIterable<Node> two = at.inputs();
             assert 2 == two.count();
             out.append("(");
