@@ -52,6 +52,42 @@ public final class JavaOutput {
 
     private static void dump(Appendable out, Node at, String sep) throws IOException {
         final String moreSep = sep + "  ";
+        if (at instanceof ReturnNode) {
+            out.append(sep).append("return ");
+            expr(out, ((ReturnNode) at).result(), "");
+            out.append(";");
+            return;
+        }
+        if (at instanceof StartNode || at instanceof BeginNode) {
+            for (Node next : at.cfgSuccessors()) {
+                dump(out, next, sep);
+            }
+            return;
+        }
+        if (at instanceof IfNode) {
+            out.append(sep).append("if (");
+            expr(out, ((IfNode) at).condition(), "");
+            out.append(") {\n");
+            dump(out, ((IfNode) at).trueSuccessor(), moreSep);
+            out.append("\n").append(sep).append("} else {\n");
+            dump(out, ((IfNode) at).falseSuccessor(), moreSep);
+            out.append("\n").append(sep).append("}\n");
+            return;
+        }
+
+        for (Node in : at.inputs()) {
+            out.append(sep).append(" in ").append(in.toString()).append("\n");
+            expr(out, in, moreSep);
+            out.append("\n");
+        }
+        out.append(sep).append(at.toString()).append("\n");
+        for (Node next : at.cfgSuccessors()) {
+            dump(out, next, moreSep);
+        }
+    }
+
+    private static void expr(Appendable out, Node at, String sep) throws IOException {
+        final String moreSep = sep + "  ";
         if (at instanceof ParameterNode) {
             StructuredGraph g = (StructuredGraph) at.graph();
             String paramName = g.getMethods().get(0).getParameters()[((ParameterNode) at).index()].getName();
@@ -68,60 +104,29 @@ public final class JavaOutput {
             assert 2 == two.count();
             out.append("(");
             Iterator<Node> twoIt = two.iterator();
-            dump(out, twoIt.next(), "");
+            expr(out, twoIt.next(), "");
             out.append(" ").append(at.getNodeClass().shortName()).append(" ");
-            dump(out, twoIt.next(), "");
+            expr(out, twoIt.next(), "");
             out.append(")");
             return;
         }
         if (at instanceof NegateNode) {
             out.append("-");
-            dump(out, ((UnaryNode) at).getValue(), "");
+            expr(out, ((UnaryNode) at).getValue(), "");
             return;
         }
         if (at instanceof ConditionalNode) {
             out.append("(");
-            dump(out, ((ConditionalNode) at).condition(), "");
+            expr(out, ((ConditionalNode) at).condition(), "");
             out.append(" ? ");
-            dump(out, ((ConditionalNode) at).trueValue(), "");
+            expr(out, ((ConditionalNode) at).trueValue(), "");
             out.append(" : ");
-            dump(out, ((ConditionalNode) at).falseValue(), "");
+            expr(out, ((ConditionalNode) at).falseValue(), "");
             out.append(")");
             return;
         }
-        if (at instanceof ReturnNode) {
-            out.append(sep).append("return ");
-            dump(out, ((ReturnNode) at).result(), "");
-            out.append(";");
-            return;
-        }
-        if (at instanceof StartNode || at instanceof BeginNode) {
-            for (Node next : at.cfgSuccessors()) {
-                dump(out, next, sep);
-            }
-            return;
-        }
-        if (at instanceof IfNode) {
-            out.append(sep).append("if (");
-            dump(out, ((IfNode) at).condition(), "");
-            out.append(") {\n");
-            dump(out, ((IfNode) at).trueSuccessor(), moreSep);
-            out.append("\n").append(sep).append("} else {\n");
-            dump(out, ((IfNode) at).falseSuccessor(), moreSep);
-            out.append("\n").append(sep).append("}\n");
-            return;
-        }
-
-        for (Node in : at.inputs()) {
-            out.append(sep).append(" in ").append(in.toString()).append("\n");
-            dump(out, in, moreSep);
-            out.append("\n");
-        }
-        out.append(sep).append(at.toString()).append("\n");
-        System.err.println("   p: " + at.cfgPredecessors().toString());
-        System.err.println("   n: " + at.cfgSuccessors().toString());
-        for (Node next : at.cfgSuccessors()) {
-            dump(out, next, moreSep);
+        for (Node next : at.inputs()) {
+            expr(out, next, moreSep);
         }
     }
 }

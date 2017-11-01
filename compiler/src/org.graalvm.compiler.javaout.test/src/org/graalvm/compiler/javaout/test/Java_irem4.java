@@ -32,11 +32,13 @@ public class Java_irem4 extends JavaOutputTest {
     @Test
     public void run13() throws Throwable {
         runTest("test", 13);
+        assertCode("% has been eliminated", "%", 0, 0);
     }
 
     @Test
     public void run64() throws Throwable {
         runTest("test", 64);
+        assertCode("% has been eliminated", "%", 0, 0);
     }
 
 }
