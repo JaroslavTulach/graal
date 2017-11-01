@@ -85,12 +85,12 @@ public final class JavaOutput {
             for (PhiNode phi : loopBegin.phis()) {
                 if (phi.isLoopPhi()) {
                     out.append(sep).append(phi.stamp().javaType(metaAccess).toJavaName());
-                    out.append(" phi").append(Integer.toString(phi.getId())).append(" = ");
+                    out.append(" phi").append(findNodeId(phi)).append(" = ");
                     expr(out, phi.firstValue(), sep);
                     out.append(";").append("\n");
                 }
             }
-            out.append(sep).append("LOOP" + loopBegin.getId()).append(": for (;;) {\n");
+            out.append(sep).append("LOOP" + findNodeId(loopBegin)).append(": for (;;) {\n");
             processSuccessors(at, out, moreSep);
             out.append(sep).append("}\n");
             return;
@@ -101,7 +101,7 @@ public final class JavaOutput {
             for (PhiNode phi : loopEnd.merge().phis()) {
                 if (phi.isLoopPhi()) {
                     out.append(sep).append(phi.stamp().javaType(metaAccess).toJavaName());
-                    out.append(" newPhi").append(Integer.toString(phi.getId())).append(" = ");
+                    out.append(" newPhi").append(findNodeId(phi)).append(" = ");
                     expr(out, phi.valueAt(loopEnd), sep);
                     out.append(";").append("\n");
                 }
@@ -109,17 +109,17 @@ public final class JavaOutput {
             for (PhiNode phi : loopEnd.merge().phis()) {
                 if (phi.isLoopPhi()) {
                     out.append(sep);
-                    out.append(" phi").append(Integer.toString(phi.getId())).append(" = ");
-                    out.append(" newPhi").append(Integer.toString(phi.getId()));
+                    out.append(" phi").append(findNodeId(phi)).append(" = ");
+                    out.append(" newPhi").append(findNodeId(phi));
                     out.append(";").append("\n");
                 }
             }
-            out.append(sep).append("continue LOOP").append(loopEnd.loopBegin().getId() + ";\n");
+            out.append(sep).append("continue LOOP").append(findNodeId(loopEnd.loopBegin())).append(";\n");
             return;
         }
         if (at instanceof LoopExitNode) {
             LoopExitNode loopExit = (LoopExitNode) at;
-            // out.append(sep).append("break LOOP").append(loopExit.loopBegin().getId() + ";\n");
+            // out.append(sep).append("break LOOP").append(findNodeId(loopExit.loopBegin() + ";\n");
             processSuccessors(at, out, sep);
             return;
         }
@@ -132,6 +132,11 @@ public final class JavaOutput {
         }
         out.append("*/\n");
         processSuccessors(at, out, moreSep);
+    }
+
+    @SuppressWarnings("deprecation")
+    private static String findNodeId(Node phi) {
+        return Integer.toString(phi.getId());
     }
 
     private static void processSuccessors(Node at, Appendable out, final String moreSep) throws IOException {
@@ -180,7 +185,7 @@ public final class JavaOutput {
             return;
         }
         if (at instanceof PhiNode) {
-            out.append("phi").append(Integer.toString(at.getId()));
+            out.append("phi").append(findNodeId(at));
             return;
         }
         for (Node next : at.inputs()) {
