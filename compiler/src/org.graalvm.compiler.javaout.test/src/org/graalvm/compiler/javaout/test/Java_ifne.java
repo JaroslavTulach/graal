@@ -40,6 +40,14 @@ public class Java_ifne extends JavaOutputTest {
         return n;
     }
 
+    public static int fac(int a) {
+        int n = 1;
+        for (int i = 1; i < a; i++) {
+            n *= i;
+        }
+        return n;
+    }
+
     @Test
     public void run0() throws Throwable {
         runTest("test", 0);
@@ -49,5 +57,10 @@ public class Java_ifne extends JavaOutputTest {
     @Test
     public void run1() throws Throwable {
         runTest("test", 1);
+    }
+
+    @Test
+    public void fac3() throws Throwable {
+        runTest("fac", 3);
     }
 }
