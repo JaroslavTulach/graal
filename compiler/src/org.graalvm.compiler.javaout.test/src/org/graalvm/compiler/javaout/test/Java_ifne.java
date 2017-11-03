@@ -48,6 +48,14 @@ public class Java_ifne extends JavaOutputTest {
         return n;
     }
 
+    public static int rec(int a) {
+        if (a <= 1) {
+            return 1;
+        } else {
+            return a * rec(a - 1);
+        }
+    }
+
     @Test
     public void run0() throws Throwable {
         runTest("test", 0);
@@ -62,5 +70,10 @@ public class Java_ifne extends JavaOutputTest {
     @Test
     public void fac3() throws Throwable {
         runTest("fac", 3);
+    }
+
+    @Test
+    public void fac6() throws Throwable {
+        runTest("rec", 6);
     }
 }
