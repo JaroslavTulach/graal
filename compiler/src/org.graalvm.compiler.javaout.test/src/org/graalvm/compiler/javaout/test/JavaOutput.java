@@ -24,17 +24,27 @@ package org.graalvm.compiler.javaout.test;
 
 import java.io.IOException;
 import java.util.Iterator;
+import java.util.LinkedHashSet;
+import java.util.Set;
 import jdk.vm.ci.meta.MetaAccessProvider;
 import jdk.vm.ci.runtime.JVMCI;
 import org.graalvm.compiler.graph.Node;
 import org.graalvm.compiler.graph.iterators.NodeIterable;
+import org.graalvm.compiler.nodes.AbstractEndNode;
+import org.graalvm.compiler.nodes.AbstractMergeNode;
 import org.graalvm.compiler.nodes.BeginNode;
 import org.graalvm.compiler.nodes.BinaryOpLogicNode;
+import org.graalvm.compiler.nodes.CallTargetNode;
 import org.graalvm.compiler.nodes.ConstantNode;
+import org.graalvm.compiler.nodes.EndNode;
+import org.graalvm.compiler.nodes.FixedNode;
+import org.graalvm.compiler.nodes.FrameState;
 import org.graalvm.compiler.nodes.IfNode;
+import org.graalvm.compiler.nodes.InvokeNode;
 import org.graalvm.compiler.nodes.LoopBeginNode;
 import org.graalvm.compiler.nodes.LoopEndNode;
 import org.graalvm.compiler.nodes.LoopExitNode;
+import org.graalvm.compiler.nodes.MergeNode;
 import org.graalvm.compiler.nodes.ParameterNode;
 import org.graalvm.compiler.nodes.PhiNode;
 import org.graalvm.compiler.nodes.ReturnNode;
@@ -47,17 +57,20 @@ import org.graalvm.compiler.nodes.calc.NegateNode;
 import org.graalvm.compiler.nodes.calc.UnaryNode;
 
 public final class JavaOutput {
+    private final Set<PhiNode> phis = new LinkedHashSet<>();
     private final StructuredGraph g;
 
     public JavaOutput(StructuredGraph g) {
         this.g = g;
     }
 
-    public void generate(Appendable out, String sep) throws IOException {
+    public void generate(StringBuilder out, String sep) throws IOException {
+        int length = out.length();
         dump(out, g.start(), sep);
+        out.insert(length, declarePhis());
     }
 
-    private static void dump(Appendable out, Node at, String sep) throws IOException {
+    private void dump(Appendable out, Node at, String sep) throws IOException {
         final String moreSep = sep + "  ";
         if (at instanceof ReturnNode) {
             out.append(sep).append("return ");
@@ -77,15 +90,19 @@ public final class JavaOutput {
             out.append("\n").append(sep).append("} else {\n");
             dump(out, ((IfNode) at).falseSuccessor(), moreSep);
             out.append("\n").append(sep).append("}\n");
+            FixedNode next = ((IfNode) at).trueSuccessor().next();
+            if (next instanceof EndNode && !(next instanceof LoopEndNode)) {
+                AbstractMergeNode merge = ((AbstractEndNode) next).merge();
+                dump(out, merge, sep);
+            }
             return;
         }
         if (at instanceof LoopBeginNode) {
             final LoopBeginNode loopBegin = (LoopBeginNode) at;
-            MetaAccessProvider metaAccess = JVMCI.getRuntime().getHostJVMCIBackend().getMetaAccess();
             for (PhiNode phi : loopBegin.phis()) {
                 if (phi.isLoopPhi()) {
-                    out.append(sep).append(phi.stamp().javaType(metaAccess).toJavaName());
-                    out.append(" phi").append(findNodeId(phi)).append(" = ");
+                    out.append(sep);
+                    out.append("phi").append(findNodeId(phi)).append(" = ");
                     expr(out, phi.firstValue(), sep);
                     out.append(";").append("\n");
                 }
@@ -97,23 +114,7 @@ public final class JavaOutput {
         }
         if (at instanceof LoopEndNode) {
             LoopEndNode loopEnd = (LoopEndNode) at;
-            MetaAccessProvider metaAccess = JVMCI.getRuntime().getHostJVMCIBackend().getMetaAccess();
-            for (PhiNode phi : loopEnd.merge().phis()) {
-                if (phi.isLoopPhi()) {
-                    out.append(sep).append(phi.stamp().javaType(metaAccess).toJavaName());
-                    out.append(" newPhi").append(findNodeId(phi)).append(" = ");
-                    expr(out, phi.valueAt(loopEnd), sep);
-                    out.append(";").append("\n");
-                }
-            }
-            for (PhiNode phi : loopEnd.merge().phis()) {
-                if (phi.isLoopPhi()) {
-                    out.append(sep);
-                    out.append(" phi").append(findNodeId(phi)).append(" = ");
-                    out.append(" newPhi").append(findNodeId(phi));
-                    out.append(";").append("\n");
-                }
-            }
+            computePhis(loopEnd, out, sep, true);
             out.append(sep).append("continue LOOP").append(findNodeId(loopEnd.loopBegin())).append(";\n");
             return;
         }
@@ -122,6 +123,16 @@ public final class JavaOutput {
             // out.append(sep).append("break LOOP").append(findNodeId(loopExit.loopBegin() + ";\n");
             processSuccessors(at, out, sep);
             return;
+        }
+        if (at instanceof EndNode) {
+            if (((EndNode) at).merge() instanceof MergeNode) {
+                computePhis((AbstractEndNode) at, out, sep, false);
+                return;
+            }
+        }
+        if (at instanceof InvokeNode) {
+            CallTargetNode ct = ((InvokeNode) at).callTarget();
+            out.append("/* " + ct + " */\n");
         }
 
         out.append(sep).append("/* node: ");
@@ -134,12 +145,43 @@ public final class JavaOutput {
         processSuccessors(at, out, moreSep);
     }
 
+    private String declarePhis() {
+        MetaAccessProvider metaAccess = JVMCI.getRuntime().getHostJVMCIBackend().getMetaAccess();
+        StringBuilder sb = new StringBuilder();
+        for (PhiNode phi : phis) {
+            sb.append("    ").append(phi.stamp().javaType(metaAccess).toJavaName());
+            sb.append(" phi").append(findNodeId(phi)).append(";\n");
+        }
+        return sb.toString();
+    }
+
+    private void computePhis(AbstractEndNode end, Appendable out, String sep, boolean loopPhiOnly) throws IOException {
+        MetaAccessProvider metaAccess = JVMCI.getRuntime().getHostJVMCIBackend().getMetaAccess();
+        for (PhiNode phi : end.merge().phis()) {
+            if (phi.isLoopPhi() == loopPhiOnly) {
+                phis.add(phi);
+                out.append(sep).append(phi.stamp().javaType(metaAccess).toJavaName());
+                out.append(" newPhi").append(findNodeId(phi)).append(" = ");
+                expr(out, phi.valueAt(end), sep);
+                out.append(";").append("\n");
+            }
+        }
+        for (PhiNode phi : end.merge().phis()) {
+            if (phi.isLoopPhi() == loopPhiOnly) {
+                out.append(sep);
+                out.append("phi").append(findNodeId(phi));
+                out.append(" = newPhi").append(findNodeId(phi));
+                out.append(";").append("\n");
+            }
+        }
+    }
+
     @SuppressWarnings("deprecation")
     private static String findNodeId(Node phi) {
         return Integer.toString(phi.getId());
     }
 
-    private static void processSuccessors(Node at, Appendable out, final String moreSep) throws IOException {
+    private void processSuccessors(Node at, Appendable out, final String moreSep) throws IOException {
         for (Node next : at.cfgSuccessors()) {
             dump(out, next, moreSep);
         }
@@ -186,6 +228,10 @@ public final class JavaOutput {
         }
         if (at instanceof PhiNode) {
             out.append("phi").append(findNodeId(at));
+            return;
+        }
+        if (at instanceof FrameState) {
+            out.append("// ").append(at.toString()).append("\n").append(sep).append("  ");
             return;
         }
         for (Node next : at.inputs()) {

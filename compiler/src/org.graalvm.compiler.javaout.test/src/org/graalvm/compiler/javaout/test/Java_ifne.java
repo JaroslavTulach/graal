@@ -73,7 +73,48 @@ public class Java_ifne extends JavaOutputTest {
     }
 
     @Test
-    public void fac6() throws Throwable {
+    public void fac0rec() throws Throwable {
+        runTest("rec", 0);
+    }
+
+    @Test
+    public void fac1rec() throws Throwable {
+        runTest("rec", 0);
+    }
+
+    @Test
+    public void fac2rec() throws Throwable {
+        runTest("rec", 2);
+    }
+
+    @Test
+    public void fac3rec() throws Throwable {
+        runTest("rec", 3);
+    }
+
+    @Test
+    public void fac4rec() throws Throwable {
+        runTest("rec", 4);
+    }
+
+    @Test
+    public void fac5rec() throws Throwable {
+        runTest("rec", 5);
+    }
+
+    @Test
+    public void fac6rec() throws Throwable {
         runTest("rec", 6);
     }
+
+    @Test
+    public void fac7rec() throws Throwable {
+        runTest("rec", 7);
+    }
+
+    @Test
+    public void fac8rec() throws Throwable {
+        runTest("rec", 8);
+    }
+
 }
