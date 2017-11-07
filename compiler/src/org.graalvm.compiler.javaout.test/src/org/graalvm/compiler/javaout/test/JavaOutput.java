@@ -26,7 +26,9 @@ import java.io.IOException;
 import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.Set;
+import jdk.vm.ci.meta.JavaKind;
 import jdk.vm.ci.meta.MetaAccessProvider;
+import jdk.vm.ci.meta.ResolvedJavaMethod;
 import jdk.vm.ci.runtime.JVMCI;
 import org.graalvm.compiler.graph.Node;
 import org.graalvm.compiler.graph.iterators.NodeIterable;
@@ -50,6 +52,7 @@ import org.graalvm.compiler.nodes.PhiNode;
 import org.graalvm.compiler.nodes.ReturnNode;
 import org.graalvm.compiler.nodes.StartNode;
 import org.graalvm.compiler.nodes.StructuredGraph;
+import org.graalvm.compiler.nodes.ValueNode;
 import org.graalvm.compiler.nodes.calc.BinaryNode;
 import org.graalvm.compiler.nodes.calc.ConditionalNode;
 import org.graalvm.compiler.nodes.calc.FixedBinaryNode;
@@ -59,9 +62,11 @@ import org.graalvm.compiler.nodes.calc.UnaryNode;
 public final class JavaOutput {
     private final Set<PhiNode> phis = new LinkedHashSet<>();
     private final StructuredGraph g;
+    private final ResolvedJavaMethod method;
 
-    public JavaOutput(StructuredGraph g) {
+    public JavaOutput(ResolvedJavaMethod method, StructuredGraph g) {
         this.g = g;
+        this.method = method;
     }
 
     public void generate(StringBuilder out, String sep) throws IOException {
@@ -132,7 +137,30 @@ public final class JavaOutput {
         }
         if (at instanceof InvokeNode) {
             CallTargetNode ct = ((InvokeNode) at).callTarget();
-            out.append("/* " + ct + " */\n");
+            out.append(sep);
+            if (ct.targetMethod().getSignature().getReturnKind() != JavaKind.Void) {
+                out.append(ct.targetMethod().getSignature().getReturnType(null).toJavaName());
+                out.append(" inv").append(findNodeId(at)).append(" = ");
+            }
+            if (method == ct.targetMethod()) {
+                out.append("test");
+            } else {
+                out.append(method.getName());
+            }
+            out.append("(");
+            String del = "";
+            for (ValueNode arg : ct.arguments()) {
+                out.append(del);
+                expr(out, arg, sep);
+                del = ", ";
+            }
+            out.append(");\n");
+            processSuccessors(at, out, sep);
+            return;
+        }
+        if (at instanceof MergeNode) {
+            processSuccessors(at, out, moreSep);
+            return;
         }
 
         out.append(sep).append("/* node: ");
@@ -231,7 +259,10 @@ public final class JavaOutput {
             return;
         }
         if (at instanceof FrameState) {
-            out.append("// ").append(at.toString()).append("\n").append(sep).append("  ");
+            return;
+        }
+        if (at instanceof InvokeNode) {
+            out.append("inv").append(findNodeId(at));
             return;
         }
         for (Node next : at.inputs()) {

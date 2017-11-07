@@ -114,7 +114,7 @@ public abstract class JavaOutputTest extends GraalCompilerTest {
         executeActualCheckDeopt(options, method, shouldNotDeopt, receiver, args);
         assertNotNull("Optimized graph generated", optimizedGraph);
 
-        JavaOutput generator = new JavaOutput(optimizedGraph);
+        JavaOutput generator = new JavaOutput(method, optimizedGraph);
 
         StringBuilder sb = new StringBuilder();
         sb.append("\npublic class Generated {\n");

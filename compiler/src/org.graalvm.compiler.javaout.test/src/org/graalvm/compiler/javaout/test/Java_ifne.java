@@ -57,64 +57,8 @@ public class Java_ifne extends JavaOutputTest {
     }
 
     @Test
-    public void run0() throws Throwable {
-        runTest("test", 0);
-        assertCode("Currently three checks for zero", "== 0", 1, 3);
-    }
-
-    @Test
-    public void run1() throws Throwable {
-        runTest("test", 1);
-    }
-
-    @Test
-    public void fac3() throws Throwable {
-        runTest("fac", 3);
-    }
-
-    @Test
-    public void fac0rec() throws Throwable {
-        runTest("rec", 0);
-    }
-
-    @Test
-    public void fac1rec() throws Throwable {
-        runTest("rec", 0);
-    }
-
-    @Test
-    public void fac2rec() throws Throwable {
-        runTest("rec", 2);
-    }
-
-    @Test
-    public void fac3rec() throws Throwable {
-        runTest("rec", 3);
-    }
-
-    @Test
-    public void fac4rec() throws Throwable {
-        runTest("rec", 4);
-    }
-
-    @Test
-    public void fac5rec() throws Throwable {
-        runTest("rec", 5);
-    }
-
-    @Test
-    public void fac6rec() throws Throwable {
-        runTest("rec", 6);
-    }
-
-    @Test
-    public void fac7rec() throws Throwable {
-        runTest("rec", 7);
-    }
-
-    @Test
-    public void fac8rec() throws Throwable {
-        runTest("rec", 8);
+    public void fac12rec() throws Throwable {
+        runTest("rec", 12);
     }
 
 }
