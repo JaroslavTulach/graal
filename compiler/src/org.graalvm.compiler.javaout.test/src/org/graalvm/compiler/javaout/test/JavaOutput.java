@@ -219,7 +219,7 @@ public final class JavaOutput {
         final String moreSep = sep + "  ";
         if (at instanceof ParameterNode) {
             StructuredGraph g = (StructuredGraph) at.graph();
-            String paramName = g.getMethods().get(0).getParameters()[((ParameterNode) at).index()].getName();
+            String paramName = g.method().getParameters()[((ParameterNode) at).index()].getName();
             out.append(paramName);
             return;
         }

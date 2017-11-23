@@ -112,13 +112,19 @@ public abstract class JavaOutputTest extends GraalCompilerTest {
         }
 
         executeActualCheckDeopt(options, method, shouldNotDeopt, receiver, args);
-        assertNotNull("Optimized graph generated", optimizedGraph);
+        final StructuredGraph graph = optimizedGraph;
+        Object actual = invokeCode(graph, method, receiver, args);
+        Assert.assertEquals("The same result produced by:\n" + code, expect.returnValue, actual);
+    }
 
-        JavaOutput generator = new JavaOutput(method, optimizedGraph);
+    protected Object invokeCode(StructuredGraph graph, ResolvedJavaMethod method, Object receiver, Object... args) throws IllegalStateException {
+        assertNotNull("Optimized graph generated", graph);
+
+        JavaOutput generator = new JavaOutput(method, graph);
 
         StringBuilder sb = new StringBuilder();
         sb.append("\npublic class Generated {\n");
-        ResolvedJavaMethod m = optimizedGraph.getMethods().get(0);
+        ResolvedJavaMethod m = graph.method();
         sb.append("  public static ").append(m.getSignature().getReturnType(m.getDeclaringClass()).toJavaName());
         sb.append(" test(");
         for (int i = 0; i < m.getParameters().length; i++) {
@@ -143,8 +149,7 @@ public abstract class JavaOutputTest extends GraalCompilerTest {
 
         Method generatedMethod = JavaCompilation.assertMethod("Generated", generated, "test");
         try {
-            Object actual = generatedMethod.invoke(receiver, args);
-            Assert.assertEquals("The same result produced by:\n" + sb.toString(), expect.returnValue, actual);
+            return generatedMethod.invoke(receiver, args);
         } catch (IllegalAccessException | IllegalArgumentException | InvocationTargetException ex) {
             throw new IllegalStateException(ex);
         }
