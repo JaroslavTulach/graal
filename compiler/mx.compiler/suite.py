@@ -1125,7 +1125,9 @@ suite = {
       "subDir" : "src",
       "sourceDirs" : ["src"],
       "dependencies" : [
+        "org.graalvm.compiler.truffle",
         "org.graalvm.compiler.core.test",
+        "truffle:TRUFFLE_SL_TEST",
       ],
       "checkstyle" : "org.graalvm.compiler.graph",
       "javaCompliance" : "1.8",

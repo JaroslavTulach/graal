@@ -178,6 +178,9 @@ public abstract class TruffleCompiler {
             dequeueInlinedCallSites(inliningDecision, compilable);
 
             compilationNotify.notifyCompilationTruffleTierFinished(compilable, inliningDecision, graph);
+            if (task != null && task.isCancelled()) {
+                return;
+            }
             CompilationResult compilationResult = compileMethodHelper(graph, compilable.toString(), graphBuilderSuite, compilable, asCompilationRequest(compilationId));
             compilationNotify.notifyCompilationSuccess(compilable, inliningDecision, graph, compilationResult);
 
