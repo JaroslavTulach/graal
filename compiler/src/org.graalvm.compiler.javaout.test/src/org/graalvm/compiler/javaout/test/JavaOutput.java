@@ -219,8 +219,15 @@ public final class JavaOutput {
         final String moreSep = sep + "  ";
         if (at instanceof ParameterNode) {
             StructuredGraph g = (StructuredGraph) at.graph();
-            String paramName = g.method().getParameters()[((ParameterNode) at).index()].getName();
-            out.append(paramName);
+            final int index = ((ParameterNode) at).index();
+            if ("org.graalvm.compiler.truffle.OptimizedCallTarget".equals(g.method().getDeclaringClass().toJavaName()) &&
+                            "callRoot".equals(g.method().getName())) {
+                out.append(g.method().getParameters()[0].getName());
+                out.append("[" + index + "]");
+            } else {
+                String paramName = g.method().getParameters()[index].getName();
+                out.append(paramName);
+            }
             return;
         }
         if (at instanceof ConstantNode) {
