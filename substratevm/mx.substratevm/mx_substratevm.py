@@ -513,6 +513,7 @@ def svm_gate_body(args, tasks):
             if t:
                 helloworld(native_image)
                 cinterfacetutorial(native_image)
+                jniviasvm(native_image)
 
         with Task('JavaScript', tasks, tags=[GraalTags.js]) as t:
             if t:
@@ -695,6 +696,87 @@ def cinterfacetutorial(native_image, args=None):
 
     # Start the C executable
     mx.run([buildDir + '/cinterfacetutorial'])
+
+def jniviasvm(native_image, args=None):
+    args = [] if args is None else args
+
+    nativePath = join(svmbuild_dir(), 'native')
+    mkpath(nativePath)
+
+    nativeImpl = join(nativePath, 'NativeImpl.java')
+    with open(nativeImpl, 'w') as fp:
+        fp.write('''
+package org.pkg.implnative;
+
+import org.graalvm.nativeimage.Isolate;
+import org.graalvm.nativeimage.c.function.CEntryPoint;
+import org.graalvm.word.Pointer;
+
+public final class NativeImpl {
+    @CEntryPoint(name = "Java_org_pkg_apinative_Native_createIsolate", builtin = CEntryPoint.Builtin.CreateIsolate)
+    public static native long createIsolate();
+
+    @CEntryPoint(name = "Java_org_pkg_apinative_Native_add")
+    static int add(Pointer jvm, Pointer clazz, @CEntryPoint.IsolateContext long isolateId, int a, int b) {
+        return a + b;
+    }
+}
+''')
+
+    sdk = mx.distribution('sdk:GRAAL_SDK')
+    mx.run([join(mx_compiler.jdk.home, 'bin', 'javac'), '-d', nativePath, '-cp', sdk.path, nativeImpl])
+
+    libname = 'nativeimpl'
+    libso = mx.add_lib_prefix(mx.add_lib_suffix(libname))
+    libfile = join(nativePath, libso)
+
+    native_image(["-H:Path=" + nativePath, '--shared', '-cp', nativePath, '-H:Name=libnativeimpl'], '.so')
+
+    if not exists(libfile):
+        mx.abort('File {0} should have been generated'.format(libfile))
+
+    clientPath = join(svmbuild_dir(), 'client')
+    mkpath(clientPath)
+
+    clientJava = join(clientPath, 'Native.java')
+    with open(clientJava, 'w') as fp:
+        fp.write('''
+package org.pkg.apinative;
+
+public final class Native {
+    public static void main(String[] args) {
+        System.loadLibrary("nativeimpl");
+
+        long isolate = createIsolate();
+
+        System.out.println("2 + 40 = " + add(isolate, 2, 40));
+        System.out.println("12 + 30 = " + add(isolate, 12, 30));
+        System.out.println("20 + 22 = " + add(isolate, 20, 22));
+    }
+
+    private static native int add(long isolate, int a, int b);
+    private static native long createIsolate();
+}
+''')
+
+    mx.run([join(mx_compiler.jdk.home, 'bin', 'javac'), '-d', clientPath, clientJava])
+
+    expectedOutput = [
+        '2 + 40 = 42\n',
+        '12 + 30 = 42\n',
+        '20 + 22 = 42\n',
+    ]
+    actualOutput = []
+    def _collector(x):
+        actualOutput.append(x)
+        mx.log(x)
+
+    mx.run([join(mx_compiler.jdk.home, 'bin', 'java'),
+        '-Djava.library.path=' + nativePath,
+        '-cp', clientPath, 'org.pkg.apinative.Native'], out=_collector)
+
+    if actualOutput != expectedOutput:
+        raise Exception('Wrong output: ' + str(actualOutput) + "  !=  " + str(expectedOutput))
 
 def helloworld(native_image, args=None):
     args = [] if args is None else args
@@ -883,6 +965,7 @@ mx.update_commands(suite, {
     'gate': [gate, '[options]'],
     'build': [build, ''],
     'helloworld' : [lambda args: native_image_context_run(helloworld, args), ''],
+    'jniviasvm' : [lambda args: native_image_context_run(jniviasvm, args), ''],
     'cinterfacetutorial' : [lambda args: native_image_context_run(cinterfacetutorial, args), ''],
     'fetch-languages': [lambda args: fetch_languages(args, early_exit=False), ''],
     'benchmark': [benchmark, '--vmargs [vmargs] --runargs [runargs] suite:benchname'],

@@ -1,3 +1,8 @@
+/jni+svm/nbproject/private/
+/jni+svm/build/
+/jni+svm/dist/
+/jni+svm/*.h
+/jni+svm/*.so
 *.aux
 *.bak
 *.bgv
@@ -50,3 +55,10 @@ native-image
 native-image-*
 bench-results.json
 jmh_result.json
+/jni+svm/nbproject/private/
+/jni+svm/graal_isolate.h
+/jni+svm/libinit.so
+/jni+svm/fdemosvm.h
+/jni+svm/graal_isolate_dynamic.h
+/jni+svm/fdemosvm_dynamic.h
+/jni+svm/fdemosvm.so
