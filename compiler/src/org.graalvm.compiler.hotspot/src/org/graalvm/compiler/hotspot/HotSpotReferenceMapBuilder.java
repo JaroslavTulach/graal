@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2009, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2009, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -22,15 +24,15 @@
  */
 package org.graalvm.compiler.hotspot;
 
-import static org.graalvm.compiler.lir.LIRValueUtil.isJavaConstant;
 import static jdk.vm.ci.code.ValueUtil.asRegister;
 import static jdk.vm.ci.code.ValueUtil.asStackSlot;
 import static jdk.vm.ci.code.ValueUtil.isRegister;
+import static org.graalvm.compiler.lir.LIRValueUtil.isJavaConstant;
 
 import java.util.ArrayList;
 
-import org.graalvm.compiler.core.common.PermanentBailoutException;
 import org.graalvm.compiler.core.common.LIRKind;
+import org.graalvm.compiler.core.common.PermanentBailoutException;
 import org.graalvm.compiler.debug.GraalError;
 import org.graalvm.compiler.lir.LIRFrameState;
 import org.graalvm.compiler.lir.Variable;
@@ -52,8 +54,10 @@ public final class HotSpotReferenceMapBuilder extends ReferenceMapBuilder {
 
     private final int totalFrameSize;
     private final int maxOopMapStackOffset;
+    private final int uncompressedReferenceSize;
 
-    public HotSpotReferenceMapBuilder(int totalFrameSize, int maxOopMapStackOffset) {
+    public HotSpotReferenceMapBuilder(int totalFrameSize, int maxOopMapStackOffset, int uncompressedReferenceSize) {
+        this.uncompressedReferenceSize = uncompressedReferenceSize;
         this.objectValues = new ArrayList<>();
         this.objectCount = 0;
         this.maxOopMapStackOffset = maxOopMapStackOffset;
@@ -110,12 +114,15 @@ public final class HotSpotReferenceMapBuilder extends ReferenceMapBuilder {
                 if (kind.isDerivedReference()) {
                     Variable baseVariable = (Variable) kind.getDerivedReferenceBase();
                     Value baseValue = state.getLiveBasePointers().get(baseVariable.index);
-                    assert baseValue.getPlatformKind().getVectorLength() == 1 && ((LIRKind) baseValue.getValueKind()).isReference(0) && !((LIRKind) baseValue.getValueKind()).isDerivedReference();
+                    assert baseValue.getPlatformKind().getVectorLength() == 1 &&
+                                    ((LIRKind) baseValue.getValueKind()).isReference(0) &&
+                                    !((LIRKind) baseValue.getValueKind()).isDerivedReference();
                     base = toLocation(baseValue, 0);
                 }
 
                 for (int i = 0; i < kind.getPlatformKind().getVectorLength(); i++) {
                     if (kind.isReference(i)) {
+                        assert kind.isCompressedReference(i) ? (bytes < uncompressedReferenceSize) : (bytes == uncompressedReferenceSize);
                         objects[idx] = toLocation(obj, i * bytes);
                         derivedBase[idx] = base;
                         sizeInBytes[idx] = bytes;

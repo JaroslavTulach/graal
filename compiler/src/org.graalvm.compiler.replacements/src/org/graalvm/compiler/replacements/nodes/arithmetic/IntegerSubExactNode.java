@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2013, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2013, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -28,12 +30,14 @@ import static org.graalvm.compiler.nodeinfo.NodeSize.SIZE_2;
 import org.graalvm.compiler.core.common.type.IntegerStamp;
 import org.graalvm.compiler.graph.NodeClass;
 import org.graalvm.compiler.graph.spi.CanonicalizerTool;
+import org.graalvm.compiler.nodeinfo.InputType;
 import org.graalvm.compiler.nodeinfo.NodeInfo;
-import org.graalvm.compiler.nodes.AbstractBeginNode;
 import org.graalvm.compiler.nodes.ConstantNode;
+import org.graalvm.compiler.nodes.NodeView;
 import org.graalvm.compiler.nodes.ValueNode;
 import org.graalvm.compiler.nodes.calc.SubNode;
-import org.graalvm.compiler.nodes.spi.LoweringTool;
+import org.graalvm.compiler.nodes.extended.GuardedNode;
+import org.graalvm.compiler.nodes.extended.GuardingNode;
 import org.graalvm.compiler.nodes.util.GraphUtil;
 
 import jdk.vm.ci.meta.JavaConstant;
@@ -44,13 +48,16 @@ import jdk.vm.ci.meta.JavaKind;
  * case the addition would overflow the 32 bit range.
  */
 @NodeInfo(cycles = CYCLES_2, size = SIZE_2)
-public final class IntegerSubExactNode extends SubNode implements IntegerExactArithmeticNode {
+public final class IntegerSubExactNode extends SubNode implements GuardedNode, IntegerExactArithmeticNode {
     public static final NodeClass<IntegerSubExactNode> TYPE = NodeClass.create(IntegerSubExactNode.class);
 
-    public IntegerSubExactNode(ValueNode x, ValueNode y) {
+    @Input(InputType.Guard) protected GuardingNode guard;
+
+    public IntegerSubExactNode(ValueNode x, ValueNode y, GuardingNode guard) {
         super(TYPE, x, y);
-        setStamp(x.stamp().unrestricted());
-        assert x.stamp().isCompatible(y.stamp()) && x.stamp() instanceof IntegerStamp;
+        setStamp(x.stamp(NodeView.DEFAULT).unrestricted());
+        assert x.stamp(NodeView.DEFAULT).isCompatible(y.stamp(NodeView.DEFAULT)) && x.stamp(NodeView.DEFAULT) instanceof IntegerStamp;
+        this.guard = guard;
     }
 
     @Override
@@ -67,7 +74,7 @@ public final class IntegerSubExactNode extends SubNode implements IntegerExactAr
     @Override
     public ValueNode canonical(CanonicalizerTool tool, ValueNode forX, ValueNode forY) {
         if (GraphUtil.unproxify(forX) == GraphUtil.unproxify(forY)) {
-            return ConstantNode.forIntegerStamp(stamp(), 0);
+            return ConstantNode.forIntegerStamp(stamp(NodeView.DEFAULT), 0);
         }
         if (forX.isConstant() && forY.isConstant()) {
             return canonicalXYconstant(forX, forY);
@@ -77,7 +84,7 @@ public final class IntegerSubExactNode extends SubNode implements IntegerExactAr
                 return forX;
             }
         }
-        if (!IntegerStamp.subtractionCanOverflow((IntegerStamp) x.stamp(), (IntegerStamp) y.stamp())) {
+        if (!IntegerStamp.subtractionCanOverflow((IntegerStamp) x.stamp(NodeView.DEFAULT), (IntegerStamp) y.stamp(NodeView.DEFAULT))) {
             return new SubNode(x, y).canonical(tool);
         }
         return this;
@@ -101,12 +108,13 @@ public final class IntegerSubExactNode extends SubNode implements IntegerExactAr
     }
 
     @Override
-    public IntegerExactArithmeticSplitNode createSplit(AbstractBeginNode next, AbstractBeginNode deopt) {
-        return graph().add(new IntegerSubExactSplitNode(stamp(), getX(), getY(), next, deopt));
+    public GuardingNode getGuard() {
+        return guard;
     }
 
     @Override
-    public void lower(LoweringTool tool) {
-        IntegerExactArithmeticSplitNode.lower(tool, this);
+    public void setGuard(GuardingNode guard) {
+        updateUsagesInterface(this.guard, guard);
+        this.guard = guard;
     }
 }

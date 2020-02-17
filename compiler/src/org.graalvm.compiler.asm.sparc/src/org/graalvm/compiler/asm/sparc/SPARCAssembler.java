@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2009, 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2009, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -134,9 +136,9 @@ import java.util.List;
 import java.util.Map;
 
 import org.graalvm.compiler.asm.Assembler;
+import org.graalvm.compiler.asm.BranchTargetOutOfBoundsException;
 import org.graalvm.compiler.asm.Label;
 import org.graalvm.compiler.core.common.NumUtil;
-import org.graalvm.compiler.core.common.PermanentBailoutException;
 import org.graalvm.compiler.debug.GraalError;
 
 import jdk.vm.ci.code.Register;
@@ -624,6 +626,13 @@ public abstract class SPARCAssembler extends Assembler {
 
         public int getValue() {
             return value;
+        }
+
+        public int getOpfCCValue() {
+            /*
+             * In the opf_cc encoding for FMOVcc, the third bit is set to indicate icc/xcc.
+             */
+            return (isFloat ? value : (value | 0x4));
         }
 
         public String getOperator() {
@@ -1171,7 +1180,7 @@ public abstract class SPARCAssembler extends Assembler {
     public static final Sethi SETHI = new Sethi();
     public static final FMOVcc FMOVSCC = new FMOVcc(OpfLow.Fmovscc);
     public static final FMOVcc FMOVDCC = new FMOVcc(OpfLow.Fmovdcc);
-    public static final MOVicc MOVicc = new MOVicc();
+    public static final MOVicc MOVICC = new MOVicc();
     public static final OpfOp OPF = new OpfOp();
     public static final Op3Op OP3 = new Op3Op();
     public static final SPARCOp LDST = new SPARCOp(Ops.LdstOp);
@@ -1279,7 +1288,7 @@ public abstract class SPARCAssembler extends Assembler {
         public int setDisp(int inst, int d) {
             assert this.match(inst);
             if (!isValidDisp(d)) {
-                throw new PermanentBailoutException("Too large displacement 0x%x in field %s in instruction %s", d, this.disp, this);
+                throw new BranchTargetOutOfBoundsException(true, "Too large displacement 0x%x in field %s in instruction %s", d, this.disp, this);
             }
             return this.disp.setBits(inst, d);
         }
@@ -1611,7 +1620,7 @@ public abstract class SPARCAssembler extends Assembler {
             inst = BitSpec.rd.setBits(inst, rd.encoding());
             inst = BitSpec.op3.setBits(inst, opfLow.op3.value);
             inst = BitSpec.opfCond.setBits(inst, condition.value);
-            inst = BitSpec.opfCC.setBits(inst, cc.value);
+            inst = BitSpec.opfCC.setBits(inst, cc.getOpfCCValue());
             inst = BitSpec.opfLow.setBits(inst, opfLow.value);
             inst = BitSpec.rs2.setBits(inst, rs2.encoding());
             masm.emitInt(inst);
@@ -1849,7 +1858,7 @@ public abstract class SPARCAssembler extends Assembler {
     }
 
     protected int patchUnbound(Label label) {
-        label.addPatchAt(position());
+        label.addPatchAt(position(), this);
         return 0;
     }
 
@@ -2191,7 +2200,7 @@ public abstract class SPARCAssembler extends Assembler {
     }
 
     private void fmovcc(ConditionFlag cond, CC cc, Register rs2, Register rd, int opfLow) {
-        int opfCC = cc.value;
+        int opfCC = cc.getOpfCCValue();
         int a = opfCC << 11 | opfLow << 5 | rs2.encoding;
         fmt10(rd.encoding, Fpop2.value, cond.value, a);
     }

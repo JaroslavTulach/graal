@@ -1,26 +1,42 @@
 /*
- * Copyright (c) 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2017, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
- * This code is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.  Oracle designates this
- * particular file as subject to the "Classpath" exception as provided
- * by Oracle in the LICENSE file that accompanied this code.
+ * The Universal Permissive License (UPL), Version 1.0
  *
- * This code is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
- * version 2 for more details (a copy is included in the LICENSE file that
- * accompanied this code).
+ * Subject to the condition set forth below, permission is hereby granted to any
+ * person obtaining a copy of this software, associated documentation and/or
+ * data (collectively the "Software"), free of charge and under any and all
+ * copyright rights in the Software, and any and all patent rights owned or
+ * freely licensable by each licensor hereunder covering either (i) the
+ * unmodified Software as contributed to or provided by such licensor, or (ii)
+ * the Larger Works (as defined below), to deal in both
  *
- * You should have received a copy of the GNU General Public License version
- * 2 along with this work; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
+ * (a) the Software, and
  *
- * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
- * or visit www.oracle.com if you need additional information or have any
- * questions.
+ * (b) any piece of software and/or hardware listed in the lrgrwrks.txt file if
+ * one is included with the Software each a "Larger Work" to which the Software
+ * is contributed by such licensors),
+ *
+ * without restriction, including without limitation the rights to copy, create
+ * derivative works of, display, perform, and distribute the Software and make,
+ * use, sell, offer for sale, import, export, have made, and have sold the
+ * Software and the Larger Work(s), and to sublicense the foregoing rights on
+ * either these or other terms.
+ *
+ * This license is subject to the following condition:
+ *
+ * The above copyright notice and either this complete permission notice or at a
+ * minimum a reference to the UPL must be included in all copies or substantial
+ * portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
  */
 package com.oracle.truffle.api;
 
@@ -30,7 +46,6 @@ import java.util.List;
 import java.util.Map;
 
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
-import com.oracle.truffle.api.TruffleLanguage.AccessAPI;
 import com.oracle.truffle.api.TruffleLanguage.ContextReference;
 import com.oracle.truffle.api.TruffleLanguage.Env;
 
@@ -40,9 +55,9 @@ import com.oracle.truffle.api.TruffleLanguage.Env;
  * contexts for isolated execution of guest language code.
  * <p>
  * A {@link TruffleContext context} consists of a {@link TruffleLanguage#createContext(Env) language
- * context} instance for each {@link Env#getLanguages() installed language}. The current language
- * context is {@link TruffleLanguage#createContext(Env) created} eagerly and can be accessed using a
- * {@link ContextReference context reference} or statically with
+ * context} instance for each {@link Env#getInternalLanguages() installed language}. The current
+ * language context is {@link TruffleLanguage#createContext(Env) created} eagerly and can be
+ * accessed using a {@link ContextReference context reference} or statically with
  * {@link TruffleLanguage#getCurrentContext(Class)} after the context was
  * {@link TruffleContext#enter() entered}.
  * <p>
@@ -62,29 +77,55 @@ public final class TruffleContext implements AutoCloseable {
 
     static final TruffleContext EMPTY = new TruffleContext();
 
-    private static ThreadLocal<List<Object>> assertStack;
-    final Object impl;
-
-    TruffleContext(TruffleLanguage.Env env, Map<String, Object> config) {
-        this.impl = AccessAPI.engineAccess().createInternalContext(env.getVMObject(), config);
-    }
-
-    private TruffleContext() {
-        this.impl = null;
-    }
+    private static final ThreadLocal<List<Object>> CONTEXT_ASSERT_STACK;
 
     static {
-        assert initializeAssertStack();
-    }
-
-    private static boolean initializeAssertStack() {
-        assertStack = new ThreadLocal<List<Object>>() {
+        boolean assertions = false;
+        assert (assertions = true) == true;
+        CONTEXT_ASSERT_STACK = assertions ? new ThreadLocal<List<Object>>() {
             @Override
             protected List<Object> initialValue() {
                 return new ArrayList<>();
             }
-        };
-        return true;
+        } : null;
+    }
+    final Object polyglotContext;
+    final boolean closeable;
+
+    TruffleContext(Object impl) {
+        this.polyglotContext = impl;
+        this.closeable = false;
+    }
+
+    private TruffleContext(TruffleLanguage.Env env, Map<String, Object> config) {
+        this.polyglotContext = LanguageAccessor.engineAccess().createInternalContext(env.getPolyglotLanguageContext(), config, this);
+        this.closeable = false;
+        // Initialized after this TruffleContext instance is fully set up
+        LanguageAccessor.engineAccess().initializeInternalContext(env.getPolyglotLanguageContext(), polyglotContext);
+    }
+
+    /**
+     * Creates closeable context representation for use by a language.
+     */
+    private TruffleContext(Object polyglotContext, boolean closeable) {
+        this.polyglotContext = polyglotContext;
+        this.closeable = closeable;
+    }
+
+    private TruffleContext() {
+        this.polyglotContext = null;
+        this.closeable = false;
+    }
+
+    /**
+     * Get a parent context of this context, if any. This provides the hierarchy of inner contexts.
+     *
+     * @return a parent context, or <code>null</code> if there is no parent
+     * @since 0.30
+     */
+    @TruffleBoundary
+    public TruffleContext getParent() {
+        return LanguageAccessor.engineAccess().getParentContext(polyglotContext);
     }
 
     /**
@@ -92,10 +133,11 @@ public final class TruffleContext implements AutoCloseable {
      * must be followed by a call to {@link #leave(Object)} in a finally block and the previous
      * context must be passed as an argument. It is allowed to enter a context multiple times from
      * the same thread. If the context is currently not entered by any thread then it is allowed be
-     * entered by an arbitrary thread. Entering the context from two different threads at the same
-     * time causes an {@link IllegalStateException}. The result of the enter function is unspecified
-     * and must only be passed to {@link #leave(Object)}. The result value must not be stored
-     * permanently.
+     * entered by an arbitrary thread. Entering the context from two or more different threads at
+     * the same time is possible, unless one of the loaded languages denies access to the thread, in
+     * which case an {@link IllegalStateException} is thrown. The result of the enter function is
+     * unspecified and must only be passed to {@link #leave(Object)}. The result value must not be
+     * stored permanently.
      * <p>
      * Entering a language context is designed for compilation and is most efficient if the
      * {@link TruffleContext context} instance is compilation final.
@@ -107,8 +149,10 @@ public final class TruffleContext implements AutoCloseable {
      * @since 0.27
      */
     public Object enter() {
-        Object prev = AccessAPI.engineAccess().enterInternalContext(impl);
-        assert verifyEnter(prev);
+        Object prev = LanguageAccessor.engineAccess().enterInternalContext(polyglotContext);
+        if (CONTEXT_ASSERT_STACK != null) {
+            verifyEnter(prev);
+        }
         return prev;
     }
 
@@ -123,8 +167,10 @@ public final class TruffleContext implements AutoCloseable {
      * @since 0.27
      */
     public void leave(Object prev) {
-        assert verifyLeave(prev);
-        AccessAPI.engineAccess().leaveInternalContext(impl, prev);
+        if (CONTEXT_ASSERT_STACK != null) {
+            verifyLeave(prev);
+        }
+        LanguageAccessor.engineAccess().leaveInternalContext(polyglotContext, prev);
     }
 
     /**
@@ -133,28 +179,49 @@ public final class TruffleContext implements AutoCloseable {
      * entered, then an {@link IllegalStateException} is thrown. If the context is not closed
      * explicitly, then it is automatically closed together with the parent context. If an attempt
      * to close a context was successful then consecutive calls to close have no effect.
+     * <p>
+     * Only contexts created by {@link Builder#build()} can be explicitly closed. Other instances
+     * throw {@link UnsupportedOperationException} on close attempts.
      *
+     * @throws UnsupportedOperationException when not created by {@link Builder#build()}.
      * @since 0.27
      */
+    @Override
     @TruffleBoundary
     public void close() {
-        AccessAPI.engineAccess().closeInternalContext(impl);
+        if (!closeable) {
+            throw new UnsupportedOperationException("It's not possible to close a foreign context.");
+        }
+        LanguageAccessor.engineAccess().closeInternalContext(polyglotContext);
     }
 
     @TruffleBoundary
-    private static boolean verifyEnter(Object prev) {
-        assertStack.get().add(prev);
-        return true;
+    private static void verifyEnter(Object prev) {
+        assert CONTEXT_ASSERT_STACK != null;
+        CONTEXT_ASSERT_STACK.get().add(prev);
     }
 
     @TruffleBoundary
-    private static boolean verifyLeave(Object prev) {
-        List<Object> list = assertStack.get();
-        assert list.size() > 0 : "Assert stack is empty.";
+    private static void verifyLeave(Object prev) {
+        assert CONTEXT_ASSERT_STACK != null;
+        List<Object> list = CONTEXT_ASSERT_STACK.get();
+        assert !list.isEmpty() : "Assert stack is empty.";
         Object expectedPrev = list.get(list.size() - 1);
         assert prev == expectedPrev : "Invalid prev argument provided in TruffleContext.leave(Object).";
-        list.remove(list.size() - 1);
-        return true;
+        list.remove(list.size() - 1); // pop
+    }
+
+    /**
+     * Checks whether the context is entered. Checks whether the context has been previously entered
+     * by this thread with {@link #enter()} and hasn't been left yet with
+     * {@link #leave(java.lang.Object)} methods. This method is thread-safe and may be used from
+     * multiple threads.
+     *
+     * @since 20.0.0
+     * @return {@code true} if the context is active, {@code false} otherwise
+     */
+    public boolean isEntered() {
+        return LanguageAccessor.engineAccess().isInternalContextEntered(polyglotContext);
     }
 
     /**
@@ -193,7 +260,8 @@ public final class TruffleContext implements AutoCloseable {
          */
         @TruffleBoundary
         public TruffleContext build() {
-            return new TruffleContext(sourceEnvironment, config);
+            TruffleContext context = new TruffleContext(sourceEnvironment, config);
+            return new TruffleContext(context.polyglotContext, true);
         }
     }
 }

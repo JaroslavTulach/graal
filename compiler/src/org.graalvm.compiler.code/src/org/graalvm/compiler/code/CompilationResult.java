@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2009, 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2009, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -32,10 +34,11 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
+import java.util.function.Function;
 
+import org.graalvm.collections.EconomicSet;
 import org.graalvm.compiler.core.common.CompilationIdentifier;
 import org.graalvm.compiler.graph.NodeSourcePosition;
-import org.graalvm.util.EconomicSet;
 
 import jdk.vm.ci.code.DebugInfo;
 import jdk.vm.ci.code.StackSlot;
@@ -53,6 +56,7 @@ import jdk.vm.ci.meta.Assumptions.Assumption;
 import jdk.vm.ci.meta.InvokeTarget;
 import jdk.vm.ci.meta.ResolvedJavaField;
 import jdk.vm.ci.meta.ResolvedJavaMethod;
+import jdk.vm.ci.meta.SpeculationLog;
 
 /**
  * Represents the output from compiling a method, including the compiled machine code, associated
@@ -67,7 +71,7 @@ public class CompilationResult {
      */
     public abstract static class CodeAnnotation {
 
-        public final int position;
+        private int position;
 
         public CodeAnnotation(int position) {
             this.position = position;
@@ -85,6 +89,14 @@ public class CompilationResult {
 
         @Override
         public abstract boolean equals(Object obj);
+
+        public int getPosition() {
+            return position;
+        }
+
+        void setPosition(int position) {
+            this.position = position;
+        }
     }
 
     /**
@@ -106,7 +118,7 @@ public class CompilationResult {
             }
             if (obj instanceof CodeComment) {
                 CodeComment that = (CodeComment) obj;
-                if (this.position == that.position && this.value.equals(that.value)) {
+                if (this.getPosition() == that.getPosition() && this.value.equals(that.value)) {
                     return true;
                 }
             }
@@ -115,7 +127,7 @@ public class CompilationResult {
 
         @Override
         public String toString() {
-            return getClass().getSimpleName() + "@" + position + ": " + value;
+            return getClass().getSimpleName() + "@" + getPosition() + ": " + value;
         }
     }
 
@@ -159,7 +171,7 @@ public class CompilationResult {
             }
             if (obj instanceof JumpTable) {
                 JumpTable that = (JumpTable) obj;
-                if (this.position == that.position && this.entrySize == that.entrySize && this.low == that.low && this.high == that.high) {
+                if (this.getPosition() == that.getPosition() && this.entrySize == that.entrySize && this.low == that.low && this.high == that.high) {
                     return true;
                 }
             }
@@ -168,7 +180,7 @@ public class CompilationResult {
 
         @Override
         public String toString() {
-            return getClass().getSimpleName() + "@" + position + ": [" + low + " .. " + high + "]";
+            return getClass().getSimpleName() + "@" + getPosition() + ": [" + low + " .. " + high + "]";
         }
     }
 
@@ -189,6 +201,10 @@ public class CompilationResult {
 
     private StackSlot customStackArea = null;
 
+    /**
+     * A customized name that is unrelated to {@link #compilationId}. Can be null if
+     * {@link #compilationId} fully describes the compilation.
+     */
     private final String name;
 
     private final CompilationIdentifier compilationId;
@@ -215,6 +231,11 @@ public class CompilationResult {
     private ResolvedJavaMethod[] methods;
 
     /**
+     * The {@link SpeculationLog} log used during compilation.
+     */
+    private SpeculationLog speculationLog;
+
+    /**
      * The list of fields that were accessed from the bytecodes.
      */
     private ResolvedJavaField[] fields;
@@ -226,7 +247,7 @@ public class CompilationResult {
     private boolean isImmutablePIC;
 
     public CompilationResult(CompilationIdentifier compilationId) {
-        this(compilationId, compilationId.toString(CompilationIdentifier.Verbosity.NAME), false);
+        this(compilationId, null, false);
     }
 
     public CompilationResult(CompilationIdentifier compilationId, String name) {
@@ -364,6 +385,21 @@ public class CompilationResult {
      */
     public ResolvedJavaMethod[] getMethods() {
         return methods;
+    }
+
+    /**
+     * Sets the {@link SpeculationLog} log used during compilation.
+     */
+    public void setSpeculationLog(SpeculationLog speculationLog) {
+        checkOpen();
+        this.speculationLog = speculationLog;
+    }
+
+    /**
+     * Gets the {@link SpeculationLog} log, if any, used during compilation.
+     */
+    public SpeculationLog getSpeculationLog() {
+        return speculationLog;
     }
 
     /**
@@ -609,7 +645,7 @@ public class CompilationResult {
     /**
      * @return the code annotations or {@code null} if there are none
      */
-    public List<CodeAnnotation> getAnnotations() {
+    public List<CodeAnnotation> getCodeAnnotations() {
         if (annotations == null) {
             return Collections.emptyList();
         }
@@ -675,6 +711,10 @@ public class CompilationResult {
         return unmodifiableList(sourceMapping);
     }
 
+    /**
+     * Gets the name for this compilation result. This will only be non-null when it provides a
+     * value unrelated to {@link #getCompilationId()}.
+     */
     public String getName() {
         return name;
     }
@@ -696,7 +736,8 @@ public class CompilationResult {
      * Clears the information in this object pertaining to generating code. That is, the
      * {@linkplain #getMarks() marks}, {@linkplain #getInfopoints() infopoints},
      * {@linkplain #getExceptionHandlers() exception handlers}, {@linkplain #getDataPatches() data
-     * patches} and {@linkplain #getAnnotations() annotations} recorded in this object are cleared.
+     * patches} and {@linkplain #getCodeAnnotations() annotations} recorded in this object are
+     * cleared.
      */
     public void resetForEmittingCode() {
         checkOpen();
@@ -709,6 +750,14 @@ public class CompilationResult {
         if (annotations != null) {
             annotations.clear();
         }
+    }
+
+    public void clearInfopoints() {
+        infopoints.clear();
+    }
+
+    public void clearExceptionHandlers() {
+        exceptionHandlers.clear();
     }
 
     private void checkOpen() {
@@ -726,5 +775,36 @@ public class CompilationResult {
         }
         dataSection.close();
         closed = true;
+    }
+
+    public void shiftCodePatch(int pos, int bytesToShift) {
+        iterateAndReplace(infopoints, pos, site -> {
+            if (site instanceof Call) {
+                Call call = (Call) site;
+                return new Call(call.target, site.pcOffset + bytesToShift, call.size, call.direct, call.debugInfo);
+            } else {
+                return new Infopoint(site.pcOffset + bytesToShift, site.debugInfo, site.reason);
+            }
+        });
+        iterateAndReplace(dataPatches, pos, site -> new DataPatch(site.pcOffset + bytesToShift, site.reference, site.note));
+        iterateAndReplace(exceptionHandlers, pos, site -> new ExceptionHandler(site.pcOffset + bytesToShift, site.handlerPos));
+        iterateAndReplace(marks, pos, site -> new Mark(site.pcOffset + bytesToShift, site.id));
+        if (annotations != null) {
+            for (CodeAnnotation annotation : annotations) {
+                int annotationPos = annotation.position;
+                if (pos <= annotationPos) {
+                    annotation.setPosition(annotationPos + bytesToShift);
+                }
+            }
+        }
+    }
+
+    private static <T extends Site> void iterateAndReplace(List<T> sites, int pos, Function<T, T> replacement) {
+        for (int i = 0; i < sites.size(); i++) {
+            T site = sites.get(i);
+            if (pos <= site.pcOffset) {
+                sites.set(i, replacement.apply(site));
+            }
+        }
     }
 }

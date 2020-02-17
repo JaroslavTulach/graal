@@ -1,26 +1,42 @@
 /*
- * Copyright (c) 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2017, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
- * This code is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.  Oracle designates this
- * particular file as subject to the "Classpath" exception as provided
- * by Oracle in the LICENSE file that accompanied this code.
+ * The Universal Permissive License (UPL), Version 1.0
  *
- * This code is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
- * version 2 for more details (a copy is included in the LICENSE file that
- * accompanied this code).
+ * Subject to the condition set forth below, permission is hereby granted to any
+ * person obtaining a copy of this software, associated documentation and/or
+ * data (collectively the "Software"), free of charge and under any and all
+ * copyright rights in the Software, and any and all patent rights owned or
+ * freely licensable by each licensor hereunder covering either (i) the
+ * unmodified Software as contributed to or provided by such licensor, or (ii)
+ * the Larger Works (as defined below), to deal in both
  *
- * You should have received a copy of the GNU General Public License version
- * 2 along with this work; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
+ * (a) the Software, and
  *
- * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
- * or visit www.oracle.com if you need additional information or have any
- * questions.
+ * (b) any piece of software and/or hardware listed in the lrgrwrks.txt file if
+ * one is included with the Software each a "Larger Work" to which the Software
+ * is contributed by such licensors),
+ *
+ * without restriction, including without limitation the rights to copy, create
+ * derivative works of, display, perform, and distribute the Software and make,
+ * use, sell, offer for sale, import, export, have made, and have sold the
+ * Software and the Larger Work(s), and to sublicense the foregoing rights on
+ * either these or other terms.
+ *
+ * This license is subject to the following condition:
+ *
+ * The above copyright notice and either this complete permission notice or at a
+ * minimum a reference to the UPL must be included in all copies or substantial
+ * portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
  */
 package com.oracle.truffle.api;
 
@@ -34,6 +50,7 @@ import org.graalvm.options.OptionCategory;
 import org.graalvm.options.OptionDescriptor;
 import org.graalvm.options.OptionDescriptors;
 import org.graalvm.options.OptionKey;
+import org.graalvm.options.OptionStability;
 
 /**
  * Describes the attributes of an option whose {@link OptionKey value} is in a static field
@@ -86,7 +103,7 @@ public @interface Option {
     /**
      * Returns a help message for the option. New lines can be embedded in the message with
      * {@code "%n"}. The generated an option descriptor returns this value as result of
-     * {@link OptionDescriptor#getHelp()()}.
+     * {@link OptionDescriptor#getHelp()}.
      *
      * @since 0.27
      */
@@ -102,11 +119,19 @@ public @interface Option {
 
     /**
      * Specifies the category of the option. The generated option descriptor returns this value as
-     * result of {@link OptionDescriptor#getCategory()()}.
+     * result of {@link OptionDescriptor#getCategory()}.
      *
      * @since 0.27
      */
     OptionCategory category();
+
+    /**
+     * Defines the stability of this option. The default value is
+     * {@link OptionStability#EXPERIMENTAL}.
+     *
+     * @since 19.0
+     */
+    OptionStability stability() default OptionStability.EXPERIMENTAL;
 
     /**
      * Must be applied on classes containing {@link Option option} fields to specify a name prefix
@@ -125,7 +150,7 @@ public @interface Option {
 
         /**
          * A set of group names that are used as prefix for all options of the annotated class. If
-         * multiple group anmes are specified then descriptors for each combination of group and
+         * multiple group names are specified then descriptors for each combination of group and
          * option name is generated.
          * <p>
          * The {@link OptionDescriptor#getName() option descriptor name} is generated from the
@@ -149,21 +174,24 @@ class OptionSnippets {
     // @formatter:off
 
     // BEGIN: OptionSnippets.MyLanguage
-    @TruffleLanguage.Registration(id = "mylang",   name = "My Language",
-                                  version = "1.0", mimeType = "mime")
+    @TruffleLanguage.Registration(id = "mylang", name = "My Language",
+                                  version = "1.0")
     abstract static class MyLanguage extends TruffleLanguage<Context> {
 
         // the descriptor name for MyOption1 is 'mylang.MyOption1'
-        @Option(help = "Help Text.", category = OptionCategory.USER)
-        static final OptionKey<String>  MyOption1 = new OptionKey<>("");
+        @Option(help = "Help Text.", category = OptionCategory.USER,
+                stability = OptionStability.STABLE)
+        static final OptionKey<String> MyOption1 = new OptionKey<>("");
 
-        // the descriptor name for MyOption2 is 'mylang.MyOption2'
-        @Option(help = "Help Text.", category = OptionCategory.USER)
-        static final OptionKey<Boolean> MyOption2 = new OptionKey<>(false);
+        // the descriptor name for SecondOption is 'mylang.secondOption'
+        @Option(help = "Help Text.", name = "secondOption",
+                category = OptionCategory.EXPERT,
+                stability = OptionStability.EXPERIMENTAL)
+        static final OptionKey<Boolean> SecondOption = new OptionKey<>(false);
 
         @Override
         protected Context createContext(TruffleLanguage.Env env) {
-            if (env.getOptions().get(MyOption2)) {
+            if (env.getOptions().get(SecondOption)) {
                 // options are available via environment
             }
             return null;
@@ -171,12 +199,12 @@ class OptionSnippets {
 
         @Override
         protected OptionDescriptors getOptionDescriptors() {
+            // this class is generated by the annotation processor
             return new MyLanguageOptionDescriptors();
         }
     }
     // END: OptionSnippets.MyLanguage
 
-    // this class is generated by an annotation processor
     static class MyLanguageOptionDescriptors implements OptionDescriptors {
 
         public OptionDescriptor get(String optionName) {

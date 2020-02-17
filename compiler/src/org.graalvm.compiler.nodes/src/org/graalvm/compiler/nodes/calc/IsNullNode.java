@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2009, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2009, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -29,18 +31,20 @@ import org.graalvm.compiler.graph.NodeClass;
 import org.graalvm.compiler.graph.spi.CanonicalizerTool;
 import org.graalvm.compiler.nodeinfo.NodeCycles;
 import org.graalvm.compiler.nodeinfo.NodeInfo;
+import org.graalvm.compiler.nodes.CompressionNode;
 import org.graalvm.compiler.nodes.LogicConstantNode;
 import org.graalvm.compiler.nodes.LogicNode;
-import org.graalvm.compiler.nodes.PiNode;
+import org.graalvm.compiler.nodes.NodeView;
 import org.graalvm.compiler.nodes.UnaryOpLogicNode;
 import org.graalvm.compiler.nodes.ValueNode;
 import org.graalvm.compiler.nodes.spi.LIRLowerable;
 import org.graalvm.compiler.nodes.spi.NodeLIRBuilderTool;
 import org.graalvm.compiler.nodes.spi.Virtualizable;
 import org.graalvm.compiler.nodes.spi.VirtualizerTool;
+import org.graalvm.compiler.nodes.type.NarrowOopStamp;
 import org.graalvm.compiler.nodes.type.StampTool;
-import org.graalvm.compiler.nodes.util.GraphUtil;
 
+import jdk.vm.ci.meta.JavaConstant;
 import jdk.vm.ci.meta.TriState;
 
 /**
@@ -51,22 +55,38 @@ public final class IsNullNode extends UnaryOpLogicNode implements LIRLowerable, 
 
     public static final NodeClass<IsNullNode> TYPE = NodeClass.create(IsNullNode.class);
 
-    public IsNullNode(ValueNode object) {
+    /*
+     * When linear pointer compression is enabled, compressed and uncompressed nulls differ.
+     */
+    private final JavaConstant nullConstant;
+
+    private IsNullNode(ValueNode object, JavaConstant nullConstant) {
         super(TYPE, object);
+        this.nullConstant = nullConstant;
         assert object != null;
     }
 
-    public static LogicNode create(ValueNode forValue) {
-        return canonicalized(null, forValue);
+    public IsNullNode(ValueNode object) {
+        this(object, JavaConstant.NULL_POINTER);
+        assertNonNarrow(object);
     }
 
-    public static LogicNode tryCanonicalize(ValueNode forValue) {
-        if (StampTool.isPointerAlwaysNull(forValue)) {
-            return LogicConstantNode.tautology();
-        } else if (StampTool.isPointerNonNull(forValue)) {
-            return LogicConstantNode.contradiction();
-        }
-        return null;
+    public JavaConstant nullConstant() {
+        return nullConstant;
+    }
+
+    public static LogicNode create(ValueNode forValue) {
+        assertNonNarrow(forValue);
+        return canonicalized(null, forValue, JavaConstant.NULL_POINTER);
+    }
+
+    public static LogicNode create(ValueNode forValue, JavaConstant nullConstant) {
+        assert nullConstant.isNull() : "Null constant is not null: " + nullConstant;
+        return canonicalized(null, forValue, nullConstant);
+    }
+
+    private static void assertNonNarrow(ValueNode object) {
+        assert !(object.stamp(NodeView.DEFAULT) instanceof NarrowOopStamp) : "Value to compare against null is a NarrowOop" + object;
     }
 
     @Override
@@ -77,43 +97,53 @@ public final class IsNullNode extends UnaryOpLogicNode implements LIRLowerable, 
     @Override
     public boolean verify() {
         assertTrue(getValue() != null, "is null input must not be null");
-        assertTrue(getValue().stamp() instanceof AbstractPointerStamp, "input must be a pointer not %s", getValue().stamp());
+        assertTrue(getValue().stamp(NodeView.DEFAULT).isPointerStamp(), "input must be a pointer not %s", getValue().stamp(NodeView.DEFAULT));
         return super.verify();
     }
 
     @Override
     public ValueNode canonical(CanonicalizerTool tool, ValueNode forValue) {
-        return canonicalized(this, forValue);
+        return canonicalized(this, forValue, nullConstant);
     }
 
-    private static LogicNode canonicalized(IsNullNode isNullNode, ValueNode forValue) {
-        IsNullNode self = isNullNode;
-        LogicNode result = tryCanonicalize(forValue);
-        if (result != null) {
-            return result;
-        }
-
-        if (forValue instanceof PiNode) {
-            return IsNullNode.create(GraphUtil.skipPi(forValue));
-        }
-
-        if (forValue instanceof ConvertNode) {
-            ConvertNode convertNode = (ConvertNode) forValue;
-            if (convertNode.mayNullCheckSkipConversion()) {
-                return IsNullNode.create(convertNode.getValue());
+    private static LogicNode canonicalized(IsNullNode node, ValueNode forValue, JavaConstant forNullConstant) {
+        JavaConstant nullConstant = forNullConstant;
+        ValueNode value = forValue;
+        while (true) {
+            if (StampTool.isPointerAlwaysNull(value)) {
+                return LogicConstantNode.tautology();
+            } else if (StampTool.isPointerNonNull(value)) {
+                return LogicConstantNode.contradiction();
             }
-        }
 
-        if (self == null) {
-            self = new IsNullNode(GraphUtil.skipPi(forValue));
+            if (value instanceof ConvertNode) {
+                ConvertNode convertNode = (ConvertNode) value;
+                if (convertNode.mayNullCheckSkipConversion()) {
+                    value = convertNode.getValue();
+                    continue;
+                }
+                /*
+                 * CompressionNode.mayNullCheckSkipConversion returns false when linear pointer
+                 * compression is enabled.
+                 */
+                if (value instanceof CompressionNode) {
+                    CompressionNode compressionNode = (CompressionNode) value;
+                    nullConstant = compressionNode.nullConstant();
+                    value = compressionNode.getValue();
+                    continue;
+                }
+            }
+            /*
+             * If we are at original node, just return it. Otherwise create a new node.
+             */
+            return (node != null && value == forValue) ? node : new IsNullNode(value, nullConstant);
         }
-        return self;
     }
 
     @Override
     public void virtualize(VirtualizerTool tool) {
         ValueNode alias = tool.getAlias(getValue());
-        TriState fold = tryFold(alias.stamp());
+        TriState fold = tryFold(alias.stamp(NodeView.DEFAULT));
         if (fold != TriState.UNKNOWN) {
             tool.replaceWithValue(LogicConstantNode.forBoolean(fold.isTrue(), graph()));
         }
@@ -122,7 +152,7 @@ public final class IsNullNode extends UnaryOpLogicNode implements LIRLowerable, 
     @Override
     public Stamp getSucceedingStampForValue(boolean negated) {
         // Ignore any more precise input stamp since canonicalization will skip through PiNodes
-        AbstractPointerStamp pointerStamp = (AbstractPointerStamp) getValue().stamp().unrestricted();
+        AbstractPointerStamp pointerStamp = (AbstractPointerStamp) getValue().stamp(NodeView.DEFAULT).unrestricted();
         return negated ? pointerStamp.asNonNull() : pointerStamp.asAlwaysNull();
     }
 

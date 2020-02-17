@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2014, 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2014, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -23,17 +25,20 @@
 package org.graalvm.compiler.nodes.calc;
 
 import static org.graalvm.compiler.nodeinfo.NodeCycles.CYCLES_1;
+import static org.graalvm.compiler.nodes.calc.BinaryArithmeticNode.getArithmeticOpTable;
 
+import org.graalvm.compiler.core.common.calc.CanonicalCondition;
 import org.graalvm.compiler.core.common.type.ArithmeticOpTable;
 import org.graalvm.compiler.core.common.type.ArithmeticOpTable.IntegerConvertOp;
 import org.graalvm.compiler.core.common.type.ArithmeticOpTable.IntegerConvertOp.Narrow;
-import org.graalvm.compiler.core.common.type.ArithmeticOpTable.IntegerConvertOp.SignExtend;
 import org.graalvm.compiler.core.common.type.IntegerStamp;
 import org.graalvm.compiler.core.common.type.PrimitiveStamp;
+import org.graalvm.compiler.core.common.type.Stamp;
 import org.graalvm.compiler.graph.NodeClass;
 import org.graalvm.compiler.graph.spi.CanonicalizerTool;
 import org.graalvm.compiler.lir.gen.ArithmeticLIRGeneratorTool;
 import org.graalvm.compiler.nodeinfo.NodeInfo;
+import org.graalvm.compiler.nodes.NodeView;
 import org.graalvm.compiler.nodes.ValueNode;
 import org.graalvm.compiler.nodes.spi.NodeLIRBuilderTool;
 
@@ -43,26 +48,26 @@ import jdk.vm.ci.code.CodeUtil;
  * The {@code NarrowNode} converts an integer to a narrower integer.
  */
 @NodeInfo(cycles = CYCLES_1)
-public final class NarrowNode extends IntegerConvertNode<Narrow, SignExtend> {
+public final class NarrowNode extends IntegerConvertNode<Narrow, IntegerConvertOp.ZeroExtend> {
 
     public static final NodeClass<NarrowNode> TYPE = NodeClass.create(NarrowNode.class);
 
     public NarrowNode(ValueNode input, int resultBits) {
-        this(input, PrimitiveStamp.getBits(input.stamp()), resultBits);
-        assert 0 < resultBits && resultBits <= PrimitiveStamp.getBits(input.stamp());
+        this(input, PrimitiveStamp.getBits(input.stamp(NodeView.DEFAULT)), resultBits);
+        assert 0 < resultBits && resultBits <= PrimitiveStamp.getBits(input.stamp(NodeView.DEFAULT));
     }
 
     public NarrowNode(ValueNode input, int inputBits, int resultBits) {
-        super(TYPE, ArithmeticOpTable::getNarrow, ArithmeticOpTable::getSignExtend, inputBits, resultBits, input);
+        super(TYPE, getArithmeticOpTable(input).getNarrow(), inputBits, resultBits, input);
     }
 
-    public static ValueNode create(ValueNode input, int resultBits) {
-        return create(input, PrimitiveStamp.getBits(input.stamp()), resultBits);
+    public static ValueNode create(ValueNode input, int resultBits, NodeView view) {
+        return create(input, PrimitiveStamp.getBits(input.stamp(view)), resultBits, view);
     }
 
-    public static ValueNode create(ValueNode input, int inputBits, int resultBits) {
-        IntegerConvertOp<Narrow> signExtend = ArithmeticOpTable.forStamp(input.stamp()).getNarrow();
-        ValueNode synonym = findSynonym(signExtend, input, inputBits, resultBits, signExtend.foldStamp(inputBits, resultBits, input.stamp()));
+    public static ValueNode create(ValueNode input, int inputBits, int resultBits, NodeView view) {
+        IntegerConvertOp<Narrow> signExtend = ArithmeticOpTable.forStamp(input.stamp(view)).getNarrow();
+        ValueNode synonym = findSynonym(signExtend, input, inputBits, resultBits, signExtend.foldStamp(inputBits, resultBits, input.stamp(view)));
         if (synonym != null) {
             return synonym;
         } else {
@@ -71,12 +76,46 @@ public final class NarrowNode extends IntegerConvertNode<Narrow, SignExtend> {
     }
 
     @Override
+    protected IntegerConvertOp<Narrow> getOp(ArithmeticOpTable table) {
+        return table.getNarrow();
+    }
+
+    @Override
+    protected IntegerConvertOp<IntegerConvertOp.ZeroExtend> getReverseOp(ArithmeticOpTable table) {
+        return table.getZeroExtend();
+    }
+
+    @Override
     public boolean isLossless() {
+        return checkLossless(this.getResultBits());
+    }
+
+    private boolean checkLossless(int bits) {
+        Stamp valueStamp = this.getValue().stamp(NodeView.DEFAULT);
+        if (bits > 0 && valueStamp instanceof IntegerStamp) {
+            IntegerStamp integerStamp = (IntegerStamp) valueStamp;
+            long valueUpMask = integerStamp.upMask();
+            if ((valueUpMask & CodeUtil.mask(bits)) == valueUpMask) {
+                return true;
+            }
+        }
         return false;
     }
 
     @Override
+    public boolean preservesOrder(CanonicalCondition cond) {
+        switch (cond) {
+            case LT:
+                // Must guarantee that also sign bit does not flip.
+                return checkLossless(this.getResultBits() - 1);
+            default:
+                return checkLossless(this.getResultBits());
+        }
+    }
+
+    @Override
     public ValueNode canonical(CanonicalizerTool tool, ValueNode forValue) {
+        NodeView view = NodeView.from(tool);
         ValueNode ret = super.canonical(tool, forValue);
         if (ret != this) {
             return ret;
@@ -108,22 +147,22 @@ public final class NarrowNode extends IntegerConvertNode<Narrow, SignExtend> {
                 if (other instanceof SignExtendNode) {
                     // sxxx -(sign-extend)-> ssssssss sssssxxx -(narrow)-> sssssxxx
                     // ==> sxxx -(sign-extend)-> sssssxxx
-                    return SignExtendNode.create(other.getValue(), other.getInputBits(), getResultBits());
+                    return SignExtendNode.create(other.getValue(), other.getInputBits(), getResultBits(), view);
                 } else if (other instanceof ZeroExtendNode) {
-                    // xxxx -(zero-extend)-> 00000000 00000xxx -(narrow)-> 0000xxxx
+                    // xxxx -(zero-extend)-> 00000000 0000xxxx -(narrow)-> 0000xxxx
                     // ==> xxxx -(zero-extend)-> 0000xxxx
-                    return new ZeroExtendNode(other.getValue(), other.getInputBits(), getResultBits());
+                    return new ZeroExtendNode(other.getValue(), other.getInputBits(), getResultBits(), ((ZeroExtendNode) other).isInputAlwaysPositive());
                 }
             }
         } else if (forValue instanceof AndNode) {
             AndNode andNode = (AndNode) forValue;
-            IntegerStamp yStamp = (IntegerStamp) andNode.getY().stamp();
-            IntegerStamp xStamp = (IntegerStamp) andNode.getX().stamp();
+            IntegerStamp yStamp = (IntegerStamp) andNode.getY().stamp(view);
+            IntegerStamp xStamp = (IntegerStamp) andNode.getX().stamp(view);
             long relevantMask = CodeUtil.mask(this.getResultBits());
             if ((relevantMask & yStamp.downMask()) == relevantMask) {
-                return create(andNode.getX(), this.getResultBits());
+                return create(andNode.getX(), this.getResultBits(), view);
             } else if ((relevantMask & xStamp.downMask()) == relevantMask) {
-                return create(andNode.getY(), this.getResultBits());
+                return create(andNode.getY(), this.getResultBits(), view);
             }
         }
 

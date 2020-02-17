@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -22,27 +24,30 @@
  */
 package org.graalvm.compiler.nodes;
 
+import org.graalvm.compiler.graph.NodeSourcePosition;
 import org.graalvm.compiler.nodes.extended.GuardingNode;
-
-import jdk.vm.ci.meta.DeoptimizationAction;
-import jdk.vm.ci.meta.DeoptimizationReason;
-import jdk.vm.ci.meta.JavaConstant;
 
 /**
  * Shared interface to capture core methods of {@link AbstractFixedGuardNode} and {@link GuardNode}.
  *
  */
-public interface DeoptimizingGuard extends ValueNodeInterface, GuardingNode {
+public interface DeoptimizingGuard extends GuardingNode, StaticDeoptimizingNode {
 
     LogicNode getCondition();
 
     void setCondition(LogicNode x, boolean negated);
 
-    DeoptimizationReason getReason();
-
-    DeoptimizationAction getAction();
-
-    JavaConstant getSpeculation();
-
     boolean isNegated();
+
+    NodeSourcePosition getNoDeoptSuccessorPosition();
+
+    void setNoDeoptSuccessorPosition(NodeSourcePosition noDeoptSuccessorPosition);
+
+    default void addCallerToNoDeoptSuccessorPosition(NodeSourcePosition caller) {
+        NodeSourcePosition noDeoptSuccessorPosition = getNoDeoptSuccessorPosition();
+        if (noDeoptSuccessorPosition == null) {
+            return;
+        }
+        setNoDeoptSuccessorPosition(new NodeSourcePosition(caller, noDeoptSuccessorPosition.getMethod(), noDeoptSuccessorPosition.getBCI()));
+    }
 }

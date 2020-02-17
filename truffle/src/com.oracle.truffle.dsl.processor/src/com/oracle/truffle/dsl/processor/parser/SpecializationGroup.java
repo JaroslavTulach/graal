@@ -1,24 +1,42 @@
 /*
- * Copyright (c) 2012, 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
- * This code is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * The Universal Permissive License (UPL), Version 1.0
  *
- * This code is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
- * version 2 for more details (a copy is included in the LICENSE file that
- * accompanied this code).
+ * Subject to the condition set forth below, permission is hereby granted to any
+ * person obtaining a copy of this software, associated documentation and/or
+ * data (collectively the "Software"), free of charge and under any and all
+ * copyright rights in the Software, and any and all patent rights owned or
+ * freely licensable by each licensor hereunder covering either (i) the
+ * unmodified Software as contributed to or provided by such licensor, or (ii)
+ * the Larger Works (as defined below), to deal in both
  *
- * You should have received a copy of the GNU General Public License version
- * 2 along with this work; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
+ * (a) the Software, and
  *
- * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
- * or visit www.oracle.com if you need additional information or have any
- * questions.
+ * (b) any piece of software and/or hardware listed in the lrgrwrks.txt file if
+ * one is included with the Software each a "Larger Work" to which the Software
+ * is contributed by such licensors),
+ *
+ * without restriction, including without limitation the rights to copy, create
+ * derivative works of, display, perform, and distribute the Software and make,
+ * use, sell, offer for sale, import, export, have made, and have sold the
+ * Software and the Larger Work(s), and to sublicense the foregoing rights on
+ * either these or other terms.
+ *
+ * This license is subject to the following condition:
+ *
+ * The above copyright notice and either this complete permission notice or at a
+ * minimum a reference to the UPL must be included in all copies or substantial
+ * portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
  */
 package com.oracle.truffle.dsl.processor.parser;
 
@@ -63,7 +81,7 @@ public final class SpecializationGroup {
         this.guards.addAll(data.getGuards());
     }
 
-    public SpecializationGroup(List<SpecializationGroup> children, List<TypeGuard> typeGuardsMatches, List<GuardExpression> guardMatches) {
+    private SpecializationGroup(List<SpecializationGroup> children, List<TypeGuard> typeGuardsMatches, List<GuardExpression> guardMatches) {
         assert !children.isEmpty() : "children must not be empty";
         this.typeGuards = typeGuardsMatches;
         this.guards = guardMatches;
@@ -94,48 +112,6 @@ public final class SpecializationGroup {
             specializations.addAll(group.collectSpecializations());
         }
         return specializations;
-    }
-
-    public List<GuardExpression> findElseConnectableGuards() {
-        if (!getTypeGuards().isEmpty()) {
-            return Collections.emptyList();
-        }
-
-        if (getGuards().isEmpty()) {
-            return Collections.emptyList();
-        }
-
-        List<GuardExpression> elseConnectableGuards = new ArrayList<>();
-        int guardIndex = 0;
-        while (guardIndex < getGuards().size() && findNegatedGuardInPrevious(getGuards().get(guardIndex)) != null) {
-            elseConnectableGuards.add(getGuards().get(guardIndex));
-            guardIndex++;
-        }
-
-        return elseConnectableGuards;
-    }
-
-    private GuardExpression findNegatedGuardInPrevious(GuardExpression guard) {
-        SpecializationGroup previous = this.getPreviousGroup();
-        if (previous == null) {
-            return null;
-        }
-        List<GuardExpression> elseConnectedGuards = previous.findElseConnectableGuards();
-
-        if (previous == null || previous.getGuards().size() != elseConnectedGuards.size() + 1) {
-            return null;
-        }
-
-        /* Guard is else branch can be connected in previous specialization. */
-        if (elseConnectedGuards.contains(guard)) {
-            return guard;
-        }
-
-        GuardExpression previousGuard = previous.getGuards().get(elseConnectedGuards.size());
-        if (guard.equalsNegated(previousGuard)) {
-            return guard;
-        }
-        return null;
     }
 
     private void updateChildren(List<SpecializationGroup> childs) {
@@ -224,22 +200,13 @@ public final class SpecializationGroup {
         return new SpecializationGroup(newChildren, typeGuardsMatches, guardMatches);
     }
 
-    public static SpecializationGroup create(SpecializationData specialization) {
-        return new SpecializationGroup(specialization);
-    }
-
-    public static SpecializationGroup createDefault(List<SpecializationData> specializations) {
+    public static SpecializationGroup create(List<SpecializationData> specializations) {
         List<SpecializationGroup> groups = new ArrayList<>();
         for (SpecializationData specialization : specializations) {
             groups.add(new SpecializationGroup(specialization));
         }
-        SpecializationGroup group = new SpecializationGroup(createCombinationalGroups(groups), Collections.<TypeGuard> emptyList(), Collections.<GuardExpression> emptyList());
-
-        return group;
-    }
-
-    public static SpecializationGroup createFlat(List<SpecializationData> specializations) {
-        SpecializationGroup group = createDefault(specializations);
+        SpecializationGroup group1 = new SpecializationGroup(createCombinationalGroups(groups), Collections.<TypeGuard> emptyList(), Collections.<GuardExpression> emptyList());
+        SpecializationGroup group = group1;
 
         // trim groups
         while (group.isEmpty() && group.getChildren().size() == 1) {

@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -26,15 +28,15 @@ import java.util.BitSet;
 import java.util.LinkedList;
 import java.util.function.ToDoubleFunction;
 
+import org.graalvm.collections.EconomicSet;
+import org.graalvm.collections.Equivalence;
 import org.graalvm.compiler.nodes.FixedNode;
 import org.graalvm.compiler.nodes.Invoke;
 import org.graalvm.compiler.nodes.ParameterNode;
 import org.graalvm.compiler.nodes.StructuredGraph;
 import org.graalvm.compiler.nodes.ValueNode;
 import org.graalvm.compiler.phases.common.inlining.policy.AbstractInliningPolicy;
-import org.graalvm.compiler.phases.graph.FixedNodeProbabilityCache;
-import org.graalvm.util.Equivalence;
-import org.graalvm.util.EconomicSet;
+import org.graalvm.compiler.phases.graph.FixedNodeRelativeFrequencyCache;
 
 import jdk.vm.ci.meta.ResolvedJavaMethod;
 
@@ -85,7 +87,7 @@ public final class CallsiteHolderExplorable extends CallsiteHolder {
             probabilities = null;
             computeInliningRelevance = null;
         } else {
-            probabilities = new FixedNodeProbabilityCache();
+            probabilities = new FixedNodeRelativeFrequencyCache();
             computeInliningRelevance = new ComputeInliningRelevance(graph, probabilities);
             computeProbabilities();
         }

@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2011, 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -28,8 +30,13 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Objects;
 import java.util.function.BiFunction;
 
+import org.graalvm.collections.EconomicMap;
+import org.graalvm.collections.EconomicSet;
+import org.graalvm.collections.Equivalence;
+import org.graalvm.collections.MapCursor;
 import org.graalvm.compiler.bytecode.Bytecode;
 import org.graalvm.compiler.code.SourceStackTraceBailoutException;
 import org.graalvm.compiler.core.common.spi.ConstantFieldProvider;
@@ -47,38 +54,41 @@ import org.graalvm.compiler.nodes.AbstractBeginNode;
 import org.graalvm.compiler.nodes.AbstractEndNode;
 import org.graalvm.compiler.nodes.AbstractMergeNode;
 import org.graalvm.compiler.nodes.ConstantNode;
+import org.graalvm.compiler.nodes.ControlSinkNode;
 import org.graalvm.compiler.nodes.ControlSplitNode;
 import org.graalvm.compiler.nodes.FixedNode;
 import org.graalvm.compiler.nodes.FixedWithNextNode;
 import org.graalvm.compiler.nodes.FrameState;
 import org.graalvm.compiler.nodes.GuardNode;
+import org.graalvm.compiler.nodes.IfNode;
 import org.graalvm.compiler.nodes.LoopBeginNode;
 import org.graalvm.compiler.nodes.LoopEndNode;
 import org.graalvm.compiler.nodes.LoopExitNode;
+import org.graalvm.compiler.nodes.NodeView;
 import org.graalvm.compiler.nodes.PhiNode;
 import org.graalvm.compiler.nodes.PiNode;
 import org.graalvm.compiler.nodes.ProxyNode;
 import org.graalvm.compiler.nodes.StateSplit;
 import org.graalvm.compiler.nodes.StructuredGraph;
 import org.graalvm.compiler.nodes.ValueNode;
+import org.graalvm.compiler.nodes.ValuePhiNode;
+import org.graalvm.compiler.nodes.ValueProxyNode;
 import org.graalvm.compiler.nodes.java.LoadIndexedNode;
 import org.graalvm.compiler.nodes.java.MethodCallTargetNode;
 import org.graalvm.compiler.nodes.java.MonitorIdNode;
 import org.graalvm.compiler.nodes.spi.ArrayLengthProvider;
+import org.graalvm.compiler.nodes.spi.ArrayLengthProvider.FindLengthMode;
 import org.graalvm.compiler.nodes.spi.LimitedValueProxy;
 import org.graalvm.compiler.nodes.spi.LoweringProvider;
 import org.graalvm.compiler.nodes.spi.ValueProxy;
 import org.graalvm.compiler.nodes.spi.VirtualizerTool;
+import org.graalvm.compiler.nodes.type.StampTool;
 import org.graalvm.compiler.nodes.virtual.VirtualArrayNode;
 import org.graalvm.compiler.nodes.virtual.VirtualObjectNode;
 import org.graalvm.compiler.options.Option;
 import org.graalvm.compiler.options.OptionKey;
 import org.graalvm.compiler.options.OptionType;
 import org.graalvm.compiler.options.OptionValues;
-import org.graalvm.util.EconomicMap;
-import org.graalvm.util.EconomicSet;
-import org.graalvm.util.Equivalence;
-import org.graalvm.util.MapCursor;
 
 import jdk.vm.ci.code.BailoutException;
 import jdk.vm.ci.code.BytecodePosition;
@@ -96,6 +106,8 @@ public class GraphUtil {
         @Option(help = "Verify that there are no new unused nodes when performing killCFG", type = OptionType.Debug)//
         public static final OptionKey<Boolean> VerifyKillCFGUnusedNodes = new OptionKey<>(false);
     }
+
+    public static final int MAX_FRAMESTATE_SEARCH_DEPTH = 4;
 
     private static void killCFGInner(FixedNode node) {
         EconomicSet<Node> markedNodes = EconomicSet.create();
@@ -235,10 +247,12 @@ public class GraphUtil {
             EconomicSet<Node> unsafeNodes = null;
             Graph.NodeEventScope nodeEventScope = null;
             OptionValues options = node.getOptions();
-            if (Graph.Options.VerifyGraalGraphEdges.getValue(options)) {
+            boolean verifyGraalGraphEdges = Graph.Options.VerifyGraalGraphEdges.getValue(options);
+            boolean verifyKillCFGUnusedNodes = GraphUtil.Options.VerifyKillCFGUnusedNodes.getValue(options);
+            if (verifyGraalGraphEdges) {
                 unsafeNodes = collectUnsafeNodes(node.graph());
             }
-            if (GraphUtil.Options.VerifyKillCFGUnusedNodes.getValue(options)) {
+            if (verifyKillCFGUnusedNodes) {
                 EconomicSet<Node> collectedUnusedNodes = unusedNodes = EconomicSet.create(Equivalence.IDENTITY);
                 nodeEventScope = node.graph().trackNodeEvents(new Graph.NodeEventListener() {
                     @Override
@@ -252,12 +266,12 @@ public class GraphUtil {
             debug.dump(DebugContext.VERY_DETAILED_LEVEL, node.graph(), "Before killCFG %s", node);
             killCFGInner(node);
             debug.dump(DebugContext.VERY_DETAILED_LEVEL, node.graph(), "After killCFG %s", node);
-            if (Graph.Options.VerifyGraalGraphEdges.getValue(options)) {
+            if (verifyGraalGraphEdges) {
                 EconomicSet<Node> newUnsafeNodes = collectUnsafeNodes(node.graph());
                 newUnsafeNodes.removeAll(unsafeNodes);
                 assert newUnsafeNodes.isEmpty() : "New unsafe nodes: " + newUnsafeNodes;
             }
-            if (GraphUtil.Options.VerifyKillCFGUnusedNodes.getValue(options)) {
+            if (verifyKillCFGUnusedNodes) {
                 nodeEventScope.close();
                 Iterator<Node> iterator = unusedNodes.iterator();
                 while (iterator.hasNext()) {
@@ -652,7 +666,7 @@ public class GraphUtil {
         ValueNode n = node;
         while (n instanceof PiNode) {
             PiNode piNode = (PiNode) n;
-            ObjectStamp originalStamp = (ObjectStamp) piNode.getOriginalNode().stamp();
+            ObjectStamp originalStamp = (ObjectStamp) piNode.getOriginalNode().stamp(NodeView.DEFAULT);
             if (originalStamp.nonNull()) {
                 n = piNode.getOriginalNode();
             } else {
@@ -663,45 +677,91 @@ public class GraphUtil {
     }
 
     /**
-     * Looks for an {@link ArrayLengthProvider} while iterating through all {@link ValueProxy
-     * ValueProxies}.
+     * Returns the length of the array described by the value parameter, or null if it is not
+     * available. Details of the different modes are documented in {@link FindLengthMode}.
      *
      * @param value The start value.
+     * @param mode The mode as documented in {@link FindLengthMode}.
      * @return The array length if one was found, or null otherwise.
      */
-    public static ValueNode arrayLength(ValueNode value) {
+    public static ValueNode arrayLength(ValueNode value, FindLengthMode mode, ConstantReflectionProvider constantReflection) {
+        Objects.requireNonNull(mode);
+
         ValueNode current = value;
         do {
+            /*
+             * PiArrayNode implements ArrayLengthProvider and ValueProxy. We want to treat it as an
+             * ArrayLengthProvider, therefore we check this case first.
+             */
             if (current instanceof ArrayLengthProvider) {
-                ValueNode length = ((ArrayLengthProvider) current).length();
-                if (length != null) {
-                    return length;
+                return ((ArrayLengthProvider) current).findLength(mode, constantReflection);
+
+            } else if (current instanceof ValuePhiNode) {
+                return phiArrayLength((ValuePhiNode) current, mode, constantReflection);
+
+            } else if (current instanceof ValueProxyNode) {
+                ValueProxyNode proxy = (ValueProxyNode) current;
+                ValueNode length = arrayLength(proxy.getOriginalNode(), mode, constantReflection);
+                if (mode == ArrayLengthProvider.FindLengthMode.CANONICALIZE_READ && length != null && !length.isConstant()) {
+                    length = new ValueProxyNode(length, proxy.proxyPoint());
                 }
-            }
-            if (current instanceof ValueProxy) {
+                return length;
+
+            } else if (current instanceof ValueProxy) {
+                /* Written as a loop instead of a recursive call to reduce recursion depth. */
                 current = ((ValueProxy) current).getOriginalNode();
+
             } else {
-                break;
+                return null;
             }
         } while (true);
-        return null;
+    }
+
+    private static ValueNode phiArrayLength(ValuePhiNode phi, ArrayLengthProvider.FindLengthMode mode, ConstantReflectionProvider constantReflection) {
+        if (phi.merge() instanceof LoopBeginNode) {
+            /* Avoid cycle detection by not processing phi functions that could introduce cycles. */
+            return null;
+        }
+
+        ValueNode singleLength = null;
+        for (int i = 0; i < phi.values().count(); i++) {
+            ValueNode input = phi.values().get(i);
+            ValueNode length = arrayLength(input, mode, constantReflection);
+            if (length == null) {
+                return null;
+            }
+            assert length.stamp(NodeView.DEFAULT).getStackKind() == JavaKind.Int;
+
+            if (i == 0) {
+                assert singleLength == null;
+                singleLength = length;
+            } else if (singleLength == length) {
+                /* Nothing to do, still having a single length. */
+            } else {
+                return null;
+            }
+        }
+        return singleLength;
     }
 
     /**
      * Tries to find an original value of the given node by traversing through proxies and
-     * unambiguous phis. Note that this method will perform an exhaustive search through phis. It is
-     * intended to be used during graph building, when phi nodes aren't yet canonicalized.
+     * unambiguous phis. Note that this method will perform an exhaustive search through phis.
      *
-     * @param value The node whose original value should be determined.
-     * @return The original value (which might be the input value itself).
+     * @param value the node whose original value should be determined
+     * @param abortOnLoopPhi specifies if the traversal through phis should stop and return
+     *            {@code value} if it hits a {@linkplain PhiNode#isLoopPhi loop phi}. This argument
+     *            must be {@code true} if used during graph building as loop phi nodes may not yet
+     *            have all their inputs computed.
+     * @return the original value (which might be {@code value} itself)
      */
-    public static ValueNode originalValue(ValueNode value) {
-        ValueNode result = originalValueSimple(value);
+    public static ValueNode originalValue(ValueNode value, boolean abortOnLoopPhi) {
+        ValueNode result = originalValueSimple(value, abortOnLoopPhi);
         assert result != null;
         return result;
     }
 
-    private static ValueNode originalValueSimple(ValueNode value) {
+    private static ValueNode originalValueSimple(ValueNode value, boolean abortOnLoopPhi) {
         /* The very simple case: look through proxies. */
         ValueNode cur = originalValueForProxy(value);
 
@@ -711,6 +771,10 @@ public class GraphUtil {
              * structures.
              */
             PhiNode phi = (PhiNode) cur;
+
+            if (abortOnLoopPhi && phi.isLoopPhi()) {
+                return value;
+            }
 
             ValueNode phiSingleValue = null;
             int count = phi.valueCount();
@@ -730,7 +794,7 @@ public class GraphUtil {
                          * of the inputs is another phi function. We need to do a complicated
                          * exhaustive check.
                          */
-                        return originalValueForComplicatedPhi(phi, new NodeBitMap(value.graph()));
+                        return originalValueForComplicatedPhi(value, phi, new NodeBitMap(value.graph()), abortOnLoopPhi);
                     } else {
                         /*
                          * We have two different input values for the phi function, but none of them
@@ -766,8 +830,12 @@ public class GraphUtil {
     /**
      * Handling for complicated nestings of phi functions. We need to reduce phi functions
      * recursively, and need a temporary map of visited nodes to avoid endless recursion of cycles.
+     *
+     * @param value the node whose original value is being determined
+     * @param abortOnLoopPhi specifies if the traversal through phis should stop and return
+     *            {@code value} if it hits a {@linkplain PhiNode#isLoopPhi loop phi}
      */
-    private static ValueNode originalValueForComplicatedPhi(PhiNode phi, NodeBitMap visited) {
+    private static ValueNode originalValueForComplicatedPhi(ValueNode value, PhiNode phi, NodeBitMap visited, boolean abortOnLoopPhi) {
         if (visited.isMarked(phi)) {
             /*
              * Found a phi function that was already seen. Either a cycle, or just a second phi
@@ -783,7 +851,16 @@ public class GraphUtil {
             ValueNode phiCurValue = originalValueForProxy(phi.valueAt(i));
             if (phiCurValue instanceof PhiNode) {
                 /* Recursively process a phi function input. */
-                phiCurValue = originalValueForComplicatedPhi((PhiNode) phiCurValue, visited);
+                PhiNode curPhi = (PhiNode) phiCurValue;
+                if (abortOnLoopPhi && curPhi.isLoopPhi()) {
+                    return value;
+                }
+                phiCurValue = originalValueForComplicatedPhi(value, curPhi, visited, abortOnLoopPhi);
+                if (phiCurValue == value) {
+                    // Hit a loop phi
+                    assert abortOnLoopPhi;
+                    return value;
+                }
             }
 
             if (phiCurValue == null) {
@@ -988,7 +1065,7 @@ public class GraphUtil {
             return;
         }
 
-        if (newLengthInt >= tool.getMaximumEntryCount()) {
+        if (newLengthInt > tool.getMaximumEntryCount()) {
             /* The new array size is higher than maximum allowed size of virtualized objects. */
             return;
         }
@@ -999,13 +1076,28 @@ public class GraphUtil {
         if (sourceAlias instanceof VirtualObjectNode) {
             /* The source array is virtualized, just copy over the values. */
             VirtualObjectNode sourceVirtual = (VirtualObjectNode) sourceAlias;
+            boolean alwaysAssignable = newComponentType.getJavaKind() == JavaKind.Object && newComponentType.isJavaLangObject();
             for (int i = 0; i < readLength; i++) {
-                newEntryState[i] = tool.getEntry(sourceVirtual, fromInt + i);
+                ValueNode entry = tool.getEntry(sourceVirtual, fromInt + i);
+                if (!alwaysAssignable) {
+                    ResolvedJavaType entryType = StampTool.typeOrNull(entry, tool.getMetaAccess());
+                    if (entryType == null) {
+                        return;
+                    }
+                    if (!newComponentType.isAssignableFrom(entryType)) {
+                        return;
+                    }
+                }
+                newEntryState[i] = entry;
             }
         } else {
             /* The source array is not virtualized, emit index loads. */
+            ResolvedJavaType sourceType = StampTool.typeOrNull(sourceAlias, tool.getMetaAccess());
+            if (sourceType == null || !sourceType.isArray() || !newComponentType.isAssignableFrom(sourceType.getElementalType())) {
+                return;
+            }
             for (int i = 0; i < readLength; i++) {
-                LoadIndexedNode load = new LoadIndexedNode(null, sourceAlias, ConstantNode.forInt(i + fromInt, graph), elementKind);
+                LoadIndexedNode load = new LoadIndexedNode(null, sourceAlias, ConstantNode.forInt(i + fromInt, graph), null, elementKind);
                 tool.addNode(load);
                 newEntryState[i] = load;
             }
@@ -1021,5 +1113,56 @@ public class GraphUtil {
         VirtualArrayNode newVirtualArray = virtualArrayProvider.apply(newComponentType, newLengthInt);
         tool.createVirtualObject(newVirtualArray, newEntryState, Collections.<MonitorIdNode> emptyList(), false);
         tool.replaceWithVirtual(newVirtualArray);
+    }
+
+    /**
+     * Snippet lowerings may produce patterns without a frame state on the merge. We need to take
+     * extra care when optimizing these patterns.
+     */
+    public static boolean checkFrameState(FixedNode start, int maxDepth) {
+        if (maxDepth == 0) {
+            return false;
+        }
+        FixedNode node = start;
+        while (true) {
+            if (node instanceof AbstractMergeNode) {
+                AbstractMergeNode mergeNode = (AbstractMergeNode) node;
+                if (mergeNode.stateAfter() == null) {
+                    return false;
+                } else {
+                    return true;
+                }
+            } else if (node instanceof StateSplit) {
+                StateSplit stateSplitNode = (StateSplit) node;
+                if (stateSplitNode.stateAfter() != null) {
+                    return true;
+                }
+            }
+
+            if (node instanceof ControlSplitNode) {
+                ControlSplitNode controlSplitNode = (ControlSplitNode) node;
+                for (Node succ : controlSplitNode.cfgSuccessors()) {
+                    if (checkFrameState((FixedNode) succ, maxDepth - 1)) {
+                        return true;
+                    }
+                }
+                return false;
+            } else if (node instanceof FixedWithNextNode) {
+                FixedWithNextNode fixedWithNextNode = (FixedWithNextNode) node;
+                node = fixedWithNextNode.next();
+            } else if (node instanceof AbstractEndNode) {
+                AbstractEndNode endNode = (AbstractEndNode) node;
+                node = endNode.merge();
+            } else if (node instanceof ControlSinkNode) {
+                return true;
+            } else {
+                assert false : "unexpected node";
+                return false;
+            }
+        }
+    }
+
+    public static boolean mayRemoveSplit(IfNode ifNode) {
+        return GraphUtil.checkFrameState(ifNode.trueSuccessor(), MAX_FRAMESTATE_SEARCH_DEPTH) && GraphUtil.checkFrameState(ifNode.falseSuccessor(), MAX_FRAMESTATE_SEARCH_DEPTH);
     }
 }

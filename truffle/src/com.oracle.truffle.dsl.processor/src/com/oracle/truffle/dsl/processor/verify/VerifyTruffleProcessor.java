@@ -1,24 +1,42 @@
 /*
- * Copyright (c) 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2014, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
- * This code is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * The Universal Permissive License (UPL), Version 1.0
  *
- * This code is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
- * version 2 for more details (a copy is included in the LICENSE file that
- * accompanied this code).
+ * Subject to the condition set forth below, permission is hereby granted to any
+ * person obtaining a copy of this software, associated documentation and/or
+ * data (collectively the "Software"), free of charge and under any and all
+ * copyright rights in the Software, and any and all patent rights owned or
+ * freely licensable by each licensor hereunder covering either (i) the
+ * unmodified Software as contributed to or provided by such licensor, or (ii)
+ * the Larger Works (as defined below), to deal in both
  *
- * You should have received a copy of the GNU General Public License version
- * 2 along with this work; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
+ * (a) the Software, and
  *
- * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
- * or visit www.oracle.com if you need additional information or have any
- * questions.
+ * (b) any piece of software and/or hardware listed in the lrgrwrks.txt file if
+ * one is included with the Software each a "Larger Work" to which the Software
+ * is contributed by such licensors),
+ *
+ * without restriction, including without limitation the rights to copy, create
+ * derivative works of, display, perform, and distribute the Software and make,
+ * use, sell, offer for sale, import, export, have made, and have sold the
+ * Software and the Larger Work(s), and to sublicense the foregoing rights on
+ * either these or other terms.
+ *
+ * This license is subject to the following condition:
+ *
+ * The above copyright notice and either this complete permission notice or at a
+ * minimum a reference to the UPL must be included in all copies or substantial
+ * portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
  */
 package com.oracle.truffle.dsl.processor.verify;
 
@@ -41,13 +59,20 @@ import javax.lang.model.element.ExecutableElement;
 import javax.lang.model.element.Modifier;
 import javax.lang.model.element.TypeElement;
 import javax.lang.model.element.VariableElement;
+import javax.lang.model.type.ArrayType;
+import javax.lang.model.type.TypeKind;
+import javax.lang.model.type.TypeMirror;
 import javax.tools.Diagnostic.Kind;
 
-import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
-import com.oracle.truffle.api.nodes.Node.Child;
 import com.oracle.truffle.dsl.processor.ExpectError;
+import com.oracle.truffle.dsl.processor.ProcessorContext;
+import com.oracle.truffle.dsl.processor.TruffleTypes;
+import com.oracle.truffle.dsl.processor.java.ElementUtils;
 
-@SupportedAnnotationTypes({"com.oracle.truffle.api.CompilerDirectives.TruffleBoundary", "com.oracle.truffle.api.nodes.Node.Child"})
+@SupportedAnnotationTypes({
+                TruffleTypes.CompilerDirectives_TruffleBoundary_Name,
+                TruffleTypes.Node_Child_Name,
+                TruffleTypes.Node_Children_Name})
 public class VerifyTruffleProcessor extends AbstractProcessor {
     @Override
     public SourceVersion getSupportedSourceVersion() {
@@ -94,7 +119,6 @@ public class VerifyTruffleProcessor extends AbstractProcessor {
     private void reportException(Kind kind, Element element, Throwable t) {
         StringWriter buf = new StringWriter();
         t.printStackTrace(new PrintWriter(buf));
-        buf.toString();
         message(kind, element, "Exception thrown during processing: %s", buf.toString());
     }
 
@@ -104,39 +128,81 @@ public class VerifyTruffleProcessor extends AbstractProcessor {
             return false;
         }
 
-        TypeElement virtualFrameType = processingEnv.getElementUtils().getTypeElement("com.oracle.truffle.api.frame.VirtualFrame");
+        ProcessorContext context = ProcessorContext.enter(processingEnv);
+        try {
+            TruffleTypes types = context.getTypes();
+            TypeElement virtualFrameType = ElementUtils.castTypeElement(types.VirtualFrame);
 
-        for (Element element : roundEnv.getElementsAnnotatedWith(TruffleBoundary.class)) {
-            scope = element;
-            try {
-                if (element.getKind() != ElementKind.CONSTRUCTOR &&
-                                element.getKind() != ElementKind.METHOD) {
+            for (Element element : roundEnv.getElementsAnnotatedWith(ElementUtils.castTypeElement(types.CompilerDirectives_TruffleBoundary))) {
+                scope = element;
+                try {
+                    if (element.getKind() != ElementKind.CONSTRUCTOR &&
+                                    element.getKind() != ElementKind.METHOD) {
+                        continue;
+                    }
+                    ExecutableElement method = (ExecutableElement) element;
+
+                    for (VariableElement parameter : method.getParameters()) {
+                        Element paramType = processingEnv.getTypeUtils().asElement(parameter.asType());
+                        if (paramType != null && paramType.equals(virtualFrameType)) {
+                            errorMessage(element, "Method %s cannot be annotated with @%s and have a parameter of type %s", method.getSimpleName(),
+                                            types.CompilerDirectives_TruffleBoundary.asElement().getSimpleName().toString(),
+                                            paramType.getSimpleName());
+                        }
+                    }
+                } catch (Throwable t) {
+                    reportException(isBug367599(t) ? Kind.NOTE : Kind.ERROR, element, t);
+                } finally {
+                    scope = null;
+                }
+            }
+
+            TypeElement nodeType = ElementUtils.castTypeElement(types.Node);
+            TypeElement nodeInterfaceType = ElementUtils.castTypeElement(types.NodeInterface);
+            for (Element e : roundEnv.getElementsAnnotatedWith(ElementUtils.castTypeElement(types.Node_Child))) {
+                if (e.getModifiers().contains(Modifier.FINAL)) {
+                    emitError("@Child field cannot be final", e);
                     continue;
                 }
-                ExecutableElement method = (ExecutableElement) element;
-
-                for (VariableElement parameter : method.getParameters()) {
-                    Element paramType = processingEnv.getTypeUtils().asElement(parameter.asType());
-                    if (paramType != null && paramType.equals(virtualFrameType)) {
-                        errorMessage(element, "Method %s cannot be annotated with @%s and have a parameter of type %s", method.getSimpleName(), TruffleBoundary.class.getSimpleName(),
-                                        paramType.getSimpleName());
-                    }
+                if (!processingEnv.getTypeUtils().isSubtype(e.asType(), nodeInterfaceType.asType())) {
+                    emitError("@Child field must implement NodeInterface", e);
+                    continue;
                 }
-            } catch (Throwable t) {
-                reportException(isBug367599(t) ? Kind.NOTE : Kind.ERROR, element, t);
-            } finally {
-                scope = null;
+                if (!processingEnv.getTypeUtils().isSubtype(e.getEnclosingElement().asType(), nodeType.asType())) {
+                    emitError("@Child field is allowed only in Node sub-class", e);
+                    continue;
+                }
+                if (ElementUtils.findAnnotationMirror(e, types.Executed) == null) {
+                    assertNoErrorExpected(e);
+                }
             }
-        }
-
-        for (Element e : roundEnv.getElementsAnnotatedWith(Child.class)) {
-            if (e.getModifiers().contains(Modifier.FINAL)) {
-                emitError("@Child field cannot be final", e);
-                continue;
+            for (Element annotatedField : roundEnv.getElementsAnnotatedWith(ElementUtils.castTypeElement(types.Node_Children))) {
+                boolean reportError = false;
+                TypeMirror annotatedFieldType = annotatedField.asType();
+                if (annotatedFieldType.getKind() == TypeKind.ARRAY) {
+                    TypeMirror compomentType = ((ArrayType) annotatedFieldType).getComponentType();
+                    if (!processingEnv.getTypeUtils().isSubtype(compomentType, nodeInterfaceType.asType())) {
+                        reportError = true;
+                    }
+                } else {
+                    reportError = true;
+                }
+                if (reportError) {
+                    emitError("@Children field must be an array of NodeInerface sub-types", annotatedField);
+                    continue;
+                }
+                if (!processingEnv.getTypeUtils().isSubtype(annotatedField.getEnclosingElement().asType(), nodeType.asType())) {
+                    emitError("@Children field is allowed only in Node sub-class", annotatedField);
+                    continue;
+                }
+                if (ElementUtils.findAnnotationMirror(annotatedField, types.Executed) == null) {
+                    assertNoErrorExpected(annotatedField);
+                }
             }
-            assertNoErrorExpected(e);
+            return false;
+        } finally {
+            ProcessorContext.leave();
         }
-        return false;
     }
 
     void assertNoErrorExpected(Element element) {

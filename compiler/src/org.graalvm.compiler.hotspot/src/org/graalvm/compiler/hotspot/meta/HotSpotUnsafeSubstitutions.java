@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2017, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -22,26 +24,25 @@
  */
 package org.graalvm.compiler.hotspot.meta;
 
-import static org.graalvm.compiler.serviceprovider.JDK9Method.Java8OrEarlier;
-
 import org.graalvm.compiler.api.replacements.ClassSubstitution;
 import org.graalvm.compiler.api.replacements.MethodSubstitution;
-import org.graalvm.compiler.hotspot.HotSpotBackend;
-import org.graalvm.compiler.hotspot.nodes.ComputeObjectAddressNode;
-import org.graalvm.compiler.word.Word;
-import org.graalvm.word.WordFactory;
+import org.graalvm.compiler.hotspot.replacements.UnsafeCopyMemoryNode;
+import org.graalvm.compiler.serviceprovider.JavaVersionUtil;
 
 @ClassSubstitution(className = {"jdk.internal.misc.Unsafe", "sun.misc.Unsafe"})
 public class HotSpotUnsafeSubstitutions {
 
-    public static final String copyMemoryName = Java8OrEarlier ? "copyMemory" : "copyMemory0";
+    public static final String copyMemoryName = JavaVersionUtil.JAVA_SPEC <= 8 ? "copyMemory" : "copyMemory0";
 
     @SuppressWarnings("unused")
     @MethodSubstitution(isStatic = false)
     static void copyMemory(Object receiver, Object srcBase, long srcOffset, Object destBase, long destOffset, long bytes) {
-        Word srcAddr = WordFactory.unsigned(ComputeObjectAddressNode.get(srcBase, srcOffset));
-        Word dstAddr = WordFactory.unsigned(ComputeObjectAddressNode.get(destBase, destOffset));
-        Word size = Word.signed(bytes);
-        HotSpotBackend.unsafeArraycopy(srcAddr, dstAddr, size);
+        UnsafeCopyMemoryNode.copyMemory(false, receiver, srcBase, srcOffset, destBase, destOffset, bytes);
+    }
+
+    @SuppressWarnings("unused")
+    @MethodSubstitution(value = "copyMemory", isStatic = false)
+    static void copyMemoryGuarded(Object receiver, Object srcBase, long srcOffset, Object destBase, long destOffset, long bytes) {
+        UnsafeCopyMemoryNode.copyMemory(true, receiver, srcBase, srcOffset, destBase, destOffset, bytes);
     }
 }

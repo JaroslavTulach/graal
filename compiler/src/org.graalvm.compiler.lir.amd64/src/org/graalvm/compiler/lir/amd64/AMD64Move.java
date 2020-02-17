@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2011, 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -22,25 +24,35 @@
  */
 package org.graalvm.compiler.lir.amd64;
 
-import static org.graalvm.compiler.lir.LIRInstruction.OperandFlag.COMPOSITE;
-import static org.graalvm.compiler.lir.LIRInstruction.OperandFlag.HINT;
-import static org.graalvm.compiler.lir.LIRInstruction.OperandFlag.REG;
-import static org.graalvm.compiler.lir.LIRInstruction.OperandFlag.STACK;
-import static org.graalvm.compiler.lir.LIRInstruction.OperandFlag.UNINITIALIZED;
-import static org.graalvm.compiler.lir.LIRValueUtil.asJavaConstant;
-import static org.graalvm.compiler.lir.LIRValueUtil.isJavaConstant;
 import static java.lang.Double.doubleToRawLongBits;
 import static java.lang.Float.floatToRawIntBits;
 import static jdk.vm.ci.code.ValueUtil.asRegister;
 import static jdk.vm.ci.code.ValueUtil.isRegister;
 import static jdk.vm.ci.code.ValueUtil.isStackSlot;
+import static org.graalvm.compiler.asm.amd64.AMD64Assembler.ConditionFlag.Equal;
+import static org.graalvm.compiler.asm.amd64.AMD64Assembler.ConditionFlag.NotEqual;
+import static org.graalvm.compiler.core.common.GraalOptions.GeneratePIC;
+import static org.graalvm.compiler.lir.LIRInstruction.OperandFlag.COMPOSITE;
+import static org.graalvm.compiler.lir.LIRInstruction.OperandFlag.CONST;
+import static org.graalvm.compiler.lir.LIRInstruction.OperandFlag.HINT;
+import static org.graalvm.compiler.lir.LIRInstruction.OperandFlag.ILLEGAL;
+import static org.graalvm.compiler.lir.LIRInstruction.OperandFlag.REG;
+import static org.graalvm.compiler.lir.LIRInstruction.OperandFlag.STACK;
+import static org.graalvm.compiler.lir.LIRInstruction.OperandFlag.UNINITIALIZED;
+import static org.graalvm.compiler.lir.LIRValueUtil.asJavaConstant;
+import static org.graalvm.compiler.lir.LIRValueUtil.isJavaConstant;
 
-import org.graalvm.compiler.core.common.NumUtil;
+import org.graalvm.compiler.asm.Label;
 import org.graalvm.compiler.asm.amd64.AMD64Address;
+import org.graalvm.compiler.asm.amd64.AMD64Address.Scale;
 import org.graalvm.compiler.asm.amd64.AMD64Assembler.AMD64MIOp;
 import org.graalvm.compiler.asm.amd64.AMD64Assembler.AMD64MOp;
-import org.graalvm.compiler.asm.amd64.AMD64Assembler.OperandSize;
+import org.graalvm.compiler.asm.amd64.AMD64BaseAssembler.OperandSize;
 import org.graalvm.compiler.asm.amd64.AMD64MacroAssembler;
+import org.graalvm.compiler.core.common.CompressEncoding;
+import org.graalvm.compiler.core.common.LIRKind;
+import org.graalvm.compiler.core.common.NumUtil;
+import org.graalvm.compiler.core.common.spi.LIRKindTool;
 import org.graalvm.compiler.core.common.type.DataPointerConstant;
 import org.graalvm.compiler.debug.GraalError;
 import org.graalvm.compiler.lir.LIRFrameState;
@@ -51,10 +63,12 @@ import org.graalvm.compiler.lir.StandardOp.NullCheck;
 import org.graalvm.compiler.lir.StandardOp.ValueMoveOp;
 import org.graalvm.compiler.lir.VirtualStackSlot;
 import org.graalvm.compiler.lir.asm.CompilationResultBuilder;
+import org.graalvm.compiler.options.OptionValues;
 
 import jdk.vm.ci.amd64.AMD64;
 import jdk.vm.ci.amd64.AMD64Kind;
 import jdk.vm.ci.code.Register;
+import jdk.vm.ci.code.RegisterValue;
 import jdk.vm.ci.code.StackSlot;
 import jdk.vm.ci.meta.AllocatableValue;
 import jdk.vm.ci.meta.Constant;
@@ -83,7 +97,7 @@ public class AMD64Move {
     public static final class MoveToRegOp extends AbstractMoveOp {
         public static final LIRInstructionClass<MoveToRegOp> TYPE = LIRInstructionClass.create(MoveToRegOp.class);
 
-        @Def({REG, HINT}) protected AllocatableValue result;
+        @Def({REG, STACK, HINT}) protected AllocatableValue result;
         @Use({REG, STACK}) protected AllocatableValue input;
 
         public MoveToRegOp(AMD64Kind moveKind, AllocatableValue result, AllocatableValue input) {
@@ -143,7 +157,7 @@ public class AMD64Move {
         @Override
         public void emitCode(CompilationResultBuilder crb, AMD64MacroAssembler masm) {
             if (isRegister(result)) {
-                const2reg(crb, masm, asRegister(result), input);
+                const2reg(crb, masm, asRegister(result), input, (AMD64Kind) result.getPlatformKind());
             } else {
                 assert isStackSlot(result);
                 const2stack(crb, masm, result, input);
@@ -292,16 +306,23 @@ public class AMD64Move {
 
         @Def({REG}) protected AllocatableValue result;
         @Use({COMPOSITE, UNINITIALIZED}) protected AMD64AddressValue address;
+        private final OperandSize size;
 
-        public LeaOp(AllocatableValue result, AMD64AddressValue address) {
+        public LeaOp(AllocatableValue result, AMD64AddressValue address, OperandSize size) {
             super(TYPE);
             this.result = result;
             this.address = address;
+            this.size = size;
         }
 
         @Override
         public void emitCode(CompilationResultBuilder crb, AMD64MacroAssembler masm) {
-            masm.leaq(asRegister(result, AMD64Kind.QWORD), address.toAddress());
+            if (size == OperandSize.QWORD) {
+                masm.leaq(asRegister(result, AMD64Kind.QWORD), address.toAddress());
+            } else {
+                assert size == OperandSize.DWORD;
+                masm.lead(asRegister(result, AMD64Kind.DWORD), address.toAddress());
+            }
         }
     }
 
@@ -415,6 +436,12 @@ public class AMD64Move {
                 masm.lock();
             }
             switch (accessKind) {
+                case BYTE:
+                    masm.cmpxchgb(asRegister(newValue), address.toAddress());
+                    break;
+                case WORD:
+                    masm.cmpxchgw(asRegister(newValue), address.toAddress());
+                    break;
                 case DWORD:
                     masm.cmpxchgl(asRegister(newValue), address.toAddress());
                     break;
@@ -452,6 +479,12 @@ public class AMD64Move {
                 masm.lock();
             }
             switch (accessKind) {
+                case BYTE:
+                    masm.xaddb(address.toAddress(), asRegister(result));
+                    break;
+                case WORD:
+                    masm.xaddw(address.toAddress(), asRegister(result));
+                    break;
                 case DWORD:
                     masm.xaddl(address.toAddress(), asRegister(result));
                     break;
@@ -486,6 +519,12 @@ public class AMD64Move {
         public void emitCode(CompilationResultBuilder crb, AMD64MacroAssembler masm) {
             move(accessKind, crb, masm, result, newValue);
             switch (accessKind) {
+                case BYTE:
+                    masm.xchgb(asRegister(result), address.toAddress());
+                    break;
+                case WORD:
+                    masm.xchgw(asRegister(result), address.toAddress());
+                    break;
                 case DWORD:
                     masm.xchgl(asRegister(result), address.toAddress());
                     break;
@@ -519,7 +558,7 @@ public class AMD64Move {
             }
         } else if (isJavaConstant(input)) {
             if (isRegister(result)) {
-                const2reg(crb, masm, asRegister(result), asJavaConstant(input));
+                const2reg(crb, masm, asRegister(result), asJavaConstant(input), moveKind);
             } else if (isStackSlot(result)) {
                 const2stack(crb, masm, result, asJavaConstant(input));
             } else {
@@ -534,6 +573,7 @@ public class AMD64Move {
         if (asRegister(input).equals(asRegister(result))) {
             return;
         }
+        assert asRegister(result).getRegisterCategory().equals(asRegister(input).getRegisterCategory());
         switch (kind) {
             case BYTE:
             case WORD:
@@ -550,7 +590,7 @@ public class AMD64Move {
                 masm.movdbl(asRegister(result, AMD64Kind.DOUBLE), asRegister(input, AMD64Kind.DOUBLE));
                 break;
             default:
-                throw GraalError.shouldNotReachHere("kind=" + kind);
+                throw GraalError.shouldNotReachHere("kind=" + kind + " input=" + input + " result=" + result);
         }
     }
 
@@ -576,7 +616,7 @@ public class AMD64Move {
                 masm.movsd(dest, input);
                 break;
             default:
-                throw GraalError.shouldNotReachHere();
+                throw GraalError.shouldNotReachHere("kind=" + kind + " input=" + input + " result=" + result);
         }
     }
 
@@ -602,11 +642,11 @@ public class AMD64Move {
                 masm.movdbl(result, src);
                 break;
             default:
-                throw GraalError.shouldNotReachHere();
+                throw GraalError.shouldNotReachHere("kind=" + kind + " input=" + input + " result=" + result);
         }
     }
 
-    public static void const2reg(CompilationResultBuilder crb, AMD64MacroAssembler masm, Register result, JavaConstant input) {
+    public static void const2reg(CompilationResultBuilder crb, AMD64MacroAssembler masm, Register result, JavaConstant input, AMD64Kind moveKind) {
         /*
          * Note: we use the kind of the input operand (and not the kind of the result operand)
          * because they don't match in all cases. For example, an object constant can be loaded to a
@@ -652,16 +692,34 @@ public class AMD64Move {
                 }
                 break;
             case Object:
+                assert moveKind != null : "a nun-null moveKind is required for loading an object constant";
                 // Do not optimize with an XOR as this instruction may be between
                 // a CMP and a Jcc in which case the XOR will modify the condition
                 // flags and interfere with the Jcc.
                 if (input.isNull()) {
-                    masm.movq(result, 0x0L);
-                } else if (crb.target.inlineObjects) {
-                    crb.recordInlineDataInCode(input);
-                    masm.movq(result, 0xDEADDEADDEADDEADL);
+                    if (moveKind == AMD64Kind.QWORD && crb.mustReplaceWithUncompressedNullRegister(input)) {
+                        masm.movq(result, crb.uncompressedNullRegister);
+                    } else {
+                        // Upper bits will be zeroed so this also works for narrow oops
+                        masm.movslq(result, 0);
+                    }
                 } else {
-                    masm.movq(result, (AMD64Address) crb.recordDataReferenceInCode(input, 0));
+                    if (crb.target.inlineObjects) {
+                        crb.recordInlineDataInCode(input);
+                        if (moveKind == AMD64Kind.DWORD) {
+                            // Support for narrow oops
+                            masm.movl(result, 0xDEADDEAD, true);
+                        } else {
+                            masm.movq(result, 0xDEADDEADDEADDEADL, true);
+                        }
+                    } else {
+                        if (moveKind == AMD64Kind.DWORD) {
+                            // Support for narrow oops
+                            masm.movl(result, (AMD64Address) crb.recordDataReferenceInCode(input, 0));
+                        } else {
+                            masm.movq(result, (AMD64Address) crb.recordDataReferenceInCode(input, 0));
+                        }
+                    }
                 }
                 break;
             default:
@@ -709,9 +767,13 @@ public class AMD64Move {
                 break;
             case Object:
                 if (input.isNull()) {
+                    if (crb.mustReplaceWithUncompressedNullRegister(input)) {
+                        masm.movq(dest, crb.uncompressedNullRegister);
+                        return;
+                    }
                     imm = 0;
                 } else {
-                    throw GraalError.shouldNotReachHere("Non-null object constants must be in register");
+                    throw GraalError.shouldNotReachHere("Non-null object constants must be in a register");
                 }
                 break;
             default:
@@ -738,6 +800,244 @@ public class AMD64Move {
                 break;
             default:
                 throw GraalError.shouldNotReachHere("Unknown result Kind: " + result.getPlatformKind());
+        }
+    }
+
+    public abstract static class PointerCompressionOp extends AMD64LIRInstruction {
+        protected final LIRKindTool lirKindTool;
+        protected final CompressEncoding encoding;
+        protected final boolean nonNull;
+
+        @Def({REG, HINT}) private AllocatableValue result;
+        @Use({REG, CONST}) private Value input;
+        @Alive({REG, ILLEGAL, UNINITIALIZED}) private AllocatableValue baseRegister;
+
+        protected PointerCompressionOp(LIRInstructionClass<? extends PointerCompressionOp> type,
+                        AllocatableValue result,
+                        Value input,
+                        AllocatableValue baseRegister,
+                        CompressEncoding encoding,
+                        boolean nonNull,
+                        LIRKindTool lirKindTool) {
+
+            super(type);
+            this.result = result;
+            this.input = input;
+            this.baseRegister = baseRegister;
+            this.encoding = encoding;
+            this.nonNull = nonNull;
+            this.lirKindTool = lirKindTool;
+        }
+
+        public static boolean hasBase(OptionValues options, CompressEncoding encoding) {
+            return GeneratePIC.getValue(options) || encoding.hasBase();
+        }
+
+        public final Value getInput() {
+            return input;
+        }
+
+        public final AllocatableValue getResult() {
+            return result;
+        }
+
+        protected final Register getResultRegister() {
+            return asRegister(result);
+        }
+
+        protected final Register getBaseRegister(CompilationResultBuilder crb) {
+            return hasBase(crb.getOptions(), encoding) ? asRegister(baseRegister) : Register.None;
+        }
+
+        protected final int getShift() {
+            return encoding.getShift();
+        }
+
+        /**
+         * Emits code to move {@linkplain #getInput input} to {@link #getResult result}.
+         */
+        protected final void move(LIRKind kind, CompilationResultBuilder crb, AMD64MacroAssembler masm) {
+            AMD64Move.move((AMD64Kind) kind.getPlatformKind(), crb, masm, result, input);
+        }
+
+        /**
+         * Emits code to uncompress the compressed oop in {@code inputAndResultReg} by left shifting
+         * it {@code shift} bits, adding it to {@code baseReg} and storing the result back in
+         * {@code inputAndResultReg}.
+         */
+        public static void emitUncompressWithBaseRegister(AMD64MacroAssembler masm, Register inputAndResultReg, Register baseReg, int shift, boolean preserveFlagsRegister) {
+            emitUncompressWithBaseRegister(masm, inputAndResultReg, baseReg, inputAndResultReg, shift, preserveFlagsRegister);
+        }
+
+        /**
+         * Emits code to uncompress the compressed oop in {@code inputReg} by left shifting it
+         * {@code shift} bits, adding it to {@code baseReg} and storing the result in
+         * {@code resultReg}.
+         */
+        public static void emitUncompressWithBaseRegister(AMD64MacroAssembler masm, Register resultReg, Register baseReg, Register inputReg, int shift, boolean preserveFlagsRegister) {
+            assert !baseReg.equals(Register.None) || shift != 0 : "compression not enabled";
+            if (Scale.isScaleShiftSupported(shift)) {
+                AMD64Address.Scale scale = AMD64Address.Scale.fromShift(shift);
+                masm.leaq(resultReg, new AMD64Address(baseReg, inputReg, scale));
+            } else {
+                if (preserveFlagsRegister) {
+                    throw GraalError.shouldNotReachHere("No valid flag-effect-free instruction available to uncompress oop");
+                }
+                if (!resultReg.equals(inputReg)) {
+                    masm.movq(resultReg, inputReg);
+                }
+                masm.shlq(resultReg, shift);
+                masm.addq(resultReg, baseReg);
+            }
+        }
+    }
+
+    public static class CompressPointerOp extends PointerCompressionOp {
+        public static final LIRInstructionClass<CompressPointerOp> TYPE = LIRInstructionClass.create(CompressPointerOp.class);
+
+        public CompressPointerOp(AllocatableValue result, Value input, AllocatableValue baseRegister, CompressEncoding encoding, boolean nonNull, LIRKindTool lirKindTool) {
+            this(TYPE, result, input, baseRegister, encoding, nonNull, lirKindTool);
+        }
+
+        private CompressPointerOp(LIRInstructionClass<? extends PointerCompressionOp> type, AllocatableValue result, Value input,
+                        AllocatableValue baseRegister, CompressEncoding encoding, boolean nonNull, LIRKindTool lirKindTool) {
+
+            super(type, result, input, baseRegister, encoding, nonNull, lirKindTool);
+        }
+
+        @Override
+        public void emitCode(CompilationResultBuilder crb, AMD64MacroAssembler masm) {
+            move(lirKindTool.getObjectKind(), crb, masm);
+
+            final Register resReg = getResultRegister();
+            final Register baseReg = getBaseRegister(crb);
+            if (!baseReg.equals(Register.None)) {
+                if (!nonNull) {
+                    masm.testq(resReg, resReg);
+                    masm.cmovq(Equal, resReg, baseReg);
+                }
+                masm.subq(resReg, baseReg);
+            }
+
+            int shift = getShift();
+            if (shift != 0) {
+                masm.shrq(resReg, shift);
+            }
+        }
+    }
+
+    public static class UncompressPointerOp extends PointerCompressionOp {
+        public static final LIRInstructionClass<UncompressPointerOp> TYPE = LIRInstructionClass.create(UncompressPointerOp.class);
+
+        public UncompressPointerOp(AllocatableValue result, Value input, AllocatableValue baseRegister, CompressEncoding encoding, boolean nonNull, LIRKindTool lirKindTool) {
+            this(TYPE, result, input, baseRegister, encoding, nonNull, lirKindTool);
+        }
+
+        private UncompressPointerOp(LIRInstructionClass<? extends PointerCompressionOp> type, AllocatableValue result, Value input,
+                        AllocatableValue baseRegister, CompressEncoding encoding, boolean nonNull, LIRKindTool lirKindTool) {
+            super(type, result, input, baseRegister, encoding, nonNull, lirKindTool);
+        }
+
+        @Override
+        public void emitCode(CompilationResultBuilder crb, AMD64MacroAssembler masm) {
+            Register baseReg = getBaseRegister(crb);
+            int shift = getShift();
+            Register resReg = getResultRegister();
+            if (nonNull && !baseReg.equals(Register.None) && getInput() instanceof RegisterValue) {
+                Register inputReg = ((RegisterValue) getInput()).getRegister();
+                if (!inputReg.equals(resReg)) {
+                    emitUncompressWithBaseRegister(masm, resReg, baseReg, inputReg, shift, false);
+                    return;
+                }
+            }
+            move(lirKindTool.getNarrowOopKind(), crb, masm);
+            emitUncompressCode(masm, resReg, shift, baseReg, nonNull);
+        }
+
+        public static void emitUncompressCode(AMD64MacroAssembler masm, Register resReg, int shift, Register baseReg, boolean nonNull) {
+            if (nonNull) {
+                if (!baseReg.equals(Register.None)) {
+                    emitUncompressWithBaseRegister(masm, resReg, baseReg, shift, false);
+                } else if (shift != 0) {
+                    masm.shlq(resReg, shift);
+                }
+            } else {
+                if (shift != 0) {
+                    masm.shlq(resReg, shift);
+                }
+
+                if (!baseReg.equals(Register.None)) {
+                    if (shift == 0) {
+                        // if encoding.shift != 0, the flags are already set by the shlq
+                        masm.testq(resReg, resReg);
+                    }
+
+                    Label done = new Label();
+                    masm.jccb(Equal, done);
+                    masm.addq(resReg, baseReg);
+                    masm.bind(done);
+                }
+            }
+        }
+    }
+
+    private abstract static class ZeroNullConversionOp extends AMD64LIRInstruction {
+        @Def({REG, HINT}) protected AllocatableValue result;
+        @Use({REG}) protected AllocatableValue input;
+
+        protected ZeroNullConversionOp(LIRInstructionClass<? extends ZeroNullConversionOp> type, AllocatableValue result, AllocatableValue input) {
+            super(type);
+            this.result = result;
+            this.input = input;
+        }
+
+        @Override
+        public void emitCode(CompilationResultBuilder crb, AMD64MacroAssembler masm) {
+            Register nullRegister = crb.uncompressedNullRegister;
+            if (!nullRegister.equals(Register.None)) {
+                emitConversion(asRegister(result), asRegister(input), nullRegister, masm);
+            }
+        }
+
+        protected abstract void emitConversion(Register resultRegister, Register inputRegister, Register nullRegister, AMD64MacroAssembler masm);
+    }
+
+    public static class ConvertNullToZeroOp extends ZeroNullConversionOp {
+        public static final LIRInstructionClass<ConvertNullToZeroOp> TYPE = LIRInstructionClass.create(ConvertNullToZeroOp.class);
+
+        public ConvertNullToZeroOp(AllocatableValue result, AllocatableValue input) {
+            super(TYPE, result, input);
+        }
+
+        @Override
+        protected final void emitConversion(Register resultRegister, Register inputRegister, Register nullRegister, AMD64MacroAssembler masm) {
+            if (inputRegister.equals(resultRegister)) {
+                Label done = new Label();
+                masm.subqAndJcc(inputRegister, nullRegister, Equal, done, true);
+                masm.addq(inputRegister, nullRegister);
+                masm.bind(done);
+            } else {
+                masm.subq(resultRegister, resultRegister);
+                masm.cmpq(inputRegister, nullRegister);
+                masm.cmovq(NotEqual, resultRegister, inputRegister);
+            }
+        }
+    }
+
+    public static class ConvertZeroToNullOp extends ZeroNullConversionOp {
+        public static final LIRInstructionClass<ConvertZeroToNullOp> TYPE = LIRInstructionClass.create(ConvertZeroToNullOp.class);
+
+        public ConvertZeroToNullOp(AllocatableValue result, AllocatableValue input) {
+            super(TYPE, result, input);
+        }
+
+        @Override
+        protected final void emitConversion(Register resultRegister, Register inputRegister, Register nullRegister, AMD64MacroAssembler masm) {
+            if (!inputRegister.equals(resultRegister)) {
+                masm.movq(resultRegister, inputRegister);
+            }
+            masm.testq(inputRegister, inputRegister);
+            masm.cmovq(Equal, resultRegister, nullRegister);
         }
     }
 }

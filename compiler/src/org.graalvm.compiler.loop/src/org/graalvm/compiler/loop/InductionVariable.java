@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2012, 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -24,6 +26,7 @@ package org.graalvm.compiler.loop;
 
 import org.graalvm.compiler.core.common.type.Stamp;
 import org.graalvm.compiler.debug.GraalError;
+import org.graalvm.compiler.nodes.NodeView;
 import org.graalvm.compiler.nodes.StructuredGraph;
 import org.graalvm.compiler.nodes.ValueNode;
 
@@ -93,10 +96,10 @@ public abstract class InductionVariable {
      * {@link CountedLoopInfo#isExactTripCount()} returns false for the containing loop.
      */
     public ValueNode extremumNode() {
-        return extremumNode(false, valueNode().stamp());
+        return extremumNode(false, valueNode().stamp(NodeView.DEFAULT));
     }
 
-    public abstract ValueNode extremumNode(boolean assumePositiveTripCount, Stamp stamp);
+    public abstract ValueNode extremumNode(boolean assumeLoopEntered, Stamp stamp);
 
     public abstract boolean isConstantExtremum();
 

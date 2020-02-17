@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2016, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -37,6 +39,7 @@ import org.graalvm.compiler.options.OptionType;
 import org.graalvm.compiler.options.OptionValues;
 
 import jdk.vm.ci.code.CompilationRequest;
+import jdk.vm.ci.services.Services;
 
 /**
  * A watch dog that monitors the duration and compilation rate during a
@@ -106,7 +109,7 @@ final class BootstrapWatchDog extends Thread {
     /**
      * Set to true to debug the watch dog.
      */
-    private static final boolean DEBUG = Boolean.getBoolean("debug.graal.BootstrapWatchDog");
+    private static final boolean DEBUG = Boolean.parseBoolean(Services.getSavedProperties().get("debug.graal.BootstrapWatchDog"));
 
     /**
      * Seconds to delay before starting to measure the compilation rate.
@@ -175,6 +178,10 @@ final class BootstrapWatchDog extends Thread {
                                 StackTraceElement[] stackTraceNow = t.getStackTrace();
                                 TTY.printf("Printing stack trace for current compilation of %s lasting more than %d seconds:%n%s",
                                                 fmt(request1.getMethod()), EPOCH, fmt(stackTraceNow));
+
+                                // Fortify: Null Dereference false positive
+                                assert stacksAtTimeout != null;
+
                                 if (Arrays.equals(stacksAtTimeout.get(t), stackTraceNow)) {
                                     TTY.printf("\t** Identical stack trace %d seconds ago, implying a hung compilation **%n",
                                                     EPOCH);

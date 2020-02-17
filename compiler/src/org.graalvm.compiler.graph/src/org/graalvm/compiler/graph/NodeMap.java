@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2011, 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -26,8 +28,8 @@ import java.util.Arrays;
 import java.util.Iterator;
 import java.util.function.BiFunction;
 
-import org.graalvm.util.EconomicMap;
-import org.graalvm.util.MapCursor;
+import org.graalvm.collections.EconomicMap;
+import org.graalvm.collections.MapCursor;
 
 public class NodeMap<T> extends NodeIdAccessor implements EconomicMap<Node, T> {
 
@@ -93,6 +95,9 @@ public class NodeMap<T> extends NodeIdAccessor implements EconomicMap<Node, T> {
 
     public void set(Node node, T value) {
         assert check(node);
+        if (!node.isAlive()) {
+            throw new VerificationError("this node is not alive: " + node);
+        }
         values[getNodeId(node)] = value;
     }
 
@@ -125,6 +130,7 @@ public class NodeMap<T> extends NodeIdAccessor implements EconomicMap<Node, T> {
     private boolean check(Node node) {
         assert node.graph() == graph : String.format("%s is not part of the graph", node);
         assert !isNew(node) : "this node was added to the graph after creating the node map : " + node;
+        assert node.isAlive() : "this node is not alive: " + node;
         return true;
     }
 

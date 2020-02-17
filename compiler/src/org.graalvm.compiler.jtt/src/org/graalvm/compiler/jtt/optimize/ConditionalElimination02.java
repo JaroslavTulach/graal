@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2011, 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -24,11 +26,11 @@ package org.graalvm.compiler.jtt.optimize;
 
 import java.util.EnumSet;
 
-import jdk.vm.ci.meta.DeoptimizationReason;
-
+import org.graalvm.compiler.jtt.JTTTest;
+import org.graalvm.compiler.phases.OptimisticOptimizations;
 import org.junit.Test;
 
-import org.graalvm.compiler.jtt.JTTTest;
+import jdk.vm.ci.meta.DeoptimizationReason;
 
 public class ConditionalElimination02 extends JTTTest {
 
@@ -57,6 +59,14 @@ public class ConditionalElimination02 extends JTTTest {
             }
         }
         return -1;
+    }
+
+    /**
+     * These tests assume all code paths are reachable so disable profile based dead code removal.
+     */
+    @Override
+    protected OptimisticOptimizations getOptimisticOptimizations() {
+        return OptimisticOptimizations.ALL.remove(OptimisticOptimizations.Optimization.RemoveNeverExecutedCode);
     }
 
     @Test

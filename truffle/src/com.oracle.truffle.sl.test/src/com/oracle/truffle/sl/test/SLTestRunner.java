@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * The Universal Permissive License (UPL), Version 1.0
@@ -58,10 +58,15 @@ import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
 import java.util.Enumeration;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.jar.JarEntry;
 import java.util.jar.JarFile;
 
+import org.graalvm.polyglot.Context;
+import org.graalvm.polyglot.PolyglotException;
+import org.graalvm.polyglot.Source;
 import org.junit.Assert;
 import org.junit.Assume;
 import org.junit.internal.TextListener;
@@ -76,15 +81,8 @@ import org.junit.runners.ParentRunner;
 import org.junit.runners.model.InitializationError;
 
 import com.oracle.truffle.api.dsl.NodeFactory;
-import com.oracle.truffle.api.dsl.UnsupportedSpecializationException;
-import com.oracle.truffle.api.source.Source;
-import com.oracle.truffle.api.vm.PolyglotEngine;
 import com.oracle.truffle.sl.SLLanguage;
-import com.oracle.truffle.sl.SLMain;
 import com.oracle.truffle.sl.builtins.SLBuiltinNode;
-import com.oracle.truffle.sl.parser.SLParseError;
-import com.oracle.truffle.sl.runtime.SLContext;
-import com.oracle.truffle.sl.runtime.SLUndefinedNameException;
 import com.oracle.truffle.sl.test.SLTestRunner.TestCase;
 
 public class SLTestRunner extends ParentRunner<TestCase> {
@@ -101,14 +99,16 @@ public class SLTestRunner extends ParentRunner<TestCase> {
         protected final String sourceName;
         protected final String testInput;
         protected final String expectedOutput;
+        protected final Map<String, String> options;
         protected String actualOutput;
 
-        protected TestCase(Class<?> testClass, String baseName, String sourceName, Path path, String testInput, String expectedOutput) {
+        protected TestCase(Class<?> testClass, String baseName, String sourceName, Path path, String testInput, String expectedOutput, Map<String, String> options) {
             this.name = Description.createTestDescription(testClass, baseName);
             this.sourceName = sourceName;
             this.path = path;
             this.testInput = testInput;
             this.expectedOutput = expectedOutput;
+            this.options = options;
         }
     }
 
@@ -140,6 +140,11 @@ public class SLTestRunner extends ParentRunner<TestCase> {
         }
 
         String[] paths = suite.value();
+        Map<String, String> options = new HashMap<>();
+        String[] optionsList = suite.options();
+        for (int i = 0; i < optionsList.length; i += 2) {
+            options.put(optionsList[i], optionsList[i + 1]);
+        }
 
         Class<?> testCaseDirectory = c;
         if (suite.testCaseDirectory() != SLTestSuite.class) {
@@ -182,7 +187,7 @@ public class SLTestRunner extends ParentRunner<TestCase> {
                         expectedOutput = readAllLines(outputFile);
                     }
 
-                    foundCases.add(new TestCase(c, baseName, sourceName, sourceFile, testInput, expectedOutput));
+                    foundCases.add(new TestCase(c, baseName, sourceName, sourceFile, testInput, expectedOutput, options));
                 }
                 return FileVisitResult.CONTINUE;
             }
@@ -289,12 +294,20 @@ public class SLTestRunner extends ParentRunner<TestCase> {
     protected void runChild(TestCase testCase, RunNotifier notifier) {
         notifier.fireTestStarted(testCase.name);
 
-        PolyglotEngine engine = null;
+        Context context = null;
         try {
             ByteArrayOutputStream out = new ByteArrayOutputStream();
-            engine = PolyglotEngine.newBuilder().setIn(new ByteArrayInputStream(testCase.testInput.getBytes("UTF-8"))).setOut(out).build();
+            for (NodeFactory<? extends SLBuiltinNode> builtin : builtins) {
+                SLLanguage.installBuiltin(builtin);
+            }
+
+            Context.Builder builder = Context.newBuilder().allowExperimentalOptions(true).in(new ByteArrayInputStream(testCase.testInput.getBytes("UTF-8"))).out(out);
+            for (Map.Entry<String, String> e : testCase.options.entrySet()) {
+                builder.option(e.getKey(), e.getValue());
+            }
+            context = builder.build();
             PrintWriter printer = new PrintWriter(out);
-            run(engine, testCase.path, printer);
+            run(context, testCase.path, printer);
             printer.flush();
 
             String actualOutput = new String(out.toByteArray());
@@ -302,32 +315,26 @@ public class SLTestRunner extends ParentRunner<TestCase> {
         } catch (Throwable ex) {
             notifier.fireTestFailure(new Failure(testCase.name, ex));
         } finally {
-            if (engine != null) {
-                engine.dispose();
+            if (context != null) {
+                context.close();
             }
             notifier.fireTestFinished(testCase.name);
         }
     }
 
-    private static void run(PolyglotEngine engine, Path path, PrintWriter out) throws IOException {
-        SLContext context = (SLContext) engine.getLanguages().get(SLLanguage.MIME_TYPE).getGlobalObject().get();
-
-        for (NodeFactory<? extends SLBuiltinNode> builtin : builtins) {
-            context.installBuiltin(builtin);
-        }
-
+    private static void run(Context context, Path path, PrintWriter out) throws IOException {
         try {
             /* Parse the SL source file. */
-            Source source = Source.newBuilder(path.toFile()).interactive().build();
+            Source source = Source.newBuilder(SLLanguage.ID, path.toFile()).interactive(true).build();
 
             /* Call the main entry point, without any arguments. */
-            engine.eval(source);
-        } catch (UnsupportedSpecializationException ex) {
-            out.println(SLMain.formatTypeError(ex));
-        } catch (SLUndefinedNameException ex) {
-            out.println(ex.getMessage());
-        } catch (SLParseError ex) {
-            out.println(ex.getMessage());
+            context.eval(source);
+        } catch (PolyglotException ex) {
+            if (!ex.isInternalError()) {
+                out.println(ex.getMessage());
+            } else {
+                throw ex;
+            }
         }
     }
 

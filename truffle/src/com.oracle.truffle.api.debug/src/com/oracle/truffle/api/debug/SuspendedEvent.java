@@ -1,45 +1,64 @@
 /*
- * Copyright (c) 2015, 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
- * This code is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.  Oracle designates this
- * particular file as subject to the "Classpath" exception as provided
- * by Oracle in the LICENSE file that accompanied this code.
+ * The Universal Permissive License (UPL), Version 1.0
  *
- * This code is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
- * version 2 for more details (a copy is included in the LICENSE file that
- * accompanied this code).
+ * Subject to the condition set forth below, permission is hereby granted to any
+ * person obtaining a copy of this software, associated documentation and/or
+ * data (collectively the "Software"), free of charge and under any and all
+ * copyright rights in the Software, and any and all patent rights owned or
+ * freely licensable by each licensor hereunder covering either (i) the
+ * unmodified Software as contributed to or provided by such licensor, or (ii)
+ * the Larger Works (as defined below), to deal in both
  *
- * You should have received a copy of the GNU General Public License version
- * 2 along with this work; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
+ * (a) the Software, and
  *
- * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
- * or visit www.oracle.com if you need additional information or have any
- * questions.
+ * (b) any piece of software and/or hardware listed in the lrgrwrks.txt file if
+ * one is included with the Software each a "Larger Work" to which the Software
+ * is contributed by such licensors),
+ *
+ * without restriction, including without limitation the rights to copy, create
+ * derivative works of, display, perform, and distribute the Software and make,
+ * use, sell, offer for sale, import, export, have made, and have sold the
+ * Software and the Larger Work(s), and to sublicense the foregoing rights on
+ * either these or other terms.
+ *
+ * This license is subject to the following condition:
+ *
+ * The above copyright notice and either this complete permission notice or at a
+ * minimum a reference to the UPL must be included in all copies or substantial
+ * portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
  */
 package com.oracle.truffle.api.debug;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import com.oracle.truffle.api.CallTarget;
 import com.oracle.truffle.api.RootCallTarget;
 import com.oracle.truffle.api.Truffle;
-import com.oracle.truffle.api.debug.DebuggerSession.SteppingLocation;
+import com.oracle.truffle.api.debug.DebuggerNode.InputValuesProvider;
 import com.oracle.truffle.api.frame.FrameInstance;
 import com.oracle.truffle.api.frame.FrameInstanceVisitor;
 import com.oracle.truffle.api.frame.MaterializedFrame;
-import com.oracle.truffle.api.instrumentation.EventContext;
+import com.oracle.truffle.api.instrumentation.InstrumentableNode;
 import com.oracle.truffle.api.instrumentation.Instrumenter;
-import com.oracle.truffle.api.instrumentation.StandardTags.StatementTag;
+import com.oracle.truffle.api.instrumentation.StandardTags.RootTag;
+import com.oracle.truffle.api.nodes.Node;
 import com.oracle.truffle.api.nodes.RootNode;
 import com.oracle.truffle.api.source.SourceSection;
 
@@ -80,7 +99,7 @@ import com.oracle.truffle.api.source.SourceSection;
  * </li>
  *
  * <li>Method {@link #getReturnValue()} describes a local result when the thread is suspended just
- * {@link #isHaltedBefore() after} a frame.</li>
+ * {@link SuspendAnchor#AFTER after} the code source section.</li>
  * </ul>
  * </p>
  * <h4>Next debugging action</h4>
@@ -104,15 +123,18 @@ import com.oracle.truffle.api.source.SourceSection;
 public final class SuspendedEvent {
 
     private final SourceSection sourceSection;
-    private final SteppingLocation location;
+    private final SuspendAnchor suspendAnchor;
 
     private final Thread thread;
 
     private DebuggerSession session;
-    private EventContext context;
+    private SuspendedContext context;
     private MaterializedFrame materializedFrame;
+    private InsertableNode insertableNode;
     private List<Breakpoint> breakpoints;
-    private Object returnValue;
+    private InputValuesProvider inputValuesProvider;
+    private volatile Object returnValue;
+    private DebugException exception;
 
     private volatile boolean disposed;
     private volatile SteppingStrategy nextStrategy;
@@ -120,13 +142,17 @@ public final class SuspendedEvent {
     private final Map<Breakpoint, Throwable> conditionFailures;
     private DebugStackFrameIterable cachedFrames;
 
-    SuspendedEvent(DebuggerSession session, Thread thread, EventContext context, MaterializedFrame frame, SteppingLocation location, Object returnValue,
+    SuspendedEvent(DebuggerSession session, Thread thread, SuspendedContext context, MaterializedFrame frame, SuspendAnchor suspendAnchor,
+                    InsertableNode insertableNode, InputValuesProvider inputValuesProvider, Object returnValue, DebugException exception,
                     List<Breakpoint> breakpoints, Map<Breakpoint, Throwable> conditionFailures) {
         this.session = session;
         this.context = context;
-        this.location = location;
+        this.suspendAnchor = suspendAnchor;
         this.materializedFrame = frame;
+        this.insertableNode = insertableNode;
+        this.inputValuesProvider = inputValuesProvider;
         this.returnValue = returnValue;
+        this.exception = exception;
         this.conditionFailures = conditionFailures;
         this.breakpoints = breakpoints == null ? Collections.<Breakpoint> emptyList() : Collections.<Breakpoint> unmodifiableList(breakpoints);
         this.thread = thread;
@@ -141,12 +167,15 @@ public final class SuspendedEvent {
         this.disposed = true;
 
         // cleanup data for potential memory leaks
+        this.inputValuesProvider = null;
         this.returnValue = null;
+        this.exception = null;
         this.breakpoints = null;
         this.materializedFrame = null;
         this.cachedFrames = null;
         this.session = null;
         this.context = null;
+        this.insertableNode = null;
     }
 
     void verifyValidState(boolean allowDifferentThread) {
@@ -197,12 +226,12 @@ public final class SuspendedEvent {
         return thread;
     }
 
-    EventContext getContext() {
+    SuspendedContext getContext() {
         return context;
     }
 
-    SteppingLocation getLocation() {
-        return location;
+    InsertableNode getInsertableNode() {
+        return insertableNode;
     }
 
     /**
@@ -215,20 +244,29 @@ public final class SuspendedEvent {
      */
     public SourceSection getSourceSection() {
         verifyValidState(true);
-        return sourceSection;
+        return session.resolveSection(sourceSection);
     }
 
     /**
-     * Returns <code>true</code> if the execution is suspended before executing a guest language
-     * source location. Returns <code>false</code> if it was suspended after.
-     * <p>
-     * This method is thread-safe..
+     * Returns where, within the guest language {@link #getSourceSection() source section}, the
+     * suspended position is.
      *
-     * @since 0.14
+     * @since 0.32
      */
-    public boolean isHaltedBefore() {
+    public SuspendAnchor getSuspendAnchor() {
         verifyValidState(true);
-        return location == SteppingLocation.BEFORE_STATEMENT;
+        return suspendAnchor;
+    }
+
+    /**
+     * Returns <code>true</code> if the underlying guest language source location is denoted as the
+     * source element.
+     *
+     * @param sourceElement the source element to check, must not be <code>null</code>.
+     * @since 0.33
+     */
+    public boolean hasSourceElement(SourceElement sourceElement) {
+        return context.hasTag(sourceElement.getTag());
     }
 
     /**
@@ -242,11 +280,37 @@ public final class SuspendedEvent {
     }
 
     /**
+     * Returns the input values of the current source element gathered from return values of it's
+     * executed children. The input values are available only during stepping through the source
+     * elements hierarchy and only on {@link SuspendAnchor#AFTER AFTER} {@link #getSuspendAnchor()
+     * suspend anchor}. There can be <code>null</code> values in the returned array for children we
+     * did not intercept return values from.
+     *
+     * @return the array of input values, or <code>null</code> when no input is available.
+     * @since 0.33
+     */
+    public DebugValue[] getInputValues() {
+        if (inputValuesProvider == null) {
+            return null;
+        }
+        Object[] inputValues = inputValuesProvider.getDebugInputValues(materializedFrame);
+        int n = inputValues.length;
+        DebugValue[] values = new DebugValue[n];
+        for (int i = 0; i < n; i++) {
+            if (inputValues[i] != null) {
+                values[i] = getTopStackFrame().wrapHeapValue(inputValues[i]);
+            } else {
+                values[i] = null;
+            }
+        }
+        return values;
+    }
+
+    /**
      * Returns the return value of the currently executed source location. Returns <code>null</code>
-     * if the execution is suspended {@link #isHaltedBefore() before} a guest language location. The
-     * returned value is <code>null</code> if an exception occurred during execution of the
-     * instrumented statement. The debug value remains valid event if the current execution was
-     * suspend.
+     * if the execution is suspended {@link SuspendAnchor#BEFORE before} a guest language location.
+     * The returned value is <code>null</code> if an exception occurred during execution of the
+     * instrumented source element, the exception is provided by {@link #getException()}.
      * <p>
      * This method is not thread-safe and will throw an {@link IllegalStateException} if called on
      * another thread than it was created with.
@@ -254,11 +318,44 @@ public final class SuspendedEvent {
      * @since 0.17
      */
     public DebugValue getReturnValue() {
-        return getTopStackFrame().wrapHeapValue(returnValue);
+        verifyValidState(false);
+        Object ret = returnValue;
+        if (ret == null) {
+            return null;
+        }
+        return getTopStackFrame().wrapHeapValue(ret);
     }
 
-    // TODO CHumer: we also want to provide access to guest language errors. The API for that is not
-    // yet ready.
+    Object getReturnObject() {
+        return returnValue;
+    }
+
+    /**
+     * Change the return value. When there is a {@link #getReturnValue() return value} at the
+     * current location, this method modifies the return value to a new one.
+     *
+     * @param newValue the new return value, can not be <code>null</code>
+     * @throws IllegalStateException when {@link #getReturnValue()} returns <code>null</code>
+     * @since 19.0
+     */
+    public void setReturnValue(DebugValue newValue) {
+        verifyValidState(false);
+        if (returnValue == null) {
+            throw new IllegalStateException("Can not set return value when there is no current return value.");
+        }
+        this.returnValue = newValue.get();
+    }
+
+    /**
+     * Returns the debugger representation of a guest language exception that caused this suspended
+     * event (via an exception breakpoint, for instance). Returns <code>null</code> when no
+     * exception occurred.
+     *
+     * @since 19.0
+     */
+    public DebugException getException() {
+        return exception;
+    }
 
     MaterializedFrame getMaterializedFrame() {
         return materializedFrame;
@@ -335,13 +432,13 @@ public final class SuspendedEvent {
         return cachedFrames;
     }
 
-    private static boolean isEvalRootStackFrame(SuspendedEvent event, FrameInstance instance) {
+    static boolean isEvalRootStackFrame(DebuggerSession session, FrameInstance instance) {
         CallTarget target = instance.getCallTarget();
         RootNode root = null;
         if (target instanceof RootCallTarget) {
             root = ((RootCallTarget) target).getRootNode();
         }
-        if (root != null && event.getSession().getDebugger().getEnv().isEngineRoot(root)) {
+        if (root != null && session.getDebugger().getEnv().isEngineRoot(root)) {
             return true;
         }
         return false;
@@ -368,39 +465,11 @@ public final class SuspendedEvent {
     }
 
     /**
-     * Prepare to execute in <strong>StepInto</strong> mode when guest language program execution
-     * resumes. In this mode:
-     * <ul>
-     * <li>Execution, when resumed, continues until either:
-     * <ol>
-     * <li>execution arrives at at the <em>nth</em> node (specified by {@code stepCount}) with the
-     * tag {@link StatementTag}, <strong>or</strong></li>
-     * <li>execution arrives at a {@link Breakpoint}, <strong>or</strong></li>
-     * <li>execution completes.</li>
-     * </ol>
-     * </li>
-     * <li>The mode persists only until either:
-     * <ol>
-     * <li>program execution resumes and then halts, at which time the mode reverts to
-     * {@linkplain #prepareContinue() Continue}, <strong>or</strong></li>
-     * <li>execution completes, at which time the mode reverts to {@linkplain #prepareContinue()
-     * Continue}.</li>
-     * </ol>
-     * </li>
-     * <li>A breakpoint set at a location where execution would halt is treated specially to avoid a
-     * "double halt" during stepping:
-     * <ul>
-     * <li>execution halts only <em>once</em> at the location;</li>
-     * <li>the halt counts as a breakpoint {@link Breakpoint#getHitCount() hit};</li>
-     * <li>the mode reverts to {@linkplain #prepareContinue() Continue}, as if there were no
-     * breakpoint; and</li>
-     * <li>this special treatment applies only for breakpoints created <strong>before</strong> the
-     * mode is set.</li>
-     * </ul>
-     * </ul>
-     * <p>
-     * This method is thread-safe and the prepared StepInto mode is appended to any other previously
-     * prepared modes.
+     * Prepare to execute in <strong>step into</strong> mode when guest language program execution
+     * resumes. See the description of {@link #prepareStepInto(StepConfig)} for details, calling
+     * this is identical to
+     * <code>{@link #prepareStepInto(StepConfig) prepareStepInto}.({@link StepConfig StepConfig}.{@link StepConfig#newBuilder() newBuilder}().{@link StepConfig.Builder#count(int) count}(stepCount).{@link StepConfig.Builder#build() build}())</code>
+     * .
      *
      * @param stepCount the number of times to perform StepInto before halting
      * @return this event instance for an easy concatenation of method calls
@@ -410,69 +479,15 @@ public final class SuspendedEvent {
      * @since 0.9
      */
     public SuspendedEvent prepareStepInto(int stepCount) {
-        if (stepCount <= 0) {
-            throw new IllegalArgumentException("stepCount must be > 0");
-        }
-        setNextStrategy(SteppingStrategy.createStepInto(stepCount));
-        return this;
+        return prepareStepInto(StepConfig.newBuilder().count(stepCount).build());
     }
 
     /**
-     * Prepare to execute in <strong>StepOut</strong> mode when guest language program execution
-     * resumes. In this mode:
-     * <ul>
-     * <li>Execution, when resumed, continues until either:
-     * <ol>
-     * <li>execution arrives at the nearest enclosing call site on the stack, <strong>or</strong>
-     * </li>
-     * <li>execution arrives at a {@link Breakpoint}, <strong>or</strong></li>
-     * <li>execution completes.</li>
-     * </ol>
-     * </li>
-     * <li>The mode persists only until either:
-     * <ol>
-     * <li>program execution resumes and then halts, at which time the mode reverts to
-     * {@linkplain #prepareContinue() Continue}, <strong>or</strong></li>
-     * <li>execution completes, at which time the mode reverts to {@linkplain #prepareContinue()
-     * Continue}.</li>
-     * </ol>
-     * </li>
-     * </ul>
-     * <p>
-     * This method is thread-safe.
-     *
-     * @since 0.9
-     * @deprecated Use {@link #prepareStepOut(int)} instead.
-     */
-    @Deprecated
-    public void prepareStepOut() {
-        prepareStepOut(1);
-    }
-
-    /**
-     * Prepare to execute in <strong>StepOut</strong> mode when guest language program execution
-     * resumes. In this mode:
-     * <ul>
-     * <li>Execution, when resumed, continues until either:
-     * <ol>
-     * <li>execution arrives at the <em>nth</em> enclosing call site on the stack (specified by
-     * {@code stepCount}), <strong>or</strong></li>
-     * <li>execution arrives at a {@link Breakpoint}, <strong>or</strong></li>
-     * <li>execution completes.</li>
-     * </ol>
-     * </li>
-     * <li>The mode persists only until either:
-     * <ol>
-     * <li>program execution resumes and then halts, at which time the mode reverts to
-     * {@linkplain #prepareContinue() Continue}, <strong>or</strong></li>
-     * <li>execution completes, at which time the mode reverts to {@linkplain #prepareContinue()
-     * Continue}.</li>
-     * </ol>
-     * </li>
-     * </ul>
-     * <p>
-     * This method is thread-safe and the prepared StepOut mode is appended to any other previously
-     * prepared modes.
+     * Prepare to execute in <strong>step out</strong> mode when guest language program execution
+     * resumes. See the description of {@link #prepareStepOut(StepConfig)} for details, calling this
+     * is identical to
+     * <code>{@link #prepareStepOut(StepConfig) prepareStepOut}.({@link StepConfig StepConfig}.{@link StepConfig#newBuilder() newBuilder}().{@link StepConfig.Builder#count(int) count}(stepCount).{@link StepConfig.Builder#build() build}())</code>
+     * .
      *
      * @param stepCount the number of times to perform StepOver before halting
      * @return this event instance for an easy concatenation of method calls
@@ -482,49 +497,17 @@ public final class SuspendedEvent {
      * @since 0.26
      */
     public SuspendedEvent prepareStepOut(int stepCount) {
-        if (stepCount <= 0) {
-            throw new IllegalArgumentException("stepCount must be > 0");
-        }
-        setNextStrategy(SteppingStrategy.createStepOut(stepCount));
-        return this;
+        return prepareStepOut(StepConfig.newBuilder().count(stepCount).build());
     }
 
     /**
-     * Prepare to execute in StepOver mode when guest language program execution resumes. In this
-     * mode:
-     * <ul>
-     * <li>Execution, when resumed, continues until either:
-     * <ol>
-     * <li>execution arrives at at the <em>nth</em> node (specified by {@code stepCount}) with the
-     * tag {@link StatementTag}, ignoring nodes nested in function/method calls, <strong>or</strong>
-     * </li>
-     * <li>execution arrives at a {@link Breakpoint}, <strong>or</strong></li>
-     * <li>execution completes.</li>
-     * </ol>
-     * </li>
-     * <li>The mode persists only until either:
-     * <ol>
-     * <li>program execution resumes and then halts, at which time the mode reverts to
-     * {@linkplain #prepareContinue() Continue}, <strong>or</strong></li>
-     * <li>execution completes, at which time the mode reverts to {@linkplain #prepareContinue()
-     * Continue}.</li>
-     * </ol>
-     * </li>
-     * <li>A breakpoint set at a location where execution would halt is treated specially to avoid a
-     * "double halt" during stepping:
-     * <ul>
-     * <li>execution halts only <em>once</em> at the location;</li>
-     * <li>the halt counts as a breakpoint {@link Breakpoint#getHitCount() hit};</li>
-     * <li>the mode reverts to {@linkplain #prepareContinue() Continue}, as if there were no
-     * breakpoint; and</li>
-     * <li>this special treatment applies only for breakpoints created <strong>before</strong> the
-     * mode is set.</li>
-     * </ul>
-     * <p>
-     * This method is thread-safe and the prepared StepOver mode is appended to any other previously
-     * prepared modes.
+     * Prepare to execute in <strong>step over</strong> mode when guest language program execution
+     * resumes. See the description of {@link #prepareStepOver(StepConfig)} for details, calling
+     * this is identical to
+     * <code>{@link #prepareStepOver(StepConfig) prepareStepOver}.({@link StepConfig StepConfig}.{@link StepConfig#newBuilder() newBuilder}().{@link StepConfig.Builder#count(int) count}(stepCount).{@link StepConfig.Builder#build() build}())</code>
+     * .
      *
-     * @param stepCount the number of times to perform StepOver before halting
+     * @param stepCount the number of times to perform step over before halting
      * @return this event instance for an easy concatenation of method calls
      * @throws IllegalArgumentException if {@code stepCount <= 0}
      * @throws IllegalStateException when {@link #prepareContinue() continue} or
@@ -532,18 +515,134 @@ public final class SuspendedEvent {
      * @since 0.9
      */
     public SuspendedEvent prepareStepOver(int stepCount) {
-        if (stepCount <= 0) {
-            throw new IllegalArgumentException("stepCount must be > 0");
-        }
-        setNextStrategy(SteppingStrategy.createStepOver(stepCount));
+        return prepareStepOver(StepConfig.newBuilder().count(stepCount).build());
+    }
+
+    /**
+     * Prepare to execute in <strong>step into</strong> mode when guest language program execution
+     * resumes. In this mode, the current thread continues until it arrives to a code location with
+     * one of the enabled {@link StepConfig.Builder#sourceElements(SourceElement...) source
+     * elements} and repeats that process {@link StepConfig.Builder#count(int) step count} times.
+     * See {@link StepConfig} for the details about the stepping behavior.
+     * <p>
+     * This mode persists until the thread resumes and then suspends, at which time the mode reverts
+     * to {@linkplain #prepareContinue() Continue}, or the thread dies.
+     * <p>
+     * A breakpoint set at a location where execution would suspend is treated specially as a single
+     * event, to avoid multiple suspensions at a single location.
+     * <p>
+     * This method is thread-safe and the prepared StepInto mode is appended to any other previously
+     * prepared modes.
+     *
+     * @param stepConfig the step configuration
+     * @return this event instance for an easy concatenation of method calls
+     * @throws IllegalStateException when {@link #prepareContinue() continue} or
+     *             {@link #prepareKill() kill} is prepared already, or when the current debugger
+     *             session has no source elements enabled for stepping.
+     * @throws IllegalArgumentException when the {@link StepConfig} contains source elements not
+     *             enabled for stepping in the current debugger session.
+     * @since 0.33
+     */
+    public SuspendedEvent prepareStepInto(StepConfig stepConfig) {
+        verifyConfig(stepConfig);
+        setNextStrategy(SteppingStrategy.createStepInto(session, stepConfig));
         return this;
+    }
+
+    /**
+     * Prepare to execute in <strong>step out</strong> mode when guest language program execution
+     * resumes. In this mode, the current thread continues until it arrives to an enclosing code
+     * location with one of the enabled {@link StepConfig.Builder#sourceElements(SourceElement...)
+     * source elements} and repeats that process {@link StepConfig.Builder#count(int) step count}
+     * times. See {@link StepConfig} for the details about the stepping behavior.
+     * <p>
+     * This mode persists until the thread resumes and then suspends, at which time the mode reverts
+     * to {@linkplain #prepareContinue() Continue}, or the thread dies.
+     * <p>
+     * A breakpoint set at a location where execution would suspend is treated specially as a single
+     * event, to avoid multiple suspensions at a single location.
+     * <p>
+     * This method is thread-safe and the prepared StepInto mode is appended to any other previously
+     * prepared modes.
+     *
+     * @param stepConfig the step configuration
+     * @return this event instance for an easy concatenation of method calls
+     * @throws IllegalStateException when {@link #prepareContinue() continue} or
+     *             {@link #prepareKill() kill} is prepared already, or when the current debugger
+     *             session has no source elements enabled for stepping.
+     * @throws IllegalArgumentException when the {@link StepConfig} contains source elements not
+     *             enabled for stepping in the current debugger session.
+     * @since 0.33
+     */
+    public SuspendedEvent prepareStepOut(StepConfig stepConfig) {
+        verifyConfig(stepConfig);
+        setNextStrategy(SteppingStrategy.createStepOut(session, stepConfig));
+        return this;
+    }
+
+    /**
+     * Prepare to execute in <strong>step out</strong> mode when guest language program execution
+     * resumes. In this mode, the current thread continues until it arrives to a code location with
+     * one of the enabled {@link StepConfig.Builder#sourceElements(SourceElement...) source
+     * elements}, ignoring any nested ones, and repeats that process
+     * {@link StepConfig.Builder#count(int) step count} times. See {@link StepConfig} for the
+     * details about the stepping behavior.
+     * <p>
+     * This mode persists until the thread resumes and then suspends, at which time the mode reverts
+     * to {@linkplain #prepareContinue() Continue}, or the thread dies.
+     * <p>
+     * A breakpoint set at a location where execution would suspend is treated specially as a single
+     * event, to avoid multiple suspensions at a single location.
+     * <p>
+     * This method is thread-safe and the prepared StepInto mode is appended to any other previously
+     * prepared modes.
+     *
+     * @param stepConfig the step configuration
+     * @return this event instance for an easy concatenation of method calls
+     * @throws IllegalStateException when {@link #prepareContinue() continue} or
+     *             {@link #prepareKill() kill} is prepared already, or when the current debugger
+     *             session has no source elements enabled for stepping.
+     * @throws IllegalArgumentException when the {@link StepConfig} contains source elements not
+     *             enabled for stepping in the current debugger session.
+     * @since 0.33
+     */
+    public SuspendedEvent prepareStepOver(StepConfig stepConfig) {
+        verifyConfig(stepConfig);
+        setNextStrategy(SteppingStrategy.createStepOver(session, stepConfig));
+        return this;
+    }
+
+    private void verifyConfig(StepConfig stepConfig) {
+        Set<SourceElement> sessionElements = session.getSourceElements();
+        if (sessionElements.isEmpty()) {
+            throw new IllegalStateException("No source elements are enabled for stepping in the debugger session.");
+        }
+        Set<SourceElement> stepElements = stepConfig.getSourceElements();
+        if (stepElements != null && !sessionElements.containsAll(stepElements)) {
+            Set<SourceElement> extraElements = new HashSet<>(stepElements);
+            extraElements.removeAll(sessionElements);
+            throw new IllegalArgumentException("The step source elements " + extraElements + " are not enabled in the session.");
+        }
+    }
+
+    /**
+     * Prepare to unwind a frame. This frame and all frames above it are unwound off the execution
+     * stack. The frame needs to be on the {@link #getStackFrames() execution stack of this event}.
+     *
+     * @param frame the frame to unwind
+     * @throws IllegalArgumentException when the frame is not on the execution stack of this event
+     * @since 0.31
+     */
+    public void prepareUnwindFrame(DebugStackFrame frame) throws IllegalArgumentException {
+        if (frame.event != this) {
+            throw new IllegalArgumentException("The stack frame is not in the scope of this event.");
+        }
+        setNextStrategy(SteppingStrategy.createUnwind(frame.getDepth()));
     }
 
     /**
      * Prepare to terminate the suspended execution represented by this event. One use-case for this
      * method is to shield an execution of an unknown code with a timeout:
-     *
-     * {@link com.oracle.truffle.tck.ExecWithTimeOut#tckSnippets}
      *
      * <p>
      * This method is thread-safe and the prepared termination is appended to any other previously
@@ -572,7 +671,7 @@ public final class SuspendedEvent {
 
         private DebugStackFrame getTopStackFrame() {
             if (topStackFrame == null) {
-                topStackFrame = new DebugStackFrame(SuspendedEvent.this, null);
+                topStackFrame = new DebugStackFrame(SuspendedEvent.this, null, 0);
             }
             return topStackFrame;
         }
@@ -581,19 +680,22 @@ public final class SuspendedEvent {
             if (otherFrames == null) {
                 final List<DebugStackFrame> frameInstances = new ArrayList<>();
                 Truffle.getRuntime().iterateFrames(new FrameInstanceVisitor<FrameInstance>() {
-                    private boolean first = true;
+                    private int depth = -context.getStackDepth() - 1 + getTopFrameIndex();
 
                     @Override
                     public FrameInstance visitFrame(FrameInstance frameInstance) {
-                        if (isEvalRootStackFrame(SuspendedEvent.this, frameInstance)) {
+                        if (isEvalRootStackFrame(session, frameInstance)) {
                             // we stop at eval root stack frames
                             return frameInstance;
                         }
-                        if (first) {
-                            first = false;
+                        Node callNode = frameInstance.getCallNode();
+                        if (callNode != null && !hasRootTag(callNode)) {
                             return null;
                         }
-                        frameInstances.add(new DebugStackFrame(SuspendedEvent.this, frameInstance));
+                        if (++depth <= 0) {
+                            return null;
+                        }
+                        frameInstances.add(new DebugStackFrame(SuspendedEvent.this, frameInstance, depth));
                         return null;
                     }
                 });
@@ -602,10 +704,32 @@ public final class SuspendedEvent {
             return otherFrames;
         }
 
+        private boolean hasRootTag(Node callNode) {
+            Node node = callNode;
+            do {
+                if (node instanceof InstrumentableNode && ((InstrumentableNode) node).hasTag(RootTag.class)) {
+                    return true;
+                }
+                node = node.getParent();
+            } while (node != null);
+            return false;
+        }
+
+        private int getTopFrameIndex() {
+            if (context.getStackDepth() == 0) {
+                return 0;
+            }
+            if (hasRootTag(context.getInstrumentedNode())) {
+                return 0;
+            } else {
+                return 1; // Skip synthetic frame
+            }
+        }
+
         public Iterator<DebugStackFrame> iterator() {
             return new Iterator<DebugStackFrame>() {
 
-                private int index;
+                private int index = getTopFrameIndex();
                 private Iterator<DebugStackFrame> otherIterator;
 
                 public boolean hasNext() {

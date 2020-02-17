@@ -1,63 +1,92 @@
 /*
- * Copyright (c) 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2017, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
- * This code is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.  Oracle designates this
- * particular file as subject to the "Classpath" exception as provided
- * by Oracle in the LICENSE file that accompanied this code.
+ * The Universal Permissive License (UPL), Version 1.0
  *
- * This code is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
- * version 2 for more details (a copy is included in the LICENSE file that
- * accompanied this code).
+ * Subject to the condition set forth below, permission is hereby granted to any
+ * person obtaining a copy of this software, associated documentation and/or
+ * data (collectively the "Software"), free of charge and under any and all
+ * copyright rights in the Software, and any and all patent rights owned or
+ * freely licensable by each licensor hereunder covering either (i) the
+ * unmodified Software as contributed to or provided by such licensor, or (ii)
+ * the Larger Works (as defined below), to deal in both
  *
- * You should have received a copy of the GNU General Public License version
- * 2 along with this work; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
+ * (a) the Software, and
  *
- * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
- * or visit www.oracle.com if you need additional information or have any
- * questions.
+ * (b) any piece of software and/or hardware listed in the lrgrwrks.txt file if
+ * one is included with the Software each a "Larger Work" to which the Software
+ * is contributed by such licensors),
+ *
+ * without restriction, including without limitation the rights to copy, create
+ * derivative works of, display, perform, and distribute the Software and make,
+ * use, sell, offer for sale, import, export, have made, and have sold the
+ * Software and the Larger Work(s), and to sublicense the foregoing rights on
+ * either these or other terms.
+ *
+ * This license is subject to the following condition:
+ *
+ * The above copyright notice and either this complete permission notice or at a
+ * minimum a reference to the UPL must be included in all copies or substantial
+ * portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
  */
 package com.oracle.truffle.nfi.test.parser;
 
-import com.oracle.truffle.nfi.types.NativeLibraryDescriptor;
-import com.oracle.truffle.nfi.types.Parser;
+import com.oracle.truffle.api.CallTarget;
+import com.oracle.truffle.api.source.Source;
+import com.oracle.truffle.nfi.spi.types.NativeLibraryDescriptor;
+import com.oracle.truffle.nfi.test.parser.backend.TestLibrary;
+import com.oracle.truffle.tck.TruffleRunner.RunWithPolyglotRule;
 import org.junit.Assert;
+import org.junit.ClassRule;
 import org.junit.Test;
 
 public class ParseLibraryDescriptorTest {
 
+    @ClassRule public static RunWithPolyglotRule runWithPolyglot = new RunWithPolyglotRule();
+
+    private static NativeLibraryDescriptor parseLibraryDescriptor(String descriptor) {
+        Source source = Source.newBuilder("nfi", String.format("with test %s", descriptor), "ParseLibraryDescriptorTest").internal(true).build();
+        CallTarget target = runWithPolyglot.getTruffleTestEnv().parseInternal(source);
+        TestLibrary library = (TestLibrary) target.call();
+        return library.descriptor;
+    }
+
     @Test
     public void parseDefault() {
-        NativeLibraryDescriptor def = Parser.parseLibraryDescriptor("default");
+        NativeLibraryDescriptor def = parseLibraryDescriptor("default");
         Assert.assertTrue("isDefaultLibrary", def.isDefaultLibrary());
     }
 
     @Test
     public void parseFileStringSingle() {
-        NativeLibraryDescriptor test = Parser.parseLibraryDescriptor("load 'test filename'");
+        NativeLibraryDescriptor test = parseLibraryDescriptor("load 'test filename'");
         Assert.assertEquals("file name", "test filename", test.getFilename());
     }
 
     @Test
     public void parseFileStringDouble() {
-        NativeLibraryDescriptor test = Parser.parseLibraryDescriptor("load \"test filename\"");
+        NativeLibraryDescriptor test = parseLibraryDescriptor("load \"test filename\"");
         Assert.assertEquals("file name", "test filename", test.getFilename());
     }
 
     @Test
     public void parseFileIdent() {
-        NativeLibraryDescriptor test = Parser.parseLibraryDescriptor("load /test/path/file.so");
+        NativeLibraryDescriptor test = parseLibraryDescriptor("load /test/path/file.so");
         Assert.assertEquals("file name", "/test/path/file.so", test.getFilename());
     }
 
     @Test
     public void parseWithOneFlag() {
-        NativeLibraryDescriptor test = Parser.parseLibraryDescriptor("load(RTLD_NOW) testfile");
+        NativeLibraryDescriptor test = parseLibraryDescriptor("load(RTLD_NOW) testfile");
         Assert.assertEquals("file name", "testfile", test.getFilename());
         Assert.assertEquals("flag count", 1, test.getFlags().size());
         Assert.assertEquals("RTLD_NOW", test.getFlags().get(0));
@@ -65,7 +94,7 @@ public class ParseLibraryDescriptorTest {
 
     @Test
     public void parseWithTwoFlags() {
-        NativeLibraryDescriptor test = Parser.parseLibraryDescriptor("load(RTLD_NOW | RTLD_GLOBAL) testfile");
+        NativeLibraryDescriptor test = parseLibraryDescriptor("load(RTLD_NOW | RTLD_GLOBAL) testfile");
         Assert.assertEquals("file name", "testfile", test.getFilename());
         Assert.assertEquals("flag count", 2, test.getFlags().size());
         Assert.assertEquals("RTLD_NOW", test.getFlags().get(0));
@@ -74,31 +103,31 @@ public class ParseLibraryDescriptorTest {
 
     @Test(expected = IllegalArgumentException.class)
     public void parseUnknownCommand() {
-        Parser.parseLibraryDescriptor("_unknown_command");
+        parseLibraryDescriptor("_unknown_command");
     }
 
     @Test(expected = IllegalArgumentException.class)
     public void parseUnknownToken() {
-        Parser.parseLibraryDescriptor("%");
+        parseLibraryDescriptor("%");
     }
 
     @Test(expected = IllegalArgumentException.class)
     public void parseEmpty() {
-        Parser.parseLibraryDescriptor("");
+        parseLibraryDescriptor("");
     }
 
     @Test(expected = IllegalArgumentException.class)
     public void parseEmptyFlags() {
-        Parser.parseLibraryDescriptor("load() testfile");
+        parseLibraryDescriptor("load() testfile");
     }
 
     @Test(expected = IllegalArgumentException.class)
     public void parseFlagsError() {
-        Parser.parseLibraryDescriptor("load(RTLD_NOW .) testfile");
+        parseLibraryDescriptor("load(RTLD_NOW .) testfile");
     }
 
     @Test(expected = IllegalArgumentException.class)
     public void parseStringError() {
-        Parser.parseLibraryDescriptor("load 'testfile");
+        parseLibraryDescriptor("load 'testfile");
     }
 }

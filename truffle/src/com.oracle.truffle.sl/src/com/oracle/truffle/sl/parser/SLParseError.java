@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2017, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * The Universal Permissive License (UPL), Version 1.0
@@ -53,7 +53,6 @@ public class SLParseError extends RuntimeException implements TruffleException {
     private final int line;
     private final int column;
     private final int length;
-    private volatile Node node;
 
     public SLParseError(Source source, int line, int column, int length, String message) {
         super(message);
@@ -64,18 +63,13 @@ public class SLParseError extends RuntimeException implements TruffleException {
     }
 
     @Override
+    public SourceSection getSourceLocation() {
+        return source.createSection(line, column, length);
+    }
+
+    @Override
     public Node getLocation() {
-        Node n = node;
-        if (n == null) {
-            n = new Node() {
-                @Override
-                public SourceSection getSourceSection() {
-                    return source.createSection(line, column, length);
-                }
-            };
-            node = n;
-        }
-        return n;
+        return null;
     }
 
     @Override

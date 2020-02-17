@@ -1,31 +1,53 @@
 /*
- * Copyright (c) 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
- * This code is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * The Universal Permissive License (UPL), Version 1.0
  *
- * This code is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
- * version 2 for more details (a copy is included in the LICENSE file that
- * accompanied this code).
+ * Subject to the condition set forth below, permission is hereby granted to any
+ * person obtaining a copy of this software, associated documentation and/or
+ * data (collectively the "Software"), free of charge and under any and all
+ * copyright rights in the Software, and any and all patent rights owned or
+ * freely licensable by each licensor hereunder covering either (i) the
+ * unmodified Software as contributed to or provided by such licensor, or (ii)
+ * the Larger Works (as defined below), to deal in both
  *
- * You should have received a copy of the GNU General Public License version
- * 2 along with this work; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
+ * (a) the Software, and
  *
- * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
- * or visit www.oracle.com if you need additional information or have any
- * questions.
+ * (b) any piece of software and/or hardware listed in the lrgrwrks.txt file if
+ * one is included with the Software each a "Larger Work" to which the Software
+ * is contributed by such licensors),
+ *
+ * without restriction, including without limitation the rights to copy, create
+ * derivative works of, display, perform, and distribute the Software and make,
+ * use, sell, offer for sale, import, export, have made, and have sold the
+ * Software and the Larger Work(s), and to sublicense the foregoing rights on
+ * either these or other terms.
+ *
+ * This license is subject to the following condition:
+ *
+ * The above copyright notice and either this complete permission notice or at a
+ * minimum a reference to the UPL must be included in all copies or substantial
+ * portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
  */
 package com.oracle.truffle.dsl.processor.model;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import javax.lang.model.element.ExecutableElement;
@@ -40,7 +62,6 @@ import com.oracle.truffle.dsl.processor.model.NodeChildData.Cardinality;
 public class NodeData extends Template implements Comparable<NodeData> {
 
     private final String nodeId;
-    private final String shortName;
     private final List<NodeData> enclosingNodes = new ArrayList<>();
     private NodeData declaringNode;
 
@@ -52,7 +73,6 @@ public class NodeData extends Template implements Comparable<NodeData> {
     private ParameterSpec instanceParameterSpec;
 
     private final List<SpecializationData> specializations = new ArrayList<>();
-    private final List<ShortCircuitData> shortCircuits = new ArrayList<>();
     private final List<CreateCastData> casts = new ArrayList<>();
     private final List<ExecutableTypeData> executableTypes = new ArrayList<>();
 
@@ -62,21 +82,70 @@ public class NodeData extends Template implements Comparable<NodeData> {
     private TypeMirror frameType;
     private boolean reflectable;
 
-    public NodeData(ProcessorContext context, TypeElement type, String shortName, TypeSystemData typeSystem, boolean generateFactory) {
+    private boolean reportPolymorphism;
+    private boolean isUncachable;
+    private boolean isNodeBound;
+    private boolean generateUncached;
+    private Set<String> allowedCheckedExceptions;
+    private Map<CacheExpression, String> sharedCaches = Collections.emptyMap();
+
+    public NodeData(ProcessorContext context, TypeElement type, TypeSystemData typeSystem, boolean generateFactory, boolean generateUncached) {
         super(context, type, null);
         this.nodeId = ElementUtils.getSimpleName(type);
-        this.shortName = shortName;
         this.typeSystem = typeSystem;
         this.fields = new ArrayList<>();
         this.children = new ArrayList<>();
         this.childExecutions = new ArrayList<>();
-        this.thisExecution = new NodeExecutionData(new NodeChildData(null, null, "this", getNodeType(), getNodeType(), null, Cardinality.ONE), -1, -1, false);
+        this.thisExecution = new NodeExecutionData(new NodeChildData(null, null, "this", getNodeType(), getNodeType(), null, Cardinality.ONE, null), -1, -1);
         this.thisExecution.getChild().setNode(this);
         this.generateFactory = generateFactory;
+        this.generateUncached = generateUncached;
+    }
+
+    public Map<CacheExpression, String> getSharedCaches() {
+        return sharedCaches;
+    }
+
+    public void setSharedCaches(Map<CacheExpression, String> sharedCaches) {
+        this.sharedCaches = sharedCaches;
     }
 
     public NodeData(ProcessorContext context, TypeElement type) {
-        this(context, type, null, null, false);
+        this(context, type, null, false, false);
+    }
+
+    public void setNodeBound(boolean isNodeBound) {
+        this.isNodeBound = isNodeBound;
+    }
+
+    /**
+     * Returns true if the node instance is bound by any DSL element.
+     */
+    public boolean isNodeBound() {
+        return isNodeBound;
+    }
+
+    public void setUncachable(boolean uncached) {
+        this.isUncachable = uncached;
+    }
+
+    public void setGenerateUncached(boolean generateUncached) {
+        this.generateUncached = generateUncached;
+    }
+
+    /**
+     * Returns true if the generation of an uncached version was requested.
+     */
+    public boolean isGenerateUncached() {
+        return generateUncached;
+    }
+
+    /**
+     * Returns true if the node is uncachable. It is uncachable if it does not require any state to
+     * be implemented. For example inline caches are uncachable.
+     */
+    public boolean isUncachable() {
+        return isUncachable;
     }
 
     public boolean isGenerateFactory() {
@@ -121,7 +190,7 @@ public class NodeData extends Template implements Comparable<NodeData> {
     }
 
     public Set<TypeMirror> findSpecializedTypes(NodeExecutionData execution) {
-        Set<TypeMirror> types = new HashSet<>();
+        Set<TypeMirror> foundTypes = new HashSet<>();
         for (SpecializationData specialization : getSpecializations()) {
             if (!specialization.isSpecialized()) {
                 continue;
@@ -132,21 +201,21 @@ public class NodeData extends Template implements Comparable<NodeData> {
                 if (type == null) {
                     throw new AssertionError();
                 }
-                types.add(type);
+                foundTypes.add(type);
             }
         }
-        return types;
+        return foundTypes;
     }
 
     public Collection<TypeMirror> findSpecializedReturnTypes() {
-        Set<TypeMirror> types = new HashSet<>();
+        Set<TypeMirror> foundTypes = new HashSet<>();
         for (SpecializationData specialization : getSpecializations()) {
             if (!specialization.isSpecialized()) {
                 continue;
             }
-            types.add(specialization.getReturnType().getType());
+            foundTypes.add(specialization.getReturnType().getType());
         }
-        return types;
+        return foundTypes;
     }
 
     public int getExecutionCount() {
@@ -154,14 +223,7 @@ public class NodeData extends Template implements Comparable<NodeData> {
     }
 
     public int getSignatureSize() {
-        int count = 0;
-        for (NodeExecutionData execution : getChildExecutions()) {
-            if (execution.isShortCircuit()) {
-                count++;
-            }
-            count++;
-        }
-        return count;
+        return getChildExecutions().size();
     }
 
     public boolean isFrameUsedByAnyGuard() {
@@ -169,18 +231,9 @@ public class NodeData extends Template implements Comparable<NodeData> {
             if (!specialization.isReachable()) {
                 continue;
             }
-            Parameter frame = specialization.getFrame();
-            if (frame != null) {
-                for (GuardExpression guard : specialization.getGuards()) {
-                    if (guard.getExpression().findBoundVariableElements().contains(frame.getVariableElement())) {
-                        return true;
-                    }
-                }
-                for (CacheExpression cache : specialization.getCaches()) {
-                    if (cache.getExpression().findBoundVariableElements().contains(frame.getVariableElement())) {
-                        return true;
-                    }
-                }
+
+            if (specialization.isFrameUsedByGuard()) {
+                return true;
             }
         }
         return false;
@@ -188,10 +241,6 @@ public class NodeData extends Template implements Comparable<NodeData> {
 
     public List<CreateCastData> getCasts() {
         return casts;
-    }
-
-    public String getShortName() {
-        return shortName;
     }
 
     public List<NodeFieldData> getFields() {
@@ -216,9 +265,6 @@ public class NodeData extends Template implements Comparable<NodeData> {
         }
         if (executableTypes != null) {
             containerChildren.addAll(getExecutableTypes());
-        }
-        if (shortCircuits != null) {
-            containerChildren.addAll(shortCircuits);
         }
         if (children != null) {
             containerChildren.addAll(children);
@@ -291,7 +337,7 @@ public class NodeData extends Template implements Comparable<NodeData> {
         }
 
         for (NodeExecutionData execution : childExecutions) {
-            if (execution.getName().equals(childName) && (execution.getChildIndex() == -1 || execution.getChildIndex() == index)) {
+            if (execution.getName().equals(childName) && (execution.getChildArrayIndex() == -1 || execution.getChildArrayIndex() == index)) {
                 return execution;
             }
         }
@@ -329,9 +375,6 @@ public class NodeData extends Template implements Comparable<NodeData> {
                 methods.add(execType.getMethod());
             }
         }
-        for (ShortCircuitData shortcircuit : getShortCircuits()) {
-            methods.add(shortcircuit.getMethod());
-        }
 
         if (getCasts() != null) {
             for (CreateCastData castData : getCasts()) {
@@ -343,20 +386,20 @@ public class NodeData extends Template implements Comparable<NodeData> {
     }
 
     public ExecutableTypeData findAnyGenericExecutableType(ProcessorContext context, int evaluatedCount) {
-        List<ExecutableTypeData> types = findGenericExecutableTypes(context, evaluatedCount);
-        for (ExecutableTypeData type : types) {
+        List<ExecutableTypeData> foundTypes = findGenericExecutableTypes(evaluatedCount);
+        for (ExecutableTypeData type : foundTypes) {
             if (context.isType(type.getReturnType(), Object.class)) {
                 return type;
             }
         }
 
-        for (ExecutableTypeData type : types) {
+        for (ExecutableTypeData type : foundTypes) {
             if (!context.isType(type.getReturnType(), void.class)) {
                 return type;
             }
         }
 
-        for (ExecutableTypeData type : types) {
+        for (ExecutableTypeData type : foundTypes) {
             return type;
         }
         return null;
@@ -376,14 +419,14 @@ public class NodeData extends Template implements Comparable<NodeData> {
         }
     }
 
-    public List<ExecutableTypeData> findGenericExecutableTypes(ProcessorContext context, int evaluatedCount) {
-        List<ExecutableTypeData> types = new ArrayList<>();
+    public List<ExecutableTypeData> findGenericExecutableTypes(int evaluatedCount) {
+        List<ExecutableTypeData> foundTypes = new ArrayList<>();
         for (ExecutableTypeData type : getExecutableTypes(evaluatedCount)) {
-            if (!type.hasUnexpectedValue(context)) {
-                types.add(type);
+            if (!type.hasUnexpectedValue()) {
+                foundTypes.add(type);
             }
         }
-        return types;
+        return foundTypes;
     }
 
     public ExecutableTypeData findExecutableType(TypeMirror primitiveType, int evaluatedCount) {
@@ -396,15 +439,20 @@ public class NodeData extends Template implements Comparable<NodeData> {
     }
 
     public boolean needsRewrites(ProcessorContext context) {
-        boolean needsRewrites = false;
-
+        int count = 0;
         for (SpecializationData specialization : getSpecializations()) {
-            if (specialization.hasRewrite(context)) {
-                needsRewrites = true;
-                break;
+            if (specialization.getMethod() == null) {
+                continue;
             }
+            if (count == 1) {
+                return true;
+            }
+            if (specialization.needsRewrite(context)) {
+                return true;
+            }
+            count++;
         }
-        return needsRewrites || getSpecializations().size() > 1;
+        return false;
     }
 
     public SpecializationData getPolymorphicSpecialization() {
@@ -434,7 +482,6 @@ public class NodeData extends Template implements Comparable<NodeData> {
         return null;
     }
 
-    @Override
     public TypeSystemData getTypeSystem() {
         return typeSystem;
     }
@@ -461,12 +508,12 @@ public class NodeData extends Template implements Comparable<NodeData> {
         dumpProperty(builder, indent, "casts", getCasts());
         dumpProperty(builder, indent, "messages", collectMessages());
         if (getEnclosingNodes().size() > 0) {
-            builder.append(String.format("\n%s  children = [", indent));
+            builder.append(String.format("%n%s  children = [", indent));
             for (NodeData node : getEnclosingNodes()) {
-                builder.append("\n");
+                builder.append("%n");
                 builder.append(node.dump(level + 1));
             }
-            builder.append(String.format("\n%s  ]", indent));
+            builder.append(String.format("%n%s  ]", indent));
         }
         builder.append(String.format("%s}", indent));
         return builder.toString();
@@ -476,11 +523,11 @@ public class NodeData extends Template implements Comparable<NodeData> {
         if (value instanceof List) {
             List<?> list = (List<?>) value;
             if (!list.isEmpty()) {
-                b.append(String.format("\n%s  %s = %s", indent, propertyName, dumpList(indent, (List<?>) value)));
+                b.append(String.format("%n%s  %s = %s", indent, propertyName, dumpList(indent, (List<?>) value)));
             }
         } else {
             if (value != null) {
-                b.append(String.format("\n%s  %s = %s", indent, propertyName, value));
+                b.append(String.format("%n%s  %s = %s", indent, propertyName, value));
             }
         }
     }
@@ -499,12 +546,12 @@ public class NodeData extends Template implements Comparable<NodeData> {
         StringBuilder b = new StringBuilder();
         b.append("[");
         for (Object object : array) {
-            b.append("\n        ");
+            b.append("%n        ");
             b.append(indent);
             b.append(object);
             b.append(", ");
         }
-        b.append("\n    ").append(indent).append("]");
+        b.append("%n    ").append(indent).append("]");
         return b.toString();
     }
 
@@ -519,6 +566,15 @@ public class NodeData extends Template implements Comparable<NodeData> {
 
     public List<NodeChildData> getChildren() {
         return children;
+    }
+
+    public Collection<SpecializationData> computeUncachedSpecializations(List<SpecializationData> s) {
+        Set<SpecializationData> uncached = new LinkedHashSet<>(s);
+        // remove all replacable specializations
+        for (SpecializationData specialization : s) {
+            uncached.removeAll(specialization.getReplaces());
+        }
+        return uncached;
     }
 
     public List<SpecializationData> getSpecializations() {
@@ -546,10 +602,6 @@ public class NodeData extends Template implements Comparable<NodeData> {
 
     public List<ExecutableTypeData> getExecutableTypes() {
         return getExecutableTypes(-1);
-    }
-
-    public List<ShortCircuitData> getShortCircuits() {
-        return shortCircuits;
     }
 
     public int getMinimalEvaluatedParameters() {
@@ -585,15 +637,15 @@ public class NodeData extends Template implements Comparable<NodeData> {
     }
 
     public List<TypeMirror> getGenericTypes(NodeExecutionData execution) {
-        List<TypeMirror> types = new ArrayList<>();
+        List<TypeMirror> foundTypes = new ArrayList<>();
 
         // add types possible through return types and evaluated parameters in execute methods
         if (execution.getChild() != null) {
             for (ExecutableTypeData executable : execution.getChild().getNodeData().getExecutableTypes()) {
-                if (executable.hasUnexpectedValue(getContext())) {
+                if (executable.hasUnexpectedValue()) {
                     continue;
                 }
-                types.add(executable.getReturnType());
+                foundTypes.add(executable.getReturnType());
             }
         }
 
@@ -603,12 +655,34 @@ public class NodeData extends Template implements Comparable<NodeData> {
                 List<TypeMirror> signatureParameters = typeData.getSignatureParameters();
                 if (executionIndex < signatureParameters.size()) {
                     TypeMirror genericType = signatureParameters.get(executionIndex);
-                    types.add(genericType);
+                    foundTypes.add(genericType);
                 }
             }
         }
 
-        return ElementUtils.uniqueSortedTypes(types, false);
+        return Arrays.asList(ElementUtils.getCommonSuperType(ProcessorContext.getInstance(), foundTypes));
+    }
+
+    public void setReportPolymorphism(boolean report) {
+        this.reportPolymorphism = report;
+    }
+
+    public boolean isReportPolymorphism() {
+        return reportPolymorphism;
+    }
+
+    public void setAllowedCheckedExceptions(Set<String> checkedExceptions) {
+        this.allowedCheckedExceptions = checkedExceptions;
+    }
+
+    public Set<String> getAllowedCheckedExceptions() {
+        return allowedCheckedExceptions;
+    }
+
+    private final Set<TypeMirror> libraryTypes = new LinkedHashSet<>();
+
+    public Set<TypeMirror> getLibraryTypes() {
+        return libraryTypes;
     }
 
 }

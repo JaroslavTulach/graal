@@ -1,26 +1,42 @@
 /*
- * Copyright (c) 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2016, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
- * This code is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.  Oracle designates this
- * particular file as subject to the "Classpath" exception as provided
- * by Oracle in the LICENSE file that accompanied this code.
+ * The Universal Permissive License (UPL), Version 1.0
  *
- * This code is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
- * version 2 for more details (a copy is included in the LICENSE file that
- * accompanied this code).
+ * Subject to the condition set forth below, permission is hereby granted to any
+ * person obtaining a copy of this software, associated documentation and/or
+ * data (collectively the "Software"), free of charge and under any and all
+ * copyright rights in the Software, and any and all patent rights owned or
+ * freely licensable by each licensor hereunder covering either (i) the
+ * unmodified Software as contributed to or provided by such licensor, or (ii)
+ * the Larger Works (as defined below), to deal in both
  *
- * You should have received a copy of the GNU General Public License version
- * 2 along with this work; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
+ * (a) the Software, and
  *
- * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
- * or visit www.oracle.com if you need additional information or have any
- * questions.
+ * (b) any piece of software and/or hardware listed in the lrgrwrks.txt file if
+ * one is included with the Software each a "Larger Work" to which the Software
+ * is contributed by such licensors),
+ *
+ * without restriction, including without limitation the rights to copy, create
+ * derivative works of, display, perform, and distribute the Software and make,
+ * use, sell, offer for sale, import, export, have made, and have sold the
+ * Software and the Larger Work(s), and to sublicense the foregoing rights on
+ * either these or other terms.
+ *
+ * This license is subject to the following condition:
+ *
+ * The above copyright notice and either this complete permission notice or at a
+ * minimum a reference to the UPL must be included in all copies or substantial
+ * portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
  */
 package com.oracle.truffle.api.debug.test;
 
@@ -42,11 +58,15 @@ import com.oracle.truffle.api.debug.DebugStackFrame;
 import com.oracle.truffle.api.debug.DebugValue;
 import com.oracle.truffle.api.debug.Debugger;
 import com.oracle.truffle.api.debug.DebuggerSession;
+import com.oracle.truffle.api.debug.SourceElement;
+import com.oracle.truffle.api.debug.SuspendAnchor;
 import com.oracle.truffle.api.debug.SuspendedCallback;
 import com.oracle.truffle.api.debug.SuspendedEvent;
 import com.oracle.truffle.api.instrumentation.test.InstrumentationTestLanguage;
 import com.oracle.truffle.tck.DebuggerTester;
 
+import org.graalvm.polyglot.Context;
+import org.graalvm.polyglot.PolyglotAccess;
 import org.graalvm.polyglot.Source;
 
 /**
@@ -54,7 +74,7 @@ import org.graalvm.polyglot.Source;
  */
 public abstract class AbstractDebugTest {
 
-    private DebuggerTester tester;
+    protected DebuggerTester tester;
     private final ArrayDeque<DebuggerTester> sessionStack = new ArrayDeque<>();
 
     AbstractDebugTest() {
@@ -82,6 +102,14 @@ public abstract class AbstractDebugTest {
         return tester.startSession();
     }
 
+    protected final DebuggerSession startSession(SourceElement... sourceElements) {
+        return tester.startSession(sourceElements);
+    }
+
+    protected final String getOutput() {
+        return tester.getOut();
+    }
+
     protected final Thread getEvalThread() {
         return tester.getEvalThread();
     }
@@ -98,7 +126,7 @@ public abstract class AbstractDebugTest {
         if (tester != null) {
             sessionStack.push(tester);
         }
-        tester = new DebuggerTester();
+        tester = new DebuggerTester(Context.newBuilder().allowCreateThread(true).allowPolyglotAccess(PolyglotAccess.ALL).allowIO(true));
     }
 
     protected final void popContext() {
@@ -127,20 +155,35 @@ public abstract class AbstractDebugTest {
     }
 
     protected SuspendedEvent checkState(SuspendedEvent suspendedEvent, final int expectedLineNumber, final boolean expectedIsBefore, final String expectedCode, final String... expectedFrame) {
-        final int actualLineNumber = suspendedEvent.getSourceSection().getStartLine();
+        final int actualLineNumber;
+        if (expectedIsBefore) {
+            actualLineNumber = suspendedEvent.getSourceSection().getStartLine();
+        } else {
+            actualLineNumber = suspendedEvent.getSourceSection().getEndLine();
+        }
         Assert.assertEquals(expectedLineNumber, actualLineNumber);
         final String actualCode = suspendedEvent.getSourceSection().getCharacters().toString();
         Assert.assertEquals(expectedCode, actualCode);
-        final boolean actualIsBefore = suspendedEvent.isHaltedBefore();
+        final boolean actualIsBefore = (suspendedEvent.getSuspendAnchor() == SuspendAnchor.BEFORE);
         Assert.assertEquals(expectedIsBefore, actualIsBefore);
 
         checkStack(suspendedEvent.getTopStackFrame(), expectedFrame);
         return suspendedEvent;
     }
 
+    protected SuspendedEvent checkReturn(SuspendedEvent suspendedEvent, final String expectedReturnValue) {
+        DebugValue returnValue = suspendedEvent.getReturnValue();
+        if (expectedReturnValue == null) {
+            Assert.assertNull(returnValue);
+        } else {
+            Assert.assertEquals(expectedReturnValue, returnValue.as(String.class));
+        }
+        return suspendedEvent;
+    }
+
     protected void checkStack(DebugStackFrame frame, String... expectedFrame) {
         Map<String, DebugValue> values = new HashMap<>();
-        for (DebugValue value : frame) {
+        for (DebugValue value : frame.getScope().getDeclaredValues()) {
             values.put(value.getName(), value);
         }
         Assert.assertEquals(expectedFrame.length / 2, values.size());
@@ -148,13 +191,17 @@ public abstract class AbstractDebugTest {
             String expectedIdentifier = expectedFrame[i];
             String expectedValue = expectedFrame[i + 1];
             DebugValue value = values.get(expectedIdentifier);
-            Assert.assertNotNull(value);
+            Assert.assertNotNull("Identifier " + expectedIdentifier + " not found.", value);
             Assert.assertEquals(expectedValue, value.as(String.class));
         }
     }
 
     protected final String expectDone() {
         return tester.expectDone();
+    }
+
+    protected final Throwable expectThrowable() {
+        return tester.expectThrowable();
     }
 
     protected final void expectSuspended(SuspendedCallback handler) {
@@ -165,4 +212,7 @@ public abstract class AbstractDebugTest {
         tester.expectKilled();
     }
 
+    protected final void closeEngine() {
+        tester.closeEngine();
+    }
 }

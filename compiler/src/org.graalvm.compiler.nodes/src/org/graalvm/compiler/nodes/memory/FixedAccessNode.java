@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2011, 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -22,6 +24,8 @@
  */
 package org.graalvm.compiler.nodes.memory;
 
+import static org.graalvm.compiler.nodeinfo.InputType.Memory;
+
 import org.graalvm.compiler.core.common.type.Stamp;
 import org.graalvm.compiler.graph.IterableNodeType;
 import org.graalvm.compiler.graph.NodeClass;
@@ -38,12 +42,12 @@ import org.graalvm.word.LocationIdentity;
  * does not include a null check on the object.
  */
 @NodeInfo
-public abstract class FixedAccessNode extends DeoptimizingFixedWithNextNode implements Access, IterableNodeType {
+public abstract class FixedAccessNode extends DeoptimizingFixedWithNextNode implements AddressableMemoryAccess, GuardedMemoryAccess, OnHeapMemoryAccess, IterableNodeType {
     public static final NodeClass<FixedAccessNode> TYPE = NodeClass.create(FixedAccessNode.class);
 
     @OptionalInput(InputType.Guard) protected GuardingNode guard;
-
     @Input(InputType.Association) AddressNode address;
+    @OptionalInput(Memory) MemoryNode lastLocationAccess;
     protected final LocationIdentity location;
 
     protected boolean nullCheck;
@@ -54,6 +58,7 @@ public abstract class FixedAccessNode extends DeoptimizingFixedWithNextNode impl
         return address;
     }
 
+    @Override
     public void setAddress(AddressNode address) {
         updateUsages(this.address, address);
         this.address = address;
@@ -107,7 +112,19 @@ public abstract class FixedAccessNode extends DeoptimizingFixedWithNextNode impl
     }
 
     @Override
+    public MemoryNode getLastLocationAccess() {
+        return lastLocationAccess;
+    }
+
+    @Override
+    public void setLastLocationAccess(MemoryNode lla) {
+        updateUsagesInterface(lastLocationAccess, lla);
+        lastLocationAccess = lla;
+    }
+
+    @Override
     public BarrierType getBarrierType() {
         return barrierType;
     }
+
 }

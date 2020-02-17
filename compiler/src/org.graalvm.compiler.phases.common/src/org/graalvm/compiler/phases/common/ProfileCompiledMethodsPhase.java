@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2012, 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -61,11 +63,13 @@ import org.graalvm.compiler.nodes.extended.SwitchNode;
 import org.graalvm.compiler.nodes.java.AbstractNewObjectNode;
 import org.graalvm.compiler.nodes.java.AccessMonitorNode;
 import org.graalvm.compiler.nodes.java.MonitorIdNode;
-import org.graalvm.compiler.nodes.memory.Access;
+import org.graalvm.compiler.nodes.memory.MemoryAccess;
 import org.graalvm.compiler.nodes.spi.ValueProxy;
 import org.graalvm.compiler.nodes.virtual.VirtualObjectNode;
 import org.graalvm.compiler.phases.Phase;
 import org.graalvm.compiler.phases.schedule.SchedulePhase;
+
+import jdk.vm.ci.services.Services;
 
 /**
  * This phase add counters for the dynamically executed number of nodes. Incrementing the counter
@@ -85,9 +89,17 @@ public class ProfileCompiledMethodsPhase extends Phase {
     private static final String GROUP_NAME_WITHOUT = "~profiled weight (invoke-free sections)";
     private static final String GROUP_NAME_INVOKES = "~profiled invokes";
 
-    private static final boolean WITH_SECTION_HEADER = Boolean.parseBoolean(System.getProperty("ProfileCompiledMethodsPhase.WITH_SECTION_HEADER", "false"));
-    private static final boolean WITH_INVOKE_FREE_SECTIONS = Boolean.parseBoolean(System.getProperty("ProfileCompiledMethodsPhase.WITH_FREE_SECTIONS", "false"));
-    private static final boolean WITH_INVOKES = Boolean.parseBoolean(System.getProperty("ProfileCompiledMethodsPhase.WITH_INVOKES", "true"));
+    private static String getProperty(String name, String def) {
+        String value = Services.getSavedProperties().get(name);
+        if (value == null) {
+            return def;
+        }
+        return value;
+    }
+
+    private static final boolean WITH_SECTION_HEADER = Boolean.parseBoolean(getProperty("ProfileCompiledMethodsPhase.WITH_SECTION_HEADER", "false"));
+    private static final boolean WITH_INVOKE_FREE_SECTIONS = Boolean.parseBoolean(getProperty("ProfileCompiledMethodsPhase.WITH_FREE_SECTIONS", "false"));
+    private static final boolean WITH_INVOKES = Boolean.parseBoolean(getProperty("ProfileCompiledMethodsPhase.WITH_INVOKES", "true"));
 
     @Override
     protected void run(StructuredGraph graph) {
@@ -96,7 +108,7 @@ public class ProfileCompiledMethodsPhase extends Phase {
 
         ControlFlowGraph cfg = ControlFlowGraph.compute(graph, true, true, true, true);
         for (Loop<Block> loop : cfg.getLoops()) {
-            double loopProbability = cfg.blockFor(loop.getHeader().getBeginNode()).probability();
+            double loopProbability = cfg.blockFor(loop.getHeader().getBeginNode()).getRelativeFrequency();
             if (loopProbability > (1D / Integer.MAX_VALUE)) {
                 addSectionCounters(loop.getHeader().getBeginNode(), loop.getBlocks(), loop.getChildren(), graph.getLastSchedule(), cfg);
             }
@@ -121,13 +133,13 @@ public class ProfileCompiledMethodsPhase extends Phase {
 
     private static void addSectionCounters(FixedWithNextNode start, Collection<Block> sectionBlocks, Collection<Loop<Block>> childLoops, ScheduleResult schedule, ControlFlowGraph cfg) {
         HashSet<Block> blocks = new HashSet<>(sectionBlocks);
-        for (Loop<?> loop : childLoops) {
+        for (Loop<Block> loop : childLoops) {
             blocks.removeAll(loop.getBlocks());
         }
-        double weight = getSectionWeight(schedule, blocks) / cfg.blockFor(start).probability();
-        DynamicCounterNode.addCounterBefore(GROUP_NAME, sectionHead(start), (long) weight, true, start.next());
+        long increment = DynamicCounterNode.clampIncrement((long) (getSectionWeight(schedule, blocks) / cfg.blockFor(start).getRelativeFrequency()));
+        DynamicCounterNode.addCounterBefore(GROUP_NAME, sectionHead(start), increment, true, start.next());
         if (WITH_INVOKE_FREE_SECTIONS && !hasInvoke(blocks)) {
-            DynamicCounterNode.addCounterBefore(GROUP_NAME_WITHOUT, sectionHead(start), (long) weight, true, start.next());
+            DynamicCounterNode.addCounterBefore(GROUP_NAME_WITHOUT, sectionHead(start), increment, true, start.next());
         }
     }
 
@@ -142,7 +154,7 @@ public class ProfileCompiledMethodsPhase extends Phase {
     private static double getSectionWeight(ScheduleResult schedule, Collection<Block> blocks) {
         double count = 0;
         for (Block block : blocks) {
-            double blockProbability = block.probability();
+            double blockProbability = block.getRelativeFrequency();
             for (Node node : schedule.getBlockToNodesMap().get(block)) {
                 count += blockProbability * getNodeWeight(node);
             }
@@ -158,9 +170,9 @@ public class ProfileCompiledMethodsPhase extends Phase {
             return 0;
         } else if (node instanceof AccessMonitorNode) {
             return 10;
-        } else if (node instanceof Access) {
+        } else if (node instanceof MemoryAccess) {
             return 2;
-        } else if (node instanceof LogicNode || node instanceof ConvertNode || node instanceof BinaryNode || node instanceof NotNode) {
+        } else if (node instanceof LogicNode || node instanceof ConvertNode || node instanceof NotNode) {
             return 1;
         } else if (node instanceof IntegerDivRemNode || node instanceof FloatDivNode || node instanceof RemNode) {
             return 10;
@@ -168,7 +180,7 @@ public class ProfileCompiledMethodsPhase extends Phase {
             return 3;
         } else if (node instanceof Invoke) {
             return 5;
-        } else if (node instanceof IfNode || node instanceof SafepointNode) {
+        } else if (node instanceof IfNode || node instanceof SafepointNode || node instanceof BinaryNode) {
             return 1;
         } else if (node instanceof SwitchNode) {
             return node.successors().count();

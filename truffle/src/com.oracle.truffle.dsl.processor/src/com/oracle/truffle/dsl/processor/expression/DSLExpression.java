@@ -1,38 +1,76 @@
 /*
- * Copyright (c) 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
- * This code is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * The Universal Permissive License (UPL), Version 1.0
  *
- * This code is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
- * version 2 for more details (a copy is included in the LICENSE file that
- * accompanied this code).
+ * Subject to the condition set forth below, permission is hereby granted to any
+ * person obtaining a copy of this software, associated documentation and/or
+ * data (collectively the "Software"), free of charge and under any and all
+ * copyright rights in the Software, and any and all patent rights owned or
+ * freely licensable by each licensor hereunder covering either (i) the
+ * unmodified Software as contributed to or provided by such licensor, or (ii)
+ * the Larger Works (as defined below), to deal in both
  *
- * You should have received a copy of the GNU General Public License version
- * 2 along with this work; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
+ * (a) the Software, and
  *
- * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
- * or visit www.oracle.com if you need additional information or have any
- * questions.
+ * (b) any piece of software and/or hardware listed in the lrgrwrks.txt file if
+ * one is included with the Software each a "Larger Work" to which the Software
+ * is contributed by such licensors),
+ *
+ * without restriction, including without limitation the rights to copy, create
+ * derivative works of, display, perform, and distribute the Software and make,
+ * use, sell, offer for sale, import, export, have made, and have sold the
+ * Software and the Larger Work(s), and to sublicense the foregoing rights on
+ * either these or other terms.
+ *
+ * This license is subject to the following condition:
+ *
+ * The above copyright notice and either this complete permission notice or at a
+ * minimum a reference to the UPL must be included in all copies or substantial
+ * portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
  */
 package com.oracle.truffle.dsl.processor.expression;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import javax.lang.model.element.Element;
 import javax.lang.model.element.ElementKind;
 import javax.lang.model.element.ExecutableElement;
+import javax.lang.model.element.Modifier;
+import javax.lang.model.element.TypeElement;
+import javax.lang.model.element.TypeParameterElement;
 import javax.lang.model.element.VariableElement;
+import javax.lang.model.type.DeclaredType;
+import javax.lang.model.type.TypeKind;
 import javax.lang.model.type.TypeMirror;
+import javax.lang.model.type.TypeVariable;
+
+import org.antlr.v4.runtime.BaseErrorListener;
+import org.antlr.v4.runtime.CharStreams;
+import org.antlr.v4.runtime.CommonTokenStream;
+import org.antlr.v4.runtime.RecognitionException;
+import org.antlr.v4.runtime.Recognizer;
+import org.antlr.v4.runtime.TokenStream;
+
+import com.oracle.truffle.dsl.processor.ProcessorContext;
+import com.oracle.truffle.dsl.processor.generator.DSLExpressionGenerator;
+import com.oracle.truffle.dsl.processor.java.ElementUtils;
+import com.oracle.truffle.dsl.processor.java.model.CodeTree;
 
 public abstract class DSLExpression {
 
@@ -41,8 +79,133 @@ public abstract class DSLExpression {
     private DSLExpression() {
     }
 
+    private static final class DSLErrorListener extends BaseErrorListener {
+        static DSLErrorListener INSTANCE = new DSLErrorListener();
+
+        @Override
+        public void syntaxError(Recognizer<?, ?> recognizer, Object offendingSymbol, int line, int charPositionInLine, String msg, RecognitionException e) {
+            throw new InvalidExpressionException("line " + line + ":" + charPositionInLine + " " + msg);
+        }
+    }
+
+    public List<DSLExpression> flatten() {
+        List<DSLExpression> expressions = new ArrayList<>();
+        accept(new DSLExpressionVisitor() {
+            public void visitVariable(Variable binary) {
+                expressions.add(binary);
+            }
+
+            public void visitNegate(Negate negate) {
+                expressions.add(negate);
+            }
+
+            public void visitIntLiteral(IntLiteral binary) {
+                expressions.add(binary);
+            }
+
+            public void visitClassLiteral(ClassLiteral classLiteral) {
+                expressions.add(classLiteral);
+            }
+
+            public void visitCall(Call binary) {
+                expressions.add(binary);
+            }
+
+            public void visitBooleanLiteral(BooleanLiteral binary) {
+                expressions.add(binary);
+            }
+
+            public void visitBinary(Binary binary) {
+                expressions.add(binary);
+            }
+
+            public void visitCast(Cast cast) {
+                expressions.add(cast);
+            }
+        });
+        return expressions;
+    }
+
+    @Override
+    public abstract boolean equals(Object obj);
+
+    @Override
+    public abstract int hashCode();
+
+    public boolean mayAllocate() {
+        final AtomicBoolean mayAllocate = new AtomicBoolean(false);
+        accept(new AbstractDSLExpressionVisitor() {
+
+            @Override
+            public void visitCall(Call binary) {
+                mayAllocate.set(true);
+            }
+
+        });
+        return mayAllocate.get();
+    }
+
+    public boolean isNodeReceiverBound() {
+        final AtomicBoolean bindsReceiver = new AtomicBoolean(false);
+        accept(new AbstractDSLExpressionVisitor() {
+
+            @Override
+            public void visitVariable(Variable var) {
+                if (var.getReceiver() == null) {
+                    VariableElement resolvedVar = var.getResolvedVariable();
+                    if (resolvedVar != null && !resolvedVar.getModifiers().contains(Modifier.STATIC) &&
+                                    (resolvedVar.getEnclosingElement() == null || resolvedVar.getEnclosingElement().getKind() != ElementKind.METHOD)) {
+                        String name = resolvedVar.getSimpleName().toString();
+                        if (!name.equals("null") && !name.equals("this")) {
+                            bindsReceiver.set(true);
+                        }
+                    }
+                }
+            }
+
+            @Override
+            public void visitCall(Call binary) {
+                if (binary.getReceiver() == null) {
+                    ExecutableElement method = binary.getResolvedMethod();
+                    if (method != null && !method.getModifiers().contains(Modifier.STATIC)) {
+                        bindsReceiver.set(true);
+                    }
+                }
+            }
+
+        });
+        return bindsReceiver.get();
+    }
+
     public static DSLExpression parse(String input) {
-        return Parser.parse(input);
+        ExpressionLexer lexer = new ExpressionLexer(CharStreams.fromString(input));
+        TokenStream tokens = new CommonTokenStream(lexer);
+        ExpressionParser parser = new ExpressionParser(tokens);
+        parser.setBuildParseTree(false);
+        lexer.removeErrorListeners();
+        parser.removeErrorListeners();
+        lexer.addErrorListener(DSLErrorListener.INSTANCE);
+        parser.addErrorListener(DSLErrorListener.INSTANCE);
+        try {
+            return parser.expression().result;
+        } catch (RecognitionException e) {
+            throw new InvalidExpressionException(e.getMessage());
+        }
+    }
+
+    public final Set<ExecutableElement> findBoundExecutableElements() {
+        final Set<ExecutableElement> methods = new HashSet<>();
+        this.accept(new AbstractDSLExpressionVisitor() {
+
+            @Override
+            public void visitCall(Call binary) {
+                if (binary.getResolvedMethod() != null) {
+                    methods.add(binary.getResolvedMethod());
+                }
+            }
+
+        });
+        return methods;
     }
 
     public final Set<VariableElement> findBoundVariableElements() {
@@ -79,25 +242,17 @@ public abstract class DSLExpression {
         return null;
     }
 
-    public boolean containsComparisons() {
-        final AtomicBoolean found = new AtomicBoolean();
-        this.accept(new AbstractDSLExpressionVisitor() {
-            @Override
-            public void visitBinary(Binary binary) {
-                if (binary.isComparison()) {
-                    found.set(true);
-                }
-            }
-        });
-        return found.get();
-    }
-
     public void setResolvedTargetType(TypeMirror resolvedTargetType) {
         this.resolvedTargetType = resolvedTargetType;
     }
 
     public TypeMirror getResolvedTargetType() {
         return resolvedTargetType;
+    }
+
+    public String asString() {
+        CodeTree tree = DSLExpressionGenerator.write(this, null, new HashMap<>());
+        return tree.toString();
     }
 
     public abstract TypeMirror getResolvedType();
@@ -168,6 +323,61 @@ public abstract class DSLExpression {
         @Override
         public int hashCode() {
             return receiver.hashCode();
+        }
+    }
+
+    public static final class Cast extends DSLExpression {
+
+        private final DSLExpression receiver;
+        private final TypeMirror castType;
+
+        public Cast(DSLExpression receiver, TypeMirror castType) {
+            this.receiver = receiver;
+            this.castType = castType;
+        }
+
+        @Override
+        public void accept(DSLExpressionVisitor visitor) {
+            receiver.accept(visitor);
+            visitor.visitCast(this);
+        }
+
+        @Override
+        public DSLExpression reduce(DSLExpressionReducer visitor) {
+            DSLExpression newReceiver = receiver.reduceImpl(visitor);
+            DSLExpression negate = this;
+            if (newReceiver != receiver) {
+                negate = new Cast(newReceiver, castType);
+                negate.setResolvedTargetType(getResolvedTargetType());
+            }
+            return negate;
+        }
+
+        public TypeMirror getCastType() {
+            return castType;
+        }
+
+        public DSLExpression getReceiver() {
+            return receiver;
+        }
+
+        @Override
+        public TypeMirror getResolvedType() {
+            return castType;
+        }
+
+        @Override
+        public boolean equals(Object obj) {
+            if (obj instanceof Cast) {
+                Cast otherCast = ((Cast) obj);
+                return receiver.equals(otherCast.receiver) && ElementUtils.typeEquals(castType, otherCast.castType);
+            }
+            return false;
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(receiver, castType);
         }
     }
 
@@ -251,6 +461,48 @@ public abstract class DSLExpression {
 
     }
 
+    public static final class ClassLiteral extends DSLExpression {
+
+        private final TypeMirror literal;
+
+        public ClassLiteral(TypeMirror literal) {
+            this.literal = literal;
+        }
+
+        public TypeMirror getLiteral() {
+            return literal;
+        }
+
+        @Override
+        public boolean equals(Object obj) {
+            if (!(obj instanceof ClassLiteral)) {
+                return false;
+            }
+            return ElementUtils.typeEquals(literal, ((ClassLiteral) obj).literal);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(literal);
+        }
+
+        @Override
+        public TypeMirror getResolvedType() {
+            return ProcessorContext.getInstance().getType(Class.class);
+        }
+
+        @Override
+        public void accept(DSLExpressionVisitor visitor) {
+            visitor.visitClassLiteral(this);
+        }
+
+        @Override
+        public DSLExpression reduce(DSLExpressionReducer visitor) {
+            return this;
+        }
+
+    }
+
     public static final class Call extends DSLExpression {
 
         private final DSLExpression receiver;
@@ -263,6 +515,11 @@ public abstract class DSLExpression {
             this.receiver = receiver;
             this.name = name;
             this.parameters = parameters;
+            for (DSLExpression parameter : parameters) {
+                if (parameter == null) {
+                    throw new NullPointerException();
+                }
+            }
         }
 
         @Override
@@ -338,6 +595,27 @@ public abstract class DSLExpression {
             if (resolvedMethod.getKind() == ElementKind.CONSTRUCTOR) {
                 return resolvedMethod.getEnclosingElement().asType();
             } else {
+                TypeMirror type = resolvedMethod.getReturnType();
+                TypeMirror receiverType = receiver != null ? receiver.getResolvedType() : null;
+                if (receiverType != null && type.getKind() == TypeKind.TYPEVAR && receiverType.getKind() == TypeKind.DECLARED) {
+                    // try to do some basic type inference
+                    TypeVariable variable = (TypeVariable) type;
+                    TypeElement receiverTypeElement = ElementUtils.fromTypeMirror(receiverType);
+                    Element variableElement = variable.asElement();
+                    int foundIndex = -1;
+                    int index = 0;
+                    for (TypeParameterElement typeParam : receiverTypeElement.getTypeParameters()) {
+                        if (ElementUtils.elementEquals(typeParam, variableElement)) {
+                            foundIndex = index;
+                            break;
+                        }
+                        index++;
+                    }
+                    DeclaredType declaredReceiverType = (DeclaredType) receiverType;
+                    if (foundIndex != -1) {
+                        return declaredReceiverType.getTypeArguments().get(foundIndex);
+                    }
+                }
                 return resolvedMethod.getReturnType();
             }
         }
@@ -373,14 +651,14 @@ public abstract class DSLExpression {
         public boolean equals(Object obj) {
             if (obj instanceof Variable) {
                 Variable other = (Variable) obj;
-                return Objects.equals(receiver, other.receiver) && name.equals(other.name);
+                return ElementUtils.variableEquals(resolvedVariable, other.resolvedVariable) && Objects.equals(receiver, other.receiver);
             }
             return false;
         }
 
         @Override
         public int hashCode() {
-            return Objects.hash(receiver, name);
+            return Objects.hash(resolvedVariable, receiver);
         }
 
         public DSLExpression getReceiver() {
@@ -560,7 +838,7 @@ public abstract class DSLExpression {
 
     }
 
-    public abstract class AbstractDSLExpressionVisitor implements DSLExpressionVisitor {
+    public abstract static class AbstractDSLExpressionVisitor implements DSLExpressionVisitor {
         @Override
         public void visitBinary(Binary binary) {
         }
@@ -573,6 +851,9 @@ public abstract class DSLExpression {
         public void visitIntLiteral(IntLiteral binary) {
         }
 
+        public void visitClassLiteral(ClassLiteral classLiteral) {
+        }
+
         @Override
         public void visitNegate(Negate negate) {
         }
@@ -583,11 +864,16 @@ public abstract class DSLExpression {
 
         public void visitBooleanLiteral(BooleanLiteral binary) {
         }
+
+        public void visitCast(Cast binary) {
+        }
     }
 
     public interface DSLExpressionVisitor {
 
         void visitBinary(Binary binary);
+
+        void visitClassLiteral(ClassLiteral classLiteral);
 
         void visitNegate(Negate negate);
 
@@ -598,6 +884,8 @@ public abstract class DSLExpression {
         void visitIntLiteral(IntLiteral binary);
 
         void visitBooleanLiteral(BooleanLiteral binary);
+
+        void visitCast(Cast binary);
 
     }
 

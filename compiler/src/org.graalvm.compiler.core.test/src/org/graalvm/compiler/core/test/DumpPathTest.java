@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2017, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -26,11 +28,13 @@ import java.io.IOException;
 import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 
+import org.graalvm.collections.EconomicMap;
 import org.graalvm.compiler.debug.DebugOptions;
+import org.graalvm.compiler.debug.DebugOptions.PrintGraphTarget;
 import org.graalvm.compiler.options.OptionKey;
 import org.graalvm.compiler.options.OptionValues;
-import org.graalvm.util.EconomicMap;
 import org.junit.Test;
 
 /**
@@ -45,21 +49,21 @@ public class DumpPathTest extends GraalCompilerTest {
 
     @Test
     public void testDump() throws IOException {
-        Path dumpDirectoryPath = Files.createTempDirectory("DumpPathTest");
-        String[] extensions = new String[]{".cfg", ".bgv", ".graph-strings"};
-        EconomicMap<OptionKey<?>, Object> overrides = OptionValues.newOptionMap();
-        overrides.put(DebugOptions.DumpPath, dumpDirectoryPath.toString());
-        overrides.put(DebugOptions.PrintGraphFile, true);
-        overrides.put(DebugOptions.PrintCanonicalGraphStrings, true);
-        overrides.put(DebugOptions.Dump, "*");
+        assumeManagementLibraryIsLoadable();
+        try (TemporaryDirectory temp = new TemporaryDirectory(Paths.get("."), "DumpPathTest")) {
+            String[] extensions = new String[]{".cfg", ".bgv", ".graph-strings"};
+            EconomicMap<OptionKey<?>, Object> overrides = OptionValues.newOptionMap();
+            overrides.put(DebugOptions.DumpPath, temp.toString());
+            overrides.put(DebugOptions.PrintCFG, true);
+            overrides.put(DebugOptions.PrintGraph, PrintGraphTarget.File);
+            overrides.put(DebugOptions.PrintCanonicalGraphStrings, true);
+            overrides.put(DebugOptions.Dump, "*");
 
-        // Generate dump files.
-        test(new OptionValues(getInitialOptions(), overrides), "snippet");
-        // Check that Ideal files got created, in the right place.
-        checkForFiles(dumpDirectoryPath, extensions);
-
-        // Clean up the generated files.
-        scrubDirectory(dumpDirectoryPath);
+            // Generate dump files.
+            test(new OptionValues(getInitialOptions(), overrides), "snippet");
+            // Check that IGV files got created, in the right place.
+            checkForFiles(temp.path, extensions);
+        }
     }
 
     /**
@@ -86,26 +90,6 @@ public class DumpPathTest extends GraalCompilerTest {
         // Ensure that all file names are the same.
         for (int i = 1; i < paths.length; i++) {
             assertTrue(paths[0].equals(paths[i]), paths[0] + " != " + paths[i]);
-        }
-    }
-
-    /**
-     * Remove the temporary directory.
-     */
-    private static void scrubDirectory(Path directoryPath) {
-        try {
-            try (DirectoryStream<Path> stream = Files.newDirectoryStream(directoryPath)) {
-                for (Path filePath : stream) {
-                    if (Files.isRegularFile(filePath)) {
-                        Files.delete(filePath);
-                    } else if (Files.isDirectory(filePath)) {
-                        scrubDirectory(filePath);
-                    }
-                }
-            }
-            Files.delete(directoryPath);
-        } catch (IOException ioe) {
-            ioe.printStackTrace();
         }
     }
 }

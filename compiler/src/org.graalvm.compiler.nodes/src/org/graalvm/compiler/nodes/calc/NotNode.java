@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2009, 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2009, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -24,8 +26,10 @@ package org.graalvm.compiler.nodes.calc;
 
 import static org.graalvm.compiler.nodeinfo.NodeCycles.CYCLES_1;
 import static org.graalvm.compiler.nodeinfo.NodeSize.SIZE_1;
+import static org.graalvm.compiler.nodes.calc.BinaryArithmeticNode.getArithmeticOpTable;
 
 import org.graalvm.compiler.core.common.type.ArithmeticOpTable;
+import org.graalvm.compiler.core.common.type.ArithmeticOpTable.UnaryOp;
 import org.graalvm.compiler.core.common.type.ArithmeticOpTable.UnaryOp.Not;
 import org.graalvm.compiler.core.common.type.Stamp;
 import org.graalvm.compiler.graph.NodeClass;
@@ -45,8 +49,17 @@ public final class NotNode extends UnaryArithmeticNode<Not> implements Arithmeti
 
     public static final NodeClass<NotNode> TYPE = NodeClass.create(NotNode.class);
 
-    public NotNode(ValueNode x) {
-        super(TYPE, ArithmeticOpTable::getNot, x);
+    protected NotNode(ValueNode x) {
+        super(TYPE, getArithmeticOpTable(x).getNot(), x);
+    }
+
+    public static ValueNode create(ValueNode x) {
+        return canonicalize(null, x);
+    }
+
+    @Override
+    protected UnaryOp<Not> getOp(ArithmeticOpTable table) {
+        return table.getNot();
     }
 
     @Override
@@ -55,10 +68,17 @@ public final class NotNode extends UnaryArithmeticNode<Not> implements Arithmeti
         if (ret != this) {
             return ret;
         }
-        if (forValue instanceof NotNode) {
-            return ((NotNode) forValue).getValue();
+        return canonicalize(this, forValue);
+    }
+
+    private static ValueNode canonicalize(NotNode node, ValueNode x) {
+        if (x instanceof NotNode) {
+            return ((NotNode) x).getValue();
         }
-        return this;
+        if (node != null) {
+            return node;
+        }
+        return new NotNode(x);
     }
 
     @Override

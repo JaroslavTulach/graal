@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2003, 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -180,7 +182,7 @@ public final class Math_log10 extends JTTTest {
         // Test for gross inaccuracy by comparing to log; should be
         // within a few ulps of log(x)/log(10)
         Random rand = new java.util.Random(0L);
-        for (int i = 0; i < 10000; i++) {
+        for (int i = 0; i < 500; i++) {
             double input = Double.longBitsToDouble(rand.nextLong());
             if (!Double.isFinite(input)) {
                 continue; // avoid testing NaN and infinite values

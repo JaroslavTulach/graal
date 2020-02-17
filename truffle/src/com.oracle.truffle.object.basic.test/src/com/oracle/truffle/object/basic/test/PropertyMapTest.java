@@ -1,24 +1,42 @@
 /*
- * Copyright (c) 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2017, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
- * This code is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * The Universal Permissive License (UPL), Version 1.0
  *
- * This code is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
- * version 2 for more details (a copy is included in the LICENSE file that
- * accompanied this code).
+ * Subject to the condition set forth below, permission is hereby granted to any
+ * person obtaining a copy of this software, associated documentation and/or
+ * data (collectively the "Software"), free of charge and under any and all
+ * copyright rights in the Software, and any and all patent rights owned or
+ * freely licensable by each licensor hereunder covering either (i) the
+ * unmodified Software as contributed to or provided by such licensor, or (ii)
+ * the Larger Works (as defined below), to deal in both
  *
- * You should have received a copy of the GNU General Public License version
- * 2 along with this work; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
+ * (a) the Software, and
  *
- * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
- * or visit www.oracle.com if you need additional information or have any
- * questions.
+ * (b) any piece of software and/or hardware listed in the lrgrwrks.txt file if
+ * one is included with the Software each a "Larger Work" to which the Software
+ * is contributed by such licensors),
+ *
+ * without restriction, including without limitation the rights to copy, create
+ * derivative works of, display, perform, and distribute the Software and make,
+ * use, sell, offer for sale, import, export, have made, and have sold the
+ * Software and the Larger Work(s), and to sublicense the foregoing rights on
+ * either these or other terms.
+ *
+ * This license is subject to the following condition:
+ *
+ * The above copyright notice and either this complete permission notice or at a
+ * minimum a reference to the UPL must be included in all copies or substantial
+ * portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
  */
 package com.oracle.truffle.object.basic.test;
 
@@ -34,8 +52,8 @@ import java.util.Random;
 import org.junit.Test;
 
 import com.oracle.truffle.api.object.Layout;
+import com.oracle.truffle.api.object.Location;
 import com.oracle.truffle.api.object.Property;
-import com.oracle.truffle.api.object.Shape.Allocator;
 import com.oracle.truffle.object.PropertyMap;
 
 public class PropertyMapTest {
@@ -51,14 +69,12 @@ public class PropertyMapTest {
         int[] shuffledSequence = randomSequence.clone();
         shuffle(shuffledSequence, rnd);
 
-        Layout layout = Layout.createLayout();
-        Allocator allocator;
+        Layout layout = Layout.newLayout().build();
         // fill the map
-        allocator = layout.createAllocator();
         for (int i = 0; i < size; i++) {
             int id = randomSequence[i];
             String key = String.valueOf(id);
-            Property value = Property.create(key, allocator.locationForValue(id), 0);
+            Property value = Property.create(key, newLocation(layout, id), 0);
             map = (PropertyMap) map.copyAndPut(key, value);
             referenceMap.put(key, value);
             assertEqualsOrdered(referenceMap, map);
@@ -66,22 +82,20 @@ public class PropertyMapTest {
 
         // put the same values again, should not modify the map
         PropertyMap initial = map;
-        allocator = layout.createAllocator();
         for (int i = 0; i < size; i++) {
             int id = randomSequence[i];
             String key = String.valueOf(id);
-            Property value = Property.create(key, allocator.locationForValue(id), 0);
+            Property value = Property.create(key, newLocation(layout, id), 0);
             map = (PropertyMap) map.copyAndPut(key, value);
             assertSame(initial, map);
         }
         assertEqualsOrdered(referenceMap, map);
 
         // update existing values
-        allocator = layout.createAllocator();
         for (int i = 0; i < size; i++) {
             int id = randomSequence[i];
             String key = String.valueOf(id);
-            Property value = Property.create(key, allocator.locationForValue((double) id), 0);
+            Property value = Property.create(key, newLocation(layout, (double) id), 0);
             map = (PropertyMap) map.copyAndPut(key, value);
             referenceMap.put(key, value);
         }
@@ -89,18 +103,17 @@ public class PropertyMapTest {
         for (int i = size - 1; i >= 0; i--) {
             int id = randomSequence[i];
             String key = String.valueOf(id);
-            Property value = Property.create(key, allocator.locationForValue((double) id), 0);
+            Property value = Property.create(key, newLocation(layout, (double) id), 0);
             map = (PropertyMap) map.copyAndPut(key, value);
             referenceMap.put(key, value);
         }
         assertEqualsOrdered(referenceMap, map);
 
         // update existing values, in random order
-        allocator = layout.createAllocator();
         for (int i = 0; i < size; i++) {
             int id = shuffledSequence[i];
             String key = String.valueOf(id);
-            Property value = Property.create(key, allocator.locationForValue((long) id), 0);
+            Property value = Property.create(key, newLocation(layout, (long) id), 0);
             map = (PropertyMap) map.copyAndPut(key, value);
             referenceMap.put(key, value);
         }
@@ -128,6 +141,11 @@ public class PropertyMapTest {
             referenceMap.remove(key);
             assertEqualsOrdered(referenceMap, map);
         }
+    }
+
+    @SuppressWarnings("deprecation")
+    private static Location newLocation(Layout layout, Object id) {
+        return layout.createAllocator().locationForValue(id);
     }
 
     void assertEqualsOrdered(Map<Object, Property> referenceMap, PropertyMap map) {

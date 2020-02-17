@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2009, 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2009, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -31,19 +33,24 @@ import static org.graalvm.compiler.asm.amd64.AMD64Assembler.AMD64BinaryArithmeti
 import static org.graalvm.compiler.asm.amd64.AMD64Assembler.AMD64RMOp.MOVSX;
 import static org.graalvm.compiler.asm.amd64.AMD64Assembler.AMD64RMOp.MOVSXB;
 import static org.graalvm.compiler.asm.amd64.AMD64Assembler.AMD64RMOp.MOVSXD;
-import static org.graalvm.compiler.asm.amd64.AMD64Assembler.OperandSize.DWORD;
-import static org.graalvm.compiler.asm.amd64.AMD64Assembler.OperandSize.QWORD;
-import static org.graalvm.compiler.asm.amd64.AMD64Assembler.OperandSize.SD;
-import static org.graalvm.compiler.asm.amd64.AMD64Assembler.OperandSize.SS;
+import static org.graalvm.compiler.asm.amd64.AMD64Assembler.VexRVMOp.VADDSD;
+import static org.graalvm.compiler.asm.amd64.AMD64Assembler.VexRVMOp.VADDSS;
+import static org.graalvm.compiler.asm.amd64.AMD64Assembler.VexRVMOp.VMULSD;
+import static org.graalvm.compiler.asm.amd64.AMD64Assembler.VexRVMOp.VMULSS;
+import static org.graalvm.compiler.asm.amd64.AMD64Assembler.VexRVMOp.VSUBSD;
+import static org.graalvm.compiler.asm.amd64.AMD64Assembler.VexRVMOp.VSUBSS;
+import static org.graalvm.compiler.asm.amd64.AMD64BaseAssembler.OperandSize.DWORD;
+import static org.graalvm.compiler.asm.amd64.AMD64BaseAssembler.OperandSize.QWORD;
+import static org.graalvm.compiler.asm.amd64.AMD64BaseAssembler.OperandSize.SD;
+import static org.graalvm.compiler.asm.amd64.AMD64BaseAssembler.OperandSize.SS;
 
-import org.graalvm.compiler.asm.amd64.AMD64Assembler.AMD64MIOp;
+import org.graalvm.compiler.asm.amd64.AMD64Assembler;
 import org.graalvm.compiler.asm.amd64.AMD64Assembler.AMD64RMOp;
-import org.graalvm.compiler.asm.amd64.AMD64Assembler.AMD64RRMOp;
-import org.graalvm.compiler.asm.amd64.AMD64Assembler.AVXOp;
-import org.graalvm.compiler.asm.amd64.AMD64Assembler.OperandSize;
 import org.graalvm.compiler.asm.amd64.AMD64Assembler.SSEOp;
+import org.graalvm.compiler.asm.amd64.AMD64BaseAssembler.OperandSize;
 import org.graalvm.compiler.core.common.LIRKind;
 import org.graalvm.compiler.core.common.NumUtil;
+import org.graalvm.compiler.core.common.calc.CanonicalCondition;
 import org.graalvm.compiler.core.common.calc.Condition;
 import org.graalvm.compiler.core.gen.NodeLIRBuilder;
 import org.graalvm.compiler.core.gen.NodeMatchRules;
@@ -54,12 +61,13 @@ import org.graalvm.compiler.lir.LIRFrameState;
 import org.graalvm.compiler.lir.LIRValueUtil;
 import org.graalvm.compiler.lir.LabelRef;
 import org.graalvm.compiler.lir.amd64.AMD64AddressValue;
-import org.graalvm.compiler.lir.amd64.AMD64BinaryConsumer;
-import org.graalvm.compiler.lir.amd64.AMD64ControlFlow.BranchOp;
+import org.graalvm.compiler.lir.amd64.AMD64ControlFlow.TestBranchOp;
+import org.graalvm.compiler.lir.amd64.AMD64ControlFlow.TestConstBranchOp;
 import org.graalvm.compiler.lir.gen.LIRGeneratorTool;
 import org.graalvm.compiler.nodes.ConstantNode;
 import org.graalvm.compiler.nodes.DeoptimizingNode;
 import org.graalvm.compiler.nodes.IfNode;
+import org.graalvm.compiler.nodes.NodeView;
 import org.graalvm.compiler.nodes.ValueNode;
 import org.graalvm.compiler.nodes.calc.CompareNode;
 import org.graalvm.compiler.nodes.calc.FloatConvertNode;
@@ -71,17 +79,18 @@ import org.graalvm.compiler.nodes.calc.UnsignedRightShiftNode;
 import org.graalvm.compiler.nodes.calc.ZeroExtendNode;
 import org.graalvm.compiler.nodes.java.LogicCompareAndSwapNode;
 import org.graalvm.compiler.nodes.java.ValueCompareAndSwapNode;
-import org.graalvm.compiler.nodes.memory.Access;
+import org.graalvm.compiler.nodes.memory.AddressableMemoryAccess;
 import org.graalvm.compiler.nodes.memory.LIRLowerableAccess;
+import org.graalvm.compiler.nodes.memory.MemoryAccess;
 import org.graalvm.compiler.nodes.memory.WriteNode;
 import org.graalvm.compiler.nodes.util.GraphUtil;
 
 import jdk.vm.ci.amd64.AMD64;
 import jdk.vm.ci.amd64.AMD64.CPUFeature;
 import jdk.vm.ci.amd64.AMD64Kind;
-import jdk.vm.ci.code.TargetDescription;
 import jdk.vm.ci.meta.AllocatableValue;
 import jdk.vm.ci.meta.JavaConstant;
+import jdk.vm.ci.meta.JavaKind;
 import jdk.vm.ci.meta.PlatformKind;
 import jdk.vm.ci.meta.Value;
 import jdk.vm.ci.meta.ValueKind;
@@ -92,7 +101,7 @@ public class AMD64NodeMatchRules extends NodeMatchRules {
         super(gen);
     }
 
-    protected LIRFrameState getState(Access access) {
+    protected LIRFrameState getState(MemoryAccess access) {
         if (access instanceof DeoptimizingNode) {
             return state((DeoptimizingNode) access);
         }
@@ -104,7 +113,7 @@ public class AMD64NodeMatchRules extends NodeMatchRules {
     }
 
     protected LIRKind getLirKind(LIRLowerableAccess access) {
-        return gen.getLIRKind(access.getAccessStamp());
+        return gen.getLIRKind(access.getAccessStamp(NodeView.DEFAULT));
     }
 
     protected OperandSize getMemorySize(LIRLowerableAccess access) {
@@ -127,7 +136,7 @@ public class AMD64NodeMatchRules extends NodeMatchRules {
     }
 
     protected ComplexMatchResult emitCompareBranchMemory(IfNode ifNode, CompareNode compare, ValueNode value, LIRLowerableAccess access) {
-        Condition cond = compare.condition();
+        Condition cond = compare.condition().asCondition();
         AMD64Kind kind = getMemoryKind(access);
         boolean matchedAsConstant = false; // For assertion checking
 
@@ -183,29 +192,27 @@ public class AMD64NodeMatchRules extends NodeMatchRules {
         double trueLabelProbability = x.probability(x.trueSuccessor());
         AMD64Kind kind = getMemoryKind(access);
         OperandSize size = kind == AMD64Kind.QWORD ? QWORD : DWORD;
-        if (value.isConstant()) {
+        if (value.isJavaConstant()) {
             JavaConstant constant = value.asJavaConstant();
-            if (constant != null && kind == AMD64Kind.QWORD && !NumUtil.isInt(constant.asLong())) {
+            if (kind == AMD64Kind.QWORD && !NumUtil.isInt(constant.asLong())) {
                 // Only imm32 as long
                 return null;
             }
             return builder -> {
                 AMD64AddressValue address = (AMD64AddressValue) operand(access.getAddress());
-                gen.append(new AMD64BinaryConsumer.MemoryConstOp(AMD64MIOp.TEST, size, address, (int) constant.asLong(), getState(access)));
-                gen.append(new BranchOp(Condition.EQ, trueLabel, falseLabel, trueLabelProbability));
+                gen.append(new TestConstBranchOp(size, address, (int) constant.asLong(), getState(access), Condition.EQ, trueLabel, falseLabel, trueLabelProbability));
                 return null;
             };
         } else {
             return builder -> {
                 AMD64AddressValue address = (AMD64AddressValue) operand(access.getAddress());
-                gen.append(new AMD64BinaryConsumer.MemoryRMOp(AMD64RMOp.TEST, size, gen.asAllocatable(operand(value)), address, getState(access)));
-                gen.append(new BranchOp(Condition.EQ, trueLabel, falseLabel, trueLabelProbability));
+                gen.append(new TestBranchOp(size, gen.asAllocatable(operand(value)), address, getState(access), Condition.EQ, trueLabel, falseLabel, trueLabelProbability));
                 return null;
             };
         }
     }
 
-    protected ComplexMatchResult emitConvertMemoryOp(PlatformKind kind, AMD64RMOp op, OperandSize size, Access access, ValueKind<?> addressKind) {
+    protected ComplexMatchResult emitConvertMemoryOp(PlatformKind kind, AMD64RMOp op, OperandSize size, AddressableMemoryAccess access, ValueKind<?> addressKind) {
         return builder -> {
             AMD64AddressValue address = (AMD64AddressValue) operand(access.getAddress());
             LIRFrameState state = getState(access);
@@ -216,11 +223,11 @@ public class AMD64NodeMatchRules extends NodeMatchRules {
         };
     }
 
-    protected ComplexMatchResult emitConvertMemoryOp(PlatformKind kind, AMD64RMOp op, OperandSize size, Access access) {
+    protected ComplexMatchResult emitConvertMemoryOp(PlatformKind kind, AMD64RMOp op, OperandSize size, AddressableMemoryAccess access) {
         return emitConvertMemoryOp(kind, op, size, access, null);
     }
 
-    private ComplexMatchResult emitSignExtendMemory(Access access, int fromBits, int toBits, ValueKind<?> addressKind) {
+    private ComplexMatchResult emitSignExtendMemory(AddressableMemoryAccess access, int fromBits, int toBits, ValueKind<?> addressKind) {
         assert fromBits <= toBits && toBits <= 64;
         AMD64Kind kind = null;
         AMD64RMOp op;
@@ -267,14 +274,90 @@ public class AMD64NodeMatchRules extends NodeMatchRules {
         return null;
     }
 
-    private Value emitReinterpretMemory(LIRKind to, Access access) {
+    private Value emitReinterpretMemory(LIRKind to, AddressableMemoryAccess access) {
         AMD64AddressValue address = (AMD64AddressValue) operand(access.getAddress());
         LIRFrameState state = getState(access);
         return getArithmeticLIRGenerator().emitLoad(to, address, state);
     }
 
+    private boolean supports(CPUFeature feature) {
+        return ((AMD64) getLIRGeneratorTool().target().arch).getFeatures().contains(feature);
+    }
+
+    @MatchRule("(And (Not a) b)")
+    public ComplexMatchResult logicalAndNot(ValueNode a, ValueNode b) {
+        if (!supports(CPUFeature.BMI1)) {
+            return null;
+        }
+        return builder -> getArithmeticLIRGenerator().emitLogicalAndNot(operand(a), operand(b));
+    }
+
+    @MatchRule("(And a (Negate a))")
+    public ComplexMatchResult lowestSetIsolatedBit(ValueNode a) {
+        if (!supports(CPUFeature.BMI1)) {
+            return null;
+        }
+        return builder -> getArithmeticLIRGenerator().emitLowestSetIsolatedBit(operand(a));
+    }
+
+    @MatchRule("(Xor a (Add a b))")
+    public ComplexMatchResult getMaskUpToLowestSetBit(ValueNode a, ValueNode b) {
+        if (!supports(CPUFeature.BMI1)) {
+            return null;
+        }
+
+        // Make sure that the pattern matches a subtraction by one.
+        if (!b.isJavaConstant()) {
+            return null;
+        }
+
+        JavaConstant bCst = b.asJavaConstant();
+        long bValue;
+        if (bCst.getJavaKind() == JavaKind.Int) {
+            bValue = bCst.asInt();
+        } else if (bCst.getJavaKind() == JavaKind.Long) {
+            bValue = bCst.asLong();
+        } else {
+            return null;
+        }
+
+        if (bValue == -1) {
+            return builder -> getArithmeticLIRGenerator().emitGetMaskUpToLowestSetBit(operand(a));
+        } else {
+            return null;
+        }
+    }
+
+    @MatchRule("(And a (Add a b))")
+    public ComplexMatchResult resetLowestSetBit(ValueNode a, ValueNode b) {
+        if (!supports(CPUFeature.BMI1)) {
+            return null;
+        }
+        // Make sure that the pattern matches a subtraction by one.
+        if (!b.isJavaConstant()) {
+            return null;
+        }
+
+        JavaConstant bCst = b.asJavaConstant();
+        long bValue;
+        if (bCst.getJavaKind() == JavaKind.Int) {
+            bValue = bCst.asInt();
+        } else if (bCst.getJavaKind() == JavaKind.Long) {
+            bValue = bCst.asLong();
+        } else {
+            return null;
+        }
+
+        if (bValue == -1) {
+            return builder -> getArithmeticLIRGenerator().emitResetLowestSetBit(operand(a));
+        } else {
+            return null;
+        }
+    }
+
     @MatchRule("(If (IntegerTest Read=access value))")
     @MatchRule("(If (IntegerTest FloatingRead=access value))")
+    @MatchRule("(If (IntegerTest VolatileRead=access value))")
     public ComplexMatchResult integerTestBranchMemory(IfNode root, LIRLowerableAccess access, ValueNode value) {
         return emitIntegerTestBranchMemory(root, value, access);
     }
@@ -285,14 +368,21 @@ public class AMD64NodeMatchRules extends NodeMatchRules {
     @MatchRule("(If (IntegerEquals=compare value FloatingRead=access))")
     @MatchRule("(If (IntegerLessThan=compare value FloatingRead=access))")
     @MatchRule("(If (IntegerBelow=compare value FloatingRead=access))")
+    @MatchRule("(If (IntegerEquals=compare value VolatileRead=access))")
+    @MatchRule("(If (IntegerLessThan=compare value VolatileRead=access))")
+    @MatchRule("(If (IntegerBelow=compare value VolatileRead=access))")
     @MatchRule("(If (FloatEquals=compare value Read=access))")
     @MatchRule("(If (FloatEquals=compare value FloatingRead=access))")
+    @MatchRule("(If (FloatEquals=compare value VolatileRead=access))")
     @MatchRule("(If (FloatLessThan=compare value Read=access))")
     @MatchRule("(If (FloatLessThan=compare value FloatingRead=access))")
+    @MatchRule("(If (FloatLessThan=compare value VolatileRead=access))")
     @MatchRule("(If (PointerEquals=compare value Read=access))")
     @MatchRule("(If (PointerEquals=compare value FloatingRead=access))")
+    @MatchRule("(If (PointerEquals=compare value VolatileRead=access))")
     @MatchRule("(If (ObjectEquals=compare value Read=access))")
     @MatchRule("(If (ObjectEquals=compare value FloatingRead=access))")
+    @MatchRule("(If (ObjectEquals=compare value VolatileRead=access))")
     public ComplexMatchResult ifCompareMemory(IfNode root, CompareNode compare, ValueNode value, LIRLowerableAccess access) {
         return emitCompareBranchMemory(root, compare, value, access);
     }
@@ -302,8 +392,8 @@ public class AMD64NodeMatchRules extends NodeMatchRules {
     @MatchRule("(If (FloatEquals=compare value ValueCompareAndSwap=cas))")
     @MatchRule("(If (IntegerEquals=compare value ValueCompareAndSwap=cas))")
     public ComplexMatchResult ifCompareValueCas(IfNode root, CompareNode compare, ValueNode value, ValueCompareAndSwapNode cas) {
-        assert compare.condition() == Condition.EQ;
-        if (value == cas.getExpectedValue() && cas.usages().count() == 1) {
+        assert compare.condition() == CanonicalCondition.EQ;
+        if (value == cas.getExpectedValue() && cas.hasExactlyOneUsage()) {
             return builder -> {
                 LIRKind kind = getLirKind(cas);
                 LabelRef trueLabel = getLIRBlock(root.trueSuccessor());
@@ -325,8 +415,8 @@ public class AMD64NodeMatchRules extends NodeMatchRules {
     @MatchRule("(If (IntegerEquals=compare value LogicCompareAndSwap=cas))")
     public ComplexMatchResult ifCompareLogicCas(IfNode root, CompareNode compare, ValueNode value, LogicCompareAndSwapNode cas) {
         JavaConstant constant = value.asJavaConstant();
-        assert compare.condition() == Condition.EQ;
-        if (constant != null && cas.usages().count() == 1) {
+        assert compare.condition() == CanonicalCondition.EQ;
+        if (constant != null && cas.hasExactlyOneUsage()) {
             long constantValue = constant.asLong();
             boolean successIsTrue;
             if (constantValue == 0) {
@@ -386,20 +476,20 @@ public class AMD64NodeMatchRules extends NodeMatchRules {
                         getState(access));
     }
 
-    private ComplexMatchResult binaryRead(AMD64RRMOp op, OperandSize size, ValueNode value, LIRLowerableAccess access) {
+    private ComplexMatchResult binaryRead(AMD64Assembler.VexRVMOp op, OperandSize size, ValueNode value, LIRLowerableAccess access) {
+        assert size == SS || size == SD;
         return builder -> getArithmeticLIRGenerator().emitBinaryMemory(op, size, getLIRGeneratorTool().asAllocatable(operand(value)), (AMD64AddressValue) operand(access.getAddress()),
                         getState(access));
     }
 
     @MatchRule("(Add value Read=access)")
     @MatchRule("(Add value FloatingRead=access)")
+    @MatchRule("(Add value VolatileRead=access)")
     public ComplexMatchResult addMemory(ValueNode value, LIRLowerableAccess access) {
         OperandSize size = getMemorySize(access);
         if (size.isXmmType()) {
-            TargetDescription target = getLIRGeneratorTool().target();
-            boolean isAvx = ((AMD64) target.arch).getFeatures().contains(CPUFeature.AVX);
-            if (isAvx) {
-                return binaryRead(AVXOp.ADD, size, value, access);
+            if (getArithmeticLIRGenerator().supportAVX()) {
+                return binaryRead(size == SS ? VADDSS : VADDSD, size, value, access);
             } else {
                 return binaryRead(SSEOp.ADD, size, value, access);
             }
@@ -410,13 +500,12 @@ public class AMD64NodeMatchRules extends NodeMatchRules {
 
     @MatchRule("(Sub value Read=access)")
     @MatchRule("(Sub value FloatingRead=access)")
+    @MatchRule("(Sub value VolatileRead=access)")
     public ComplexMatchResult subMemory(ValueNode value, LIRLowerableAccess access) {
         OperandSize size = getMemorySize(access);
         if (size.isXmmType()) {
-            TargetDescription target = getLIRGeneratorTool().target();
-            boolean isAvx = ((AMD64) target.arch).getFeatures().contains(CPUFeature.AVX);
-            if (isAvx) {
-                return binaryRead(AVXOp.SUB, size, value, access);
+            if (getArithmeticLIRGenerator().supportAVX()) {
+                return binaryRead(size == SS ? VSUBSS : VSUBSD, size, value, access);
             } else {
                 return binaryRead(SSEOp.SUB, size, value, access);
             }
@@ -427,13 +516,12 @@ public class AMD64NodeMatchRules extends NodeMatchRules {
 
     @MatchRule("(Mul value Read=access)")
     @MatchRule("(Mul value FloatingRead=access)")
+    @MatchRule("(Mul value VolatileRead=access)")
     public ComplexMatchResult mulMemory(ValueNode value, LIRLowerableAccess access) {
         OperandSize size = getMemorySize(access);
         if (size.isXmmType()) {
-            TargetDescription target = getLIRGeneratorTool().target();
-            boolean isAvx = ((AMD64) target.arch).getFeatures().contains(CPUFeature.AVX);
-            if (isAvx) {
-                return binaryRead(AVXOp.MUL, size, value, access);
+            if (getArithmeticLIRGenerator().supportAVX()) {
+                return binaryRead(size == SS ? VMULSS : VMULSD, size, value, access);
             } else {
                 return binaryRead(SSEOp.MUL, size, value, access);
             }
@@ -444,6 +532,7 @@ public class AMD64NodeMatchRules extends NodeMatchRules {
 
     @MatchRule("(And value Read=access)")
     @MatchRule("(And value FloatingRead=access)")
+    @MatchRule("(And value VolatileRead=access)")
     public ComplexMatchResult andMemory(ValueNode value, LIRLowerableAccess access) {
         OperandSize size = getMemorySize(access);
         if (size.isXmmType()) {
@@ -455,6 +544,7 @@ public class AMD64NodeMatchRules extends NodeMatchRules {
 
     @MatchRule("(Or value Read=access)")
     @MatchRule("(Or value FloatingRead=access)")
+    @MatchRule("(Or value VolatileRead=access)")
     public ComplexMatchResult orMemory(ValueNode value, LIRLowerableAccess access) {
         OperandSize size = getMemorySize(access);
         if (size.isXmmType()) {
@@ -466,6 +556,7 @@ public class AMD64NodeMatchRules extends NodeMatchRules {
 
     @MatchRule("(Xor value Read=access)")
     @MatchRule("(Xor value FloatingRead=access)")
+    @MatchRule("(Xor value VolatileRead=access)")
     public ComplexMatchResult xorMemory(ValueNode value, LIRLowerableAccess access) {
         OperandSize size = getMemorySize(access);
         if (size.isXmmType()) {
@@ -478,7 +569,7 @@ public class AMD64NodeMatchRules extends NodeMatchRules {
     @MatchRule("(Write object Narrow=narrow)")
     public ComplexMatchResult writeNarrow(WriteNode root, NarrowNode narrow) {
         return builder -> {
-            LIRKind writeKind = getLIRGeneratorTool().getLIRKind(root.value().stamp());
+            LIRKind writeKind = getLIRGeneratorTool().getLIRKind(root.value().stamp(NodeView.DEFAULT));
             getArithmeticLIRGenerator().emitStore(writeKind, operand(root.getAddress()), operand(narrow.getValue()), state(root));
             return null;
         };
@@ -486,12 +577,14 @@ public class AMD64NodeMatchRules extends NodeMatchRules {
 
     @MatchRule("(SignExtend Read=access)")
     @MatchRule("(SignExtend FloatingRead=access)")
+    @MatchRule("(SignExtend VolatileRead=access)")
     public ComplexMatchResult signExtend(SignExtendNode root, LIRLowerableAccess access) {
         return emitSignExtendMemory(access, root.getInputBits(), root.getResultBits(), null);
     }
 
     @MatchRule("(ZeroExtend Read=access)")
     @MatchRule("(ZeroExtend FloatingRead=access)")
+    @MatchRule("(ZeroExtend VolatileRead=access)")
     public ComplexMatchResult zeroExtend(ZeroExtendNode root, LIRLowerableAccess access) {
         AMD64Kind memoryKind = getMemoryKind(access);
         return builder -> getArithmeticLIRGenerator().emitZeroExtendMemory(memoryKind, root.getResultBits(), (AMD64AddressValue) operand(access.getAddress()), getState(access));
@@ -499,15 +592,16 @@ public class AMD64NodeMatchRules extends NodeMatchRules {
 
     @MatchRule("(Narrow Read=access)")
     @MatchRule("(Narrow FloatingRead=access)")
+    @MatchRule("(Narrow VolatileRead=access)")
     public ComplexMatchResult narrowRead(NarrowNode root, LIRLowerableAccess access) {
         return new ComplexMatchResult() {
             @Override
             public Value evaluate(NodeLIRBuilder builder) {
                 AMD64AddressValue address = (AMD64AddressValue) operand(access.getAddress());
-                LIRKind addressKind = LIRKind.combineDerived(getLIRGeneratorTool().getLIRKind(root.asNode().stamp()),
+                LIRKind addressKind = LIRKind.combineDerived(getLIRGeneratorTool().getLIRKind(root.asNode().stamp(NodeView.DEFAULT)),
                                 address.getBase(), address.getIndex());
                 AMD64AddressValue newAddress = address.withKind(addressKind);
-                LIRKind readKind = getLIRGeneratorTool().getLIRKind(root.stamp());
+                LIRKind readKind = getLIRGeneratorTool().getLIRKind(root.stamp(NodeView.DEFAULT));
                 return getArithmeticLIRGenerator().emitZeroExtendMemory((AMD64Kind) readKind.getPlatformKind(),
                                 root.getResultBits(), newAddress, getState(access));
             }
@@ -516,13 +610,15 @@ public class AMD64NodeMatchRules extends NodeMatchRules {
 
     @MatchRule("(SignExtend (Narrow=narrow Read=access))")
     @MatchRule("(SignExtend (Narrow=narrow FloatingRead=access))")
+    @MatchRule("(SignExtend (Narrow=narrow VolatileRead=access))")
     public ComplexMatchResult signExtendNarrowRead(SignExtendNode root, NarrowNode narrow, LIRLowerableAccess access) {
-        LIRKind kind = getLIRGeneratorTool().getLIRKind(narrow.stamp());
+        LIRKind kind = getLIRGeneratorTool().getLIRKind(narrow.stamp(NodeView.DEFAULT));
         return emitSignExtendMemory(access, narrow.getResultBits(), root.getResultBits(), kind);
     }
 
     @MatchRule("(FloatConvert Read=access)")
     @MatchRule("(FloatConvert FloatingRead=access)")
+    @MatchRule("(FloatConvert VolatileRead=access)")
     public ComplexMatchResult floatConvert(FloatConvertNode root, LIRLowerableAccess access) {
         switch (root.getFloatConvert()) {
             case D2F:
@@ -552,9 +648,10 @@ public class AMD64NodeMatchRules extends NodeMatchRules {
 
     @MatchRule("(Reinterpret Read=access)")
     @MatchRule("(Reinterpret FloatingRead=access)")
+    @MatchRule("(Reinterpret VolatileRead=access)")
     public ComplexMatchResult reinterpret(ReinterpretNode root, LIRLowerableAccess access) {
         return builder -> {
-            LIRKind kind = getLIRGeneratorTool().getLIRKind(root.stamp());
+            LIRKind kind = getLIRGeneratorTool().getLIRKind(root.stamp(NodeView.DEFAULT));
             return emitReinterpretMemory(kind, access);
         };
 
@@ -563,7 +660,7 @@ public class AMD64NodeMatchRules extends NodeMatchRules {
     @MatchRule("(Write object Reinterpret=reinterpret)")
     public ComplexMatchResult writeReinterpret(WriteNode root, ReinterpretNode reinterpret) {
         return builder -> {
-            LIRKind kind = getLIRGeneratorTool().getLIRKind(reinterpret.getValue().stamp());
+            LIRKind kind = getLIRGeneratorTool().getLIRKind(reinterpret.getValue().stamp(NodeView.DEFAULT));
             AllocatableValue value = getLIRGeneratorTool().asAllocatable(operand(reinterpret.getValue()));
 
             AMD64AddressValue address = (AMD64AddressValue) operand(root.getAddress());

@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2013, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2013, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -23,8 +25,8 @@
 package org.graalvm.compiler.hotspot.stubs;
 
 import org.graalvm.compiler.options.Option;
-import org.graalvm.compiler.options.OptionType;
 import org.graalvm.compiler.options.OptionKey;
+import org.graalvm.compiler.options.OptionType;
 
 //JaCoCo Exclude
 
@@ -41,14 +43,5 @@ public class StubOptions {
 
     @Option(help = "Trace execution of the stub that routes an exception to a handler in the calling frame.", type = OptionType.Debug)
     static final OptionKey<Boolean> TraceUnwindStub = new OptionKey<>(false);
-
-    @Option(help = "Trace execution of slow path stub for array allocation.", type = OptionType.Debug)
-    static final OptionKey<Boolean> TraceNewArrayStub = new OptionKey<>(false);
-
-    @Option(help = "Trace execution of slow path stub for non-array object allocation.", type = OptionType.Debug)
-    static final OptionKey<Boolean> TraceNewInstanceStub = new OptionKey<>(false);
-
-    @Option(help = "Force non-array object allocation to always use the slow path.", type = OptionType.Debug)
-    static final OptionKey<Boolean> ForceUseOfNewInstanceStub = new OptionKey<>(false);
     //@formatter:on
 }

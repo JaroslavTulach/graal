@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2007, 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2007, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -22,34 +24,28 @@
  */
 package org.graalvm.compiler.jtt.jdk;
 
+import org.graalvm.compiler.api.directives.GraalDirectives;
+import org.graalvm.compiler.jtt.JTTTest;
 import org.junit.Test;
 
-import org.graalvm.compiler.jtt.JTTTest;
-
-/*
+/**
+ * Checks that the time between 2 successive calls to {@link System#currentTimeMillis()} is less
+ * than 100 milliseconds at least once in 5_000_000 attempts.
  */
 public class System_currentTimeMillis02 extends JTTTest {
 
-    static void m(long[] times) {
-        times[1] = System.currentTimeMillis() - times[0];
-    }
-
     public static boolean test() {
-        long[] times = new long[2];  // { start, delta }
-        times[0] = System.currentTimeMillis();
-        times[1] = 0;
-        // force compilation:
-        for (int i = 0; i < 5000; i++) {
-            m(times);
+        for (int i = 0; i < 5_000_000; i++) {
+            long elapsed = System.currentTimeMillis() - System.currentTimeMillis();
+            if (elapsed < 100) {
+                return true;
+            }
         }
-        times[0] = System.currentTimeMillis();
-        times[1] = 0;
-        for (int i = 0; times[1] == 0 && i < 5000000; i++) {
-            m(times);
-            // do nothing.
+        if (!GraalDirectives.inCompiledCode()) {
+            // We don't care about the result for the interpreter, C1 or C2
+            return true;
         }
-        // better get at least 100 millisecond resolution.
-        return times[1] >= 1 && times[1] < 100;
+        return false;
     }
 
     @Test

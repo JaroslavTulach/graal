@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2015, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -57,13 +59,13 @@ public final class TraceStatisticsPrinter {
                     double max = Double.NEGATIVE_INFINITY;
                     double min = Double.POSITIVE_INFINITY;
                     for (AbstractBlockBase<?> block : t) {
-                        double probability = block.probability();
-                        total += probability;
-                        if (probability < min) {
-                            min = probability;
+                        double frequency = block.getRelativeFrequency();
+                        total += frequency;
+                        if (frequency < min) {
+                            min = frequency;
                         }
-                        if (probability > max) {
-                            max = probability;
+                        if (frequency > max) {
+                            max = frequency;
                         }
                     }
                     printLine(debug, i, total, min, max, t.length);

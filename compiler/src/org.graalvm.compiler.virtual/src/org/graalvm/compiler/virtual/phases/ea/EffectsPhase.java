@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2011, 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -24,24 +26,23 @@ package org.graalvm.compiler.virtual.phases.ea;
 
 import static org.graalvm.compiler.phases.common.DeadCodeEliminationPhase.Optionality.Required;
 
+import org.graalvm.collections.EconomicSet;
 import org.graalvm.compiler.core.common.util.CompilationAlarm;
 import org.graalvm.compiler.debug.DebugContext;
 import org.graalvm.compiler.graph.Graph.NodeEventScope;
 import org.graalvm.compiler.graph.Node;
-import org.graalvm.compiler.graph.spi.Simplifiable;
 import org.graalvm.compiler.nodes.StructuredGraph;
 import org.graalvm.compiler.nodes.StructuredGraph.ScheduleResult;
 import org.graalvm.compiler.nodes.cfg.ControlFlowGraph;
+import org.graalvm.compiler.nodes.spi.CoreProviders;
 import org.graalvm.compiler.phases.BasePhase;
 import org.graalvm.compiler.phases.common.CanonicalizerPhase;
 import org.graalvm.compiler.phases.common.DeadCodeEliminationPhase;
-import org.graalvm.compiler.phases.common.util.HashSetNodeEventListener;
+import org.graalvm.compiler.phases.common.util.EconomicSetNodeEventListener;
 import org.graalvm.compiler.phases.graph.ReentrantBlockIterator;
 import org.graalvm.compiler.phases.schedule.SchedulePhase;
-import org.graalvm.compiler.phases.tiers.PhaseContext;
-import org.graalvm.util.EconomicSet;
 
-public abstract class EffectsPhase<PhaseContextT extends PhaseContext> extends BasePhase<PhaseContextT> {
+public abstract class EffectsPhase<CoreProvidersT extends CoreProviders> extends BasePhase<CoreProvidersT> {
 
     public abstract static class Closure<T> extends ReentrantBlockIterator.BlockIteratorClosure<T> {
 
@@ -67,12 +68,12 @@ public abstract class EffectsPhase<PhaseContextT extends PhaseContext> extends B
     }
 
     @Override
-    protected void run(StructuredGraph graph, PhaseContextT context) {
+    protected void run(StructuredGraph graph, CoreProvidersT context) {
         runAnalysis(graph, context);
     }
 
     @SuppressWarnings("try")
-    public boolean runAnalysis(StructuredGraph graph, PhaseContextT context) {
+    public boolean runAnalysis(StructuredGraph graph, CoreProvidersT context) {
         boolean changed = false;
         CompilationAlarm compilationAlarm = CompilationAlarm.current();
         DebugContext debug = graph.getDebug();
@@ -94,24 +95,18 @@ public abstract class EffectsPhase<PhaseContextT extends PhaseContext> extends B
 
                     if (closure.needsApplyEffects()) {
                         // apply the effects collected during this iteration
-                        HashSetNodeEventListener listener = new HashSetNodeEventListener();
+                        EconomicSetNodeEventListener listener = new EconomicSetNodeEventListener();
                         try (NodeEventScope nes = graph.trackNodeEvents(listener)) {
                             closure.applyEffects();
-                        }
 
-                        if (debug.isDumpEnabled(DebugContext.VERBOSE_LEVEL)) {
-                            debug.dump(DebugContext.VERBOSE_LEVEL, graph, "%s iteration", getName());
-                        }
-
-                        new DeadCodeEliminationPhase(Required).apply(graph);
-
-                        EconomicSet<Node> changedNodes = listener.getNodes();
-                        for (Node node : graph.getNodes()) {
-                            if (node instanceof Simplifiable) {
-                                changedNodes.add(node);
+                            if (debug.isDumpEnabled(DebugContext.VERBOSE_LEVEL)) {
+                                debug.dump(DebugContext.VERBOSE_LEVEL, graph, "%s iteration", getName());
                             }
+
+                            new DeadCodeEliminationPhase(Required).apply(graph);
                         }
-                        postIteration(graph, context, changedNodes);
+
+                        postIteration(graph, context, listener.getNodes());
                     }
 
                     if (closure.hasChanged()) {
@@ -127,11 +122,11 @@ public abstract class EffectsPhase<PhaseContextT extends PhaseContext> extends B
         return changed;
     }
 
-    protected void postIteration(final StructuredGraph graph, final PhaseContextT context, EconomicSet<Node> changedNodes) {
+    protected void postIteration(final StructuredGraph graph, final CoreProvidersT context, EconomicSet<Node> changedNodes) {
         if (canonicalizer != null) {
             canonicalizer.applyIncremental(graph, context, changedNodes);
         }
     }
 
-    protected abstract Closure<?> createEffectsClosure(PhaseContextT context, ScheduleResult schedule, ControlFlowGraph cfg);
+    protected abstract Closure<?> createEffectsClosure(CoreProvidersT context, ScheduleResult schedule, ControlFlowGraph cfg);
 }

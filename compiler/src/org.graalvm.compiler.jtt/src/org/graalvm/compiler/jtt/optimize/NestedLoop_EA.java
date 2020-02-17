@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2011, 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -42,7 +44,7 @@ public class NestedLoop_EA extends JTTTest {
     protected Suites createSuites(OptionValues options) {
         Suites suites = super.createSuites(options);
         ListIterator<BasePhase<? super HighTierContext>> position = suites.getHighTier().findPhase(PartialEscapePhase.class);
-        CanonicalizerPhase canonicalizer = new CanonicalizerPhase();
+        CanonicalizerPhase canonicalizer = this.createCanonicalizerPhase();
         // incremental canonicalizer of PEA is missing some important canonicalization (TODO?)
         position.add(canonicalizer);
         position.add(new PartialEscapePhase(true, canonicalizer, options));
@@ -127,8 +129,7 @@ public class NestedLoop_EA extends JTTTest {
     }
 
     @Override
-    protected boolean checkHighTierGraph(StructuredGraph graph) {
+    protected void checkHighTierGraph(StructuredGraph graph) {
         assert graph.getNodes().filter(CommitAllocationNode.class).count() == 0 : "all allocations should be virtualized";
-        return true;
     }
 }

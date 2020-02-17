@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2015, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -22,11 +24,15 @@
  */
 package org.graalvm.compiler.hotspot;
 
+import static jdk.vm.ci.code.ValueUtil.isRegister;
 import static org.graalvm.compiler.lir.LIRValueUtil.asJavaConstant;
 import static org.graalvm.compiler.lir.LIRValueUtil.isJavaConstant;
-import static jdk.vm.ci.code.ValueUtil.isRegister;
+import static org.graalvm.compiler.nodes.debug.DynamicCounterNode.MAX_INCREMENT;
+import static org.graalvm.compiler.nodes.debug.DynamicCounterNode.MIN_INCREMENT;
 
 import java.util.Arrays;
+
+import org.graalvm.collections.EconomicMap;
 import org.graalvm.compiler.asm.Assembler;
 import org.graalvm.compiler.core.common.NumUtil;
 import org.graalvm.compiler.debug.GraalError;
@@ -34,7 +40,6 @@ import org.graalvm.compiler.hotspot.debug.BenchmarkCounters;
 import org.graalvm.compiler.hotspot.meta.HotSpotRegistersProvider;
 import org.graalvm.compiler.lir.LIRInstruction;
 import org.graalvm.compiler.lir.LIRInstructionClass;
-import org.graalvm.util.EconomicMap;
 
 import jdk.vm.ci.code.Register;
 import jdk.vm.ci.code.TargetDescription;
@@ -66,6 +71,21 @@ public abstract class HotSpotCounterOp extends LIRInstruction {
         this.increments = increments;
         this.thread = registers.getThreadRegister();
         this.config = config;
+        checkIncrements();
+    }
+
+    private boolean checkIncrements() {
+        for (int i = 0; i < increments.length; i++) {
+            Value increment = increments[i];
+            if (isJavaConstant(increment)) {
+                long incValue = asLong(asJavaConstant(increment));
+                if (incValue < MIN_INCREMENT || incValue > MAX_INCREMENT) {
+                    String message = String.format("Benchmark counter %s:%s has increment out of range [%d .. %d]: %d", groups[i], names[i], MIN_INCREMENT, MAX_INCREMENT, incValue);
+                    assert false : message;
+                }
+            }
+        }
+        return true;
     }
 
     protected static int getDisplacementForLongIndex(TargetDescription target, long index) {

@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -22,27 +24,23 @@
  */
 package org.graalvm.compiler.hotspot.phases;
 
-import static jdk.vm.ci.meta.SpeculationLog.SpeculationReason;
 import static org.graalvm.compiler.phases.common.DeadCodeEliminationPhase.Optionality.Required;
 
-import jdk.vm.ci.meta.DeoptimizationAction;
-import jdk.vm.ci.meta.DeoptimizationReason;
-import jdk.vm.ci.meta.JavaConstant;
-import jdk.vm.ci.meta.JavaKind;
 import org.graalvm.compiler.core.common.PermanentBailoutException;
 import org.graalvm.compiler.core.common.cfg.Loop;
 import org.graalvm.compiler.core.common.type.ObjectStamp;
 import org.graalvm.compiler.core.common.type.Stamp;
 import org.graalvm.compiler.debug.CounterKey;
+import org.graalvm.compiler.debug.DebugCloseable;
 import org.graalvm.compiler.debug.DebugContext;
 import org.graalvm.compiler.debug.GraalError;
 import org.graalvm.compiler.graph.Node;
 import org.graalvm.compiler.graph.iterators.NodeIterable;
+import org.graalvm.compiler.loop.LoopEx;
 import org.graalvm.compiler.loop.LoopsData;
 import org.graalvm.compiler.loop.phases.LoopTransformations;
 import org.graalvm.compiler.nodeinfo.InputType;
 import org.graalvm.compiler.nodeinfo.Verbosity;
-import org.graalvm.compiler.nodes.AbstractBeginNode;
 import org.graalvm.compiler.nodes.EntryMarkerNode;
 import org.graalvm.compiler.nodes.EntryProxyNode;
 import org.graalvm.compiler.nodes.FixedGuardNode;
@@ -50,6 +48,7 @@ import org.graalvm.compiler.nodes.FixedNode;
 import org.graalvm.compiler.nodes.FrameState;
 import org.graalvm.compiler.nodes.LogicNode;
 import org.graalvm.compiler.nodes.LoopBeginNode;
+import org.graalvm.compiler.nodes.NodeView;
 import org.graalvm.compiler.nodes.ParameterNode;
 import org.graalvm.compiler.nodes.PiNode;
 import org.graalvm.compiler.nodes.StartNode;
@@ -72,7 +71,13 @@ import org.graalvm.compiler.options.OptionType;
 import org.graalvm.compiler.options.OptionValues;
 import org.graalvm.compiler.phases.Phase;
 import org.graalvm.compiler.phases.common.DeadCodeEliminationPhase;
+import org.graalvm.compiler.serviceprovider.SpeculationReasonGroup;
 
+import jdk.vm.ci.meta.DeoptimizationAction;
+import jdk.vm.ci.meta.DeoptimizationReason;
+import jdk.vm.ci.meta.JavaKind;
+import jdk.vm.ci.meta.SpeculationLog;
+import jdk.vm.ci.meta.SpeculationLog.SpeculationReason;
 import jdk.vm.ci.runtime.JVMCICompiler;
 
 public class OnStackReplacementPhase extends Phase {
@@ -83,7 +88,7 @@ public class OnStackReplacementPhase extends Phase {
                        "if there is no mature profile available for the rest of the method.", type = OptionType.Debug)
         public static final OptionKey<Boolean> DeoptAfterOSR = new OptionKey<>(true);
         @Option(help = "Support OSR compilations with locks. If DeoptAfterOSR is true we can per definition not have " +
-                       "unbalaced enter/extis mappings. If DeoptAfterOSR is false insert artificial monitor enters after " +
+                       "unbalanced enter/exits mappings. If DeoptAfterOSR is false insert artificial monitor enters after " +
                        "the OSRStart to have balanced enter/exits in the graph.", type = OptionType.Debug)
         public static final OptionKey<Boolean> SupportOSRWithLocks = new OptionKey<>(true);
         // @formatter:on
@@ -95,7 +100,10 @@ public class OnStackReplacementPhase extends Phase {
         return Options.SupportOSRWithLocks.getValue(options);
     }
 
+    private static final SpeculationReasonGroup OSR_LOCAL_SPECULATIONS = new SpeculationReasonGroup("OSRLocal", int.class, Stamp.class, int.class);
+
     @Override
+    @SuppressWarnings("try")
     protected void run(StructuredGraph graph) {
         DebugContext debug = graph.getDebug();
         if (graph.getEntryBCI() == JVMCICompiler.INVOCATION_ENTRY_BCI) {
@@ -147,74 +155,77 @@ public class OnStackReplacementPhase extends Phase {
                 l = l.getParent();
             }
 
-            LoopTransformations.peel(loops.loop(l));
-            osr.replaceAtUsages(InputType.Guard, AbstractBeginNode.prevBegin((FixedNode) osr.predecessor()));
-            for (Node usage : osr.usages().snapshot()) {
-                EntryProxyNode proxy = (EntryProxyNode) usage;
-                proxy.replaceAndDelete(proxy.value());
-            }
+            LoopEx loop = loops.loop(l);
+            loop.loopBegin().markOsrLoop();
+            LoopTransformations.peel(loop);
+
+            osr.prepareDelete();
             GraphUtil.removeFixedWithUnusedInputs(osr);
             debug.dump(DebugContext.DETAILED_LEVEL, graph, "OnStackReplacement loop peeling result");
         } while (true);
 
-        FrameState osrState = osr.stateAfter();
-        osr.setStateAfter(null);
-        OSRStartNode osrStart = graph.add(new OSRStartNode());
         StartNode start = graph.start();
-        FixedNode next = osr.next();
-        osr.setNext(null);
-        osrStart.setNext(next);
-        graph.setStart(osrStart);
-        osrStart.setStateAfter(osrState);
+        FrameState osrState = osr.stateAfter();
+        OSRStartNode osrStart;
+        try (DebugCloseable context = osr.withNodeSourcePosition()) {
+            osr.setStateAfter(null);
+            osrStart = graph.add(new OSRStartNode());
+            FixedNode next = osr.next();
+            osr.setNext(null);
+            osrStart.setNext(next);
+            graph.setStart(osrStart);
+            osrStart.setStateAfter(osrState);
 
-        debug.dump(DebugContext.DETAILED_LEVEL, graph, "OnStackReplacement after setting OSR start");
-        final int localsSize = osrState.localsSize();
-        final int locksSize = osrState.locksSize();
+            debug.dump(DebugContext.DETAILED_LEVEL, graph, "OnStackReplacement after setting OSR start");
+            final int localsSize = osrState.localsSize();
+            final int locksSize = osrState.locksSize();
 
-        for (int i = 0; i < localsSize + locksSize; i++) {
-            ValueNode value = null;
-            if (i >= localsSize) {
-                value = osrState.lockAt(i - localsSize);
-            } else {
-                value = osrState.localAt(i);
-            }
-            if (value instanceof EntryProxyNode) {
-                EntryProxyNode proxy = (EntryProxyNode) value;
-                /*
-                 * We need to drop the stamp since the types we see during OSR may be too precise
-                 * (if a branch was not parsed for example). In cases when this is possible, we
-                 * insert a guard and narrow the OSRLocal stamp at its usages.
-                 */
-                Stamp narrowedStamp = proxy.value().stamp();
-                Stamp unrestrictedStamp = proxy.stamp().unrestricted();
-                ValueNode osrLocal;
+            for (int i = 0; i < localsSize + locksSize; i++) {
+                ValueNode value;
                 if (i >= localsSize) {
-                    osrLocal = graph.addOrUnique(new OSRLockNode(i - localsSize, unrestrictedStamp));
+                    value = osrState.lockAt(i - localsSize);
                 } else {
-                    osrLocal = graph.addOrUnique(new OSRLocalNode(i, unrestrictedStamp));
+                    value = osrState.localAt(i);
                 }
-                // Speculate on the OSRLocal stamps that could be more precise.
-                OSRLocalSpeculationReason reason = new OSRLocalSpeculationReason(osrState.bci, narrowedStamp, i);
-                if (graph.getSpeculationLog().maySpeculate(reason) && osrLocal instanceof OSRLocalNode && value.getStackKind().equals(JavaKind.Object) && !narrowedStamp.isUnrestricted()) {
-                    // Add guard.
-                    LogicNode check = graph.addOrUniqueWithInputs(InstanceOfNode.createHelper((ObjectStamp) narrowedStamp, osrLocal, null, null));
-                    JavaConstant constant = graph.getSpeculationLog().speculate(reason);
-                    FixedGuardNode guard = graph.add(new FixedGuardNode(check, DeoptimizationReason.OptimizedTypeCheckViolated, DeoptimizationAction.InvalidateRecompile, constant, false));
-                    graph.addAfterFixed(osrStart, guard);
+                if (value instanceof EntryProxyNode) {
+                    EntryProxyNode proxy = (EntryProxyNode) value;
+                    /*
+                     * We need to drop the stamp since the types we see during OSR may be too
+                     * precise (if a branch was not parsed for example). In cases when this is
+                     * possible, we insert a guard and narrow the OSRLocal stamp at its usages.
+                     */
+                    Stamp narrowedStamp = proxy.value().stamp(NodeView.DEFAULT);
+                    Stamp unrestrictedStamp = proxy.stamp(NodeView.DEFAULT).unrestricted();
+                    ValueNode osrLocal;
+                    if (i >= localsSize) {
+                        osrLocal = graph.addOrUnique(new OSRLockNode(i - localsSize, unrestrictedStamp));
+                    } else {
+                        osrLocal = graph.addOrUnique(new OSRLocalNode(i, unrestrictedStamp));
+                    }
+                    // Speculate on the OSRLocal stamps that could be more precise.
+                    SpeculationReason reason = OSR_LOCAL_SPECULATIONS.createSpeculationReason(osrState.bci, narrowedStamp, i);
+                    if (graph.getSpeculationLog().maySpeculate(reason) && osrLocal instanceof OSRLocalNode && value.getStackKind().equals(JavaKind.Object) && !narrowedStamp.isUnrestricted()) {
+                        // Add guard.
+                        LogicNode check = graph.addOrUniqueWithInputs(InstanceOfNode.createHelper((ObjectStamp) narrowedStamp, osrLocal, null, null));
+                        SpeculationLog.Speculation constant = graph.getSpeculationLog().speculate(reason);
+                        FixedGuardNode guard = graph.add(new FixedGuardNode(check, DeoptimizationReason.OptimizedTypeCheckViolated, DeoptimizationAction.InvalidateRecompile, constant, false));
+                        graph.addAfterFixed(osrStart, guard);
 
-                    // Replace with a more specific type at usages.
-                    // We know that we are at the root,
-                    // so we need to replace the proxy in the state.
-                    proxy.replaceAtMatchingUsages(osrLocal, n -> n == osrState);
-                    osrLocal = graph.addOrUnique(new PiNode(osrLocal, narrowedStamp, guard));
+                        // Replace with a more specific type at usages.
+                        // We know that we are at the root,
+                        // so we need to replace the proxy in the state.
+                        proxy.replaceAtMatchingUsages(osrLocal, n -> n == osrState);
+                        osrLocal = graph.addOrUnique(new PiNode(osrLocal, narrowedStamp, guard));
+                    }
+                    proxy.replaceAndDelete(osrLocal);
+                } else {
+                    assert value == null || value instanceof OSRLocalNode;
                 }
-                proxy.replaceAndDelete(osrLocal);
-            } else {
-                assert value == null || value instanceof OSRLocalNode;
             }
-        }
 
-        osr.replaceAtUsages(InputType.Guard, osrStart);
+            osr.replaceAtUsages(InputType.Guard, osrStart);
+            osr.replaceAtUsages(InputType.Anchor, osrStart);
+        }
         debug.dump(DebugContext.DETAILED_LEVEL, graph, "OnStackReplacement after replacing entry proxies");
         GraphUtil.killCFG(start);
         debug.dump(DebugContext.DETAILED_LEVEL, graph, "OnStackReplacement result");
@@ -222,21 +233,24 @@ public class OnStackReplacementPhase extends Phase {
 
         if (currentOSRWithLocks) {
             OsrWithLocksCount.increment(debug);
-            for (int i = osrState.monitorIdCount() - 1; i >= 0; --i) {
-                MonitorIdNode id = osrState.monitorIdAt(i);
-                ValueNode lockedObject = osrState.lockAt(i);
-                OSRMonitorEnterNode osrMonitorEnter = graph.add(new OSRMonitorEnterNode(lockedObject, id));
-                for (Node usage : id.usages()) {
-                    if (usage instanceof AccessMonitorNode) {
-                        AccessMonitorNode access = (AccessMonitorNode) usage;
-                        access.setObject(lockedObject);
+            try (DebugCloseable context = osrStart.withNodeSourcePosition()) {
+                for (int i = osrState.monitorIdCount() - 1; i >= 0; --i) {
+                    MonitorIdNode id = osrState.monitorIdAt(i);
+                    ValueNode lockedObject = osrState.lockAt(i);
+                    OSRMonitorEnterNode osrMonitorEnter = graph.add(new OSRMonitorEnterNode(lockedObject, id));
+                    for (Node usage : id.usages()) {
+                        if (usage instanceof AccessMonitorNode) {
+                            AccessMonitorNode access = (AccessMonitorNode) usage;
+                            access.setObject(lockedObject);
+                        }
                     }
+                    FixedNode oldNext = osrStart.next();
+                    oldNext.replaceAtPredecessor(null);
+                    osrMonitorEnter.setNext(oldNext);
+                    osrStart.setNext(osrMonitorEnter);
                 }
-                FixedNode oldNext = osrStart.next();
-                oldNext.replaceAtPredecessor(null);
-                osrMonitorEnter.setNext(oldNext);
-                osrStart.setNext(osrMonitorEnter);
             }
+
             debug.dump(DebugContext.DETAILED_LEVEL, graph, "After inserting OSR monitor enters");
             /*
              * Ensure balanced monitorenter - monitorexit
@@ -265,7 +279,7 @@ public class OnStackReplacementPhase extends Phase {
         NodeIterable<EntryMarkerNode> osrNodes = graph.getNodes(EntryMarkerNode.TYPE);
         EntryMarkerNode osr = osrNodes.first();
         if (osr == null) {
-            throw new PermanentBailoutException("No OnStackReplacementNode generated");
+            throw new GraalError("No OnStackReplacementNode generated");
         }
         if (osrNodes.count() > 1) {
             throw new GraalError("Multiple OnStackReplacementNodes generated");
@@ -293,31 +307,5 @@ public class OnStackReplacementPhase extends Phase {
     @Override
     public float codeSizeIncrease() {
         return 5.0f;
-    }
-
-    private static class OSRLocalSpeculationReason implements SpeculationReason {
-        private int bci;
-        private Stamp speculatedStamp;
-        private int localIndex;
-
-        OSRLocalSpeculationReason(int bci, Stamp speculatedStamp, int localIndex) {
-            this.bci = bci;
-            this.speculatedStamp = speculatedStamp;
-            this.localIndex = localIndex;
-        }
-
-        @Override
-        public boolean equals(Object obj) {
-            if (obj instanceof OSRLocalSpeculationReason) {
-                OSRLocalSpeculationReason that = (OSRLocalSpeculationReason) obj;
-                return this.bci == that.bci && this.speculatedStamp.equals(that.speculatedStamp) && this.localIndex == that.localIndex;
-            }
-            return false;
-        }
-
-        @Override
-        public int hashCode() {
-            return (bci << 16) ^ speculatedStamp.hashCode() ^ localIndex;
-        }
     }
 }

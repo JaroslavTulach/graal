@@ -1,49 +1,62 @@
 /*
- * Copyright (c) 2013, 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2013, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
- * This code is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * The Universal Permissive License (UPL), Version 1.0
  *
- * This code is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
- * version 2 for more details (a copy is included in the LICENSE file that
- * accompanied this code).
+ * Subject to the condition set forth below, permission is hereby granted to any
+ * person obtaining a copy of this software, associated documentation and/or
+ * data (collectively the "Software"), free of charge and under any and all
+ * copyright rights in the Software, and any and all patent rights owned or
+ * freely licensable by each licensor hereunder covering either (i) the
+ * unmodified Software as contributed to or provided by such licensor, or (ii)
+ * the Larger Works (as defined below), to deal in both
  *
- * You should have received a copy of the GNU General Public License version
- * 2 along with this work; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
+ * (a) the Software, and
  *
- * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
- * or visit www.oracle.com if you need additional information or have any
- * questions.
+ * (b) any piece of software and/or hardware listed in the lrgrwrks.txt file if
+ * one is included with the Software each a "Larger Work" to which the Software
+ * is contributed by such licensors),
+ *
+ * without restriction, including without limitation the rights to copy, create
+ * derivative works of, display, perform, and distribute the Software and make,
+ * use, sell, offer for sale, import, export, have made, and have sold the
+ * Software and the Larger Work(s), and to sublicense the foregoing rights on
+ * either these or other terms.
+ *
+ * This license is subject to the following condition:
+ *
+ * The above copyright notice and either this complete permission notice or at a
+ * minimum a reference to the UPL must be included in all copies or substantial
+ * portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
  */
 package com.oracle.truffle.object;
 
 import java.util.Iterator;
 
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
-import com.oracle.truffle.api.interop.ForeignAccess;
 import com.oracle.truffle.api.object.DynamicObject;
 import com.oracle.truffle.api.object.LocationFactory;
 import com.oracle.truffle.api.object.Property;
 import com.oracle.truffle.api.object.Shape;
 
 /** @since 0.17 or earlier */
+@SuppressWarnings("deprecation")
 public abstract class DynamicObjectImpl extends DynamicObject implements Cloneable {
-    private ShapeImpl shape;
 
     /** @since 0.17 or earlier */
-    public static final DebugCounter reshapeCount = DebugCounter.create("Reshape count");
-
-    /** @since 0.17 or earlier */
-    @SuppressWarnings("deprecation")
     protected DynamicObjectImpl(Shape shape) {
-        assert shape instanceof ShapeImpl;
+        super(shape.getRoot());
         initialize(shape);
-        setShape(shape);
+        setShapeImpl(shape);
 
         if (ObjectStorageOptions.Profile) {
             Debug.trackObject(this);
@@ -51,21 +64,18 @@ public abstract class DynamicObjectImpl extends DynamicObject implements Cloneab
     }
 
     /** @since 0.17 or earlier */
-    @SuppressWarnings("deprecation")
+    @Deprecated
     public Object getTypeIdentifier() {
         return getShape();
     }
 
-    /** @since 0.17 or earlier */
-    @Override
-    public ShapeImpl getShape() {
-        return shape;
+    final ShapeImpl getShapeImpl() {
+        return (ShapeImpl) getShape();
     }
 
-    /** @since 0.17 or earlier */
-    protected void setShape(Shape shape) {
-        assert shape.getLayout().getType().isInstance(this);
-        this.shape = (ShapeImpl) shape;
+    private void setShapeImpl(Shape shape) {
+        assert shape instanceof ShapeImpl;
+        LayoutImpl.ACCESS.setShape(this, shape);
     }
 
     /** @since 0.17 or earlier */
@@ -83,7 +93,7 @@ public abstract class DynamicObjectImpl extends DynamicObject implements Cloneab
         assert !oldShape.isShared();
         if (oldShape != newShape) {
             resizeStore(oldShape, newShape);
-            setShape(newShape);
+            setShapeImpl(newShape);
 
             assert checkExtensionArrayInvariants(newShape);
         }
@@ -104,7 +114,7 @@ public abstract class DynamicObjectImpl extends DynamicObject implements Cloneab
             assert checkSetShape(oldShape, newShape);
 
             growStore(oldShape, newShape);
-            setShape(newShape);
+            setShapeImpl(newShape);
 
             assert checkExtensionArrayInvariants(newShape);
         }
@@ -126,7 +136,7 @@ public abstract class DynamicObjectImpl extends DynamicObject implements Cloneab
     /** @since 0.17 or earlier */
     protected abstract void growPrimitiveStore(Shape oldShape, Shape newShape);
 
-    private void resizeStore(Shape oldShape, Shape newShape) {
+    protected void resizeStore(Shape oldShape, Shape newShape) {
         resizeObjectStore(oldShape, newShape);
         if (((ShapeImpl) newShape).hasPrimitiveArray) {
             resizePrimitiveStore(oldShape, newShape);
@@ -184,7 +194,7 @@ public abstract class DynamicObjectImpl extends DynamicObject implements Cloneab
 
     private void copyProperties(DynamicObject fromObject) {
         ShapeImpl fromShape = (ShapeImpl) fromObject.getShape();
-        ShapeImpl toShape = getShape();
+        ShapeImpl toShape = getShapeImpl();
         assert toShape.isRelated(fromShape);
         assert toShape.isValid();
         assert !fromShape.isShared();
@@ -210,7 +220,7 @@ public abstract class DynamicObjectImpl extends DynamicObject implements Cloneab
             if (existing.getFlags() != newFlags) {
                 Property newProperty = existing.copyWithFlags(newFlags);
                 Shape newShape = oldShape.replaceProperty(existing, newProperty);
-                this.setShape(newShape);
+                setShapeImpl(newShape);
             }
             return true;
         } else {
@@ -275,14 +285,14 @@ public abstract class DynamicObjectImpl extends DynamicObject implements Cloneab
     @Override
     @TruffleBoundary
     public void define(Object key, Object value, int flags) {
-        define(key, value, flags, getShape().getLayout().getStrategy().getDefaultLocationFactory());
+        define(key, value, flags, getShapeImpl().getLayout().getStrategy().getDefaultLocationFactory());
     }
 
     /** @since 0.17 or earlier */
     @Override
     @TruffleBoundary
     public void define(Object key, Object value, int flags, LocationFactory locationFactory) {
-        ShapeImpl oldShape = getShape();
+        ShapeImpl oldShape = getShapeImpl();
         oldShape.getLayout().getStrategy().objectDefineProperty(this, key, value, flags, locationFactory, oldShape);
     }
 
@@ -290,7 +300,7 @@ public abstract class DynamicObjectImpl extends DynamicObject implements Cloneab
     @Override
     @TruffleBoundary
     public boolean delete(Object key) {
-        ShapeImpl oldShape = getShape();
+        ShapeImpl oldShape = getShapeImpl();
         Property existing = oldShape.getProperty(key);
         if (existing != null) {
             oldShape.getLayout().getStrategy().objectRemoveProperty(this, existing, oldShape);
@@ -302,20 +312,8 @@ public abstract class DynamicObjectImpl extends DynamicObject implements Cloneab
 
     /** @since 0.17 or earlier */
     @Override
-    public int size() {
-        return getShape().getPropertyCount();
-    }
-
-    /** @since 0.17 or earlier */
-    @Override
-    public boolean isEmpty() {
-        return size() == 0;
-    }
-
-    /** @since 0.17 or earlier */
-    @Override
     public final boolean updateShape() {
-        return getShape().getLayout().getStrategy().updateShape(this);
+        return getShapeImpl().getLayout().getStrategy().updateShape(this);
     }
 
     /** @since 0.17 or earlier */
@@ -324,9 +322,4 @@ public abstract class DynamicObjectImpl extends DynamicObject implements Cloneab
         return cloneWithShape(currentShape);
     }
 
-    /** @since 0.17 or earlier */
-    @Override
-    public ForeignAccess getForeignAccess() {
-        return getShape().getForeignAccessFactory(this);
-    }
 }

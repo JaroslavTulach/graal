@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2012, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -27,7 +29,11 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 
 import java.math.BigInteger;
+import java.util.Arrays;
+import java.util.List;
+import java.util.stream.Stream;
 
+import org.graalvm.compiler.core.common.type.ArithmeticOpTable;
 import org.graalvm.compiler.core.common.type.ArithmeticOpTable.BinaryOp;
 import org.graalvm.compiler.core.common.type.ArithmeticOpTable.IntegerConvertOp;
 import org.graalvm.compiler.core.common.type.ArithmeticOpTable.ShiftOp;
@@ -37,6 +43,7 @@ import org.graalvm.compiler.core.common.type.StampFactory;
 import org.graalvm.compiler.debug.DebugContext;
 import org.graalvm.compiler.graph.test.GraphTest;
 import org.graalvm.compiler.nodes.ConstantNode;
+import org.graalvm.compiler.nodes.NodeView;
 import org.graalvm.compiler.nodes.StructuredGraph;
 import org.graalvm.compiler.nodes.StructuredGraph.AllowAssumptions;
 import org.graalvm.compiler.options.OptionValues;
@@ -67,52 +74,52 @@ public class IntegerStampTest extends GraphTest {
 
     @Test
     public void testBooleanConstant() {
-        assertEquals(IntegerStamp.create(32, 1, 1, 0x1, 0x1), ConstantNode.forBoolean(true, graph).stamp());
-        assertEquals(IntegerStamp.create(32, 0, 0, 0x0, 0x0), ConstantNode.forBoolean(false, graph).stamp());
+        assertEquals(IntegerStamp.create(32, 1, 1, 0x1, 0x1), ConstantNode.forBoolean(true, graph).stamp(NodeView.DEFAULT));
+        assertEquals(IntegerStamp.create(32, 0, 0, 0x0, 0x0), ConstantNode.forBoolean(false, graph).stamp(NodeView.DEFAULT));
     }
 
     @Test
     public void testByteConstant() {
-        assertEquals(IntegerStamp.create(32, 0, 0, 0x0, 0x0), ConstantNode.forByte((byte) 0, graph).stamp());
-        assertEquals(IntegerStamp.create(32, 16, 16, 0x10, 0x10), ConstantNode.forByte((byte) 16, graph).stamp());
-        assertEquals(IntegerStamp.create(32, -16, -16, 0xfffffff0L, 0xfffffff0L), ConstantNode.forByte((byte) -16, graph).stamp());
-        assertEquals(IntegerStamp.create(32, 127, 127, 0x7f, 0x7f), ConstantNode.forByte((byte) 127, graph).stamp());
-        assertEquals(IntegerStamp.create(32, -128, -128, 0xffffff80L, 0xffffff80L), ConstantNode.forByte((byte) -128, graph).stamp());
+        assertEquals(IntegerStamp.create(32, 0, 0, 0x0, 0x0), ConstantNode.forByte((byte) 0, graph).stamp(NodeView.DEFAULT));
+        assertEquals(IntegerStamp.create(32, 16, 16, 0x10, 0x10), ConstantNode.forByte((byte) 16, graph).stamp(NodeView.DEFAULT));
+        assertEquals(IntegerStamp.create(32, -16, -16, 0xfffffff0L, 0xfffffff0L), ConstantNode.forByte((byte) -16, graph).stamp(NodeView.DEFAULT));
+        assertEquals(IntegerStamp.create(32, 127, 127, 0x7f, 0x7f), ConstantNode.forByte((byte) 127, graph).stamp(NodeView.DEFAULT));
+        assertEquals(IntegerStamp.create(32, -128, -128, 0xffffff80L, 0xffffff80L), ConstantNode.forByte((byte) -128, graph).stamp(NodeView.DEFAULT));
     }
 
     @Test
     public void testShortConstant() {
-        assertEquals(IntegerStamp.create(32, 0, 0, 0x0, 0x0), ConstantNode.forShort((short) 0, graph).stamp());
-        assertEquals(IntegerStamp.create(32, 128, 128, 0x80, 0x80), ConstantNode.forShort((short) 128, graph).stamp());
-        assertEquals(IntegerStamp.create(32, -128, -128, 0xffffff80L, 0xffffff80L), ConstantNode.forShort((short) -128, graph).stamp());
-        assertEquals(IntegerStamp.create(32, 32767, 32767, 0x7fff, 0x7fff), ConstantNode.forShort((short) 32767, graph).stamp());
-        assertEquals(IntegerStamp.create(32, -32768, -32768, 0xffff8000L, 0xffff8000L), ConstantNode.forShort((short) -32768, graph).stamp());
+        assertEquals(IntegerStamp.create(32, 0, 0, 0x0, 0x0), ConstantNode.forShort((short) 0, graph).stamp(NodeView.DEFAULT));
+        assertEquals(IntegerStamp.create(32, 128, 128, 0x80, 0x80), ConstantNode.forShort((short) 128, graph).stamp(NodeView.DEFAULT));
+        assertEquals(IntegerStamp.create(32, -128, -128, 0xffffff80L, 0xffffff80L), ConstantNode.forShort((short) -128, graph).stamp(NodeView.DEFAULT));
+        assertEquals(IntegerStamp.create(32, 32767, 32767, 0x7fff, 0x7fff), ConstantNode.forShort((short) 32767, graph).stamp(NodeView.DEFAULT));
+        assertEquals(IntegerStamp.create(32, -32768, -32768, 0xffff8000L, 0xffff8000L), ConstantNode.forShort((short) -32768, graph).stamp(NodeView.DEFAULT));
     }
 
     @Test
     public void testCharConstant() {
-        assertEquals(IntegerStamp.create(32, 0, 0, 0x0, 0x0), ConstantNode.forChar((char) 0, graph).stamp());
-        assertEquals(IntegerStamp.create(32, 'A', 'A', 'A', 'A'), ConstantNode.forChar('A', graph).stamp());
-        assertEquals(IntegerStamp.create(32, 128, 128, 0x80, 0x80), ConstantNode.forChar((char) 128, graph).stamp());
-        assertEquals(IntegerStamp.create(32, 65535, 65535, 0xffff, 0xffff), ConstantNode.forChar((char) 65535, graph).stamp());
+        assertEquals(IntegerStamp.create(32, 0, 0, 0x0, 0x0), ConstantNode.forChar((char) 0, graph).stamp(NodeView.DEFAULT));
+        assertEquals(IntegerStamp.create(32, 'A', 'A', 'A', 'A'), ConstantNode.forChar('A', graph).stamp(NodeView.DEFAULT));
+        assertEquals(IntegerStamp.create(32, 128, 128, 0x80, 0x80), ConstantNode.forChar((char) 128, graph).stamp(NodeView.DEFAULT));
+        assertEquals(IntegerStamp.create(32, 65535, 65535, 0xffff, 0xffff), ConstantNode.forChar((char) 65535, graph).stamp(NodeView.DEFAULT));
     }
 
     @Test
     public void testIntConstant() {
-        assertEquals(IntegerStamp.create(32, 0, 0, 0x0, 0x0), ConstantNode.forInt(0, graph).stamp());
-        assertEquals(IntegerStamp.create(32, 128, 128, 0x80, 0x80), ConstantNode.forInt(128, graph).stamp());
-        assertEquals(IntegerStamp.create(32, -128, -128, 0xffffff80L, 0xffffff80L), ConstantNode.forInt(-128, graph).stamp());
-        assertEquals(IntegerStamp.create(32, Integer.MAX_VALUE, Integer.MAX_VALUE, 0x7fffffff, 0x7fffffff), ConstantNode.forInt(Integer.MAX_VALUE, graph).stamp());
-        assertEquals(IntegerStamp.create(32, Integer.MIN_VALUE, Integer.MIN_VALUE, 0x80000000L, 0x80000000L), ConstantNode.forInt(Integer.MIN_VALUE, graph).stamp());
+        assertEquals(IntegerStamp.create(32, 0, 0, 0x0, 0x0), ConstantNode.forInt(0, graph).stamp(NodeView.DEFAULT));
+        assertEquals(IntegerStamp.create(32, 128, 128, 0x80, 0x80), ConstantNode.forInt(128, graph).stamp(NodeView.DEFAULT));
+        assertEquals(IntegerStamp.create(32, -128, -128, 0xffffff80L, 0xffffff80L), ConstantNode.forInt(-128, graph).stamp(NodeView.DEFAULT));
+        assertEquals(IntegerStamp.create(32, Integer.MAX_VALUE, Integer.MAX_VALUE, 0x7fffffff, 0x7fffffff), ConstantNode.forInt(Integer.MAX_VALUE, graph).stamp(NodeView.DEFAULT));
+        assertEquals(IntegerStamp.create(32, Integer.MIN_VALUE, Integer.MIN_VALUE, 0x80000000L, 0x80000000L), ConstantNode.forInt(Integer.MIN_VALUE, graph).stamp(NodeView.DEFAULT));
     }
 
     @Test
     public void testLongConstant() {
-        assertEquals(IntegerStamp.create(64, 0, 0, 0x0, 0x0), ConstantNode.forLong(0, graph).stamp());
-        assertEquals(IntegerStamp.create(64, 128, 128, 0x80, 0x80), ConstantNode.forLong(128, graph).stamp());
-        assertEquals(IntegerStamp.create(64, -128, -128, 0xffffffffffffff80L, 0xffffffffffffff80L), ConstantNode.forLong(-128, graph).stamp());
-        assertEquals(IntegerStamp.create(64, Long.MAX_VALUE, Long.MAX_VALUE, 0x7fffffffffffffffL, 0x7fffffffffffffffL), ConstantNode.forLong(Long.MAX_VALUE, graph).stamp());
-        assertEquals(IntegerStamp.create(64, Long.MIN_VALUE, Long.MIN_VALUE, 0x8000000000000000L, 0x8000000000000000L), ConstantNode.forLong(Long.MIN_VALUE, graph).stamp());
+        assertEquals(IntegerStamp.create(64, 0, 0, 0x0, 0x0), ConstantNode.forLong(0, graph).stamp(NodeView.DEFAULT));
+        assertEquals(IntegerStamp.create(64, 128, 128, 0x80, 0x80), ConstantNode.forLong(128, graph).stamp(NodeView.DEFAULT));
+        assertEquals(IntegerStamp.create(64, -128, -128, 0xffffffffffffff80L, 0xffffffffffffff80L), ConstantNode.forLong(-128, graph).stamp(NodeView.DEFAULT));
+        assertEquals(IntegerStamp.create(64, Long.MAX_VALUE, Long.MAX_VALUE, 0x7fffffffffffffffL, 0x7fffffffffffffffL), ConstantNode.forLong(Long.MAX_VALUE, graph).stamp(NodeView.DEFAULT));
+        assertEquals(IntegerStamp.create(64, Long.MIN_VALUE, Long.MIN_VALUE, 0x8000000000000000L, 0x8000000000000000L), ConstantNode.forLong(Long.MIN_VALUE, graph).stamp(NodeView.DEFAULT));
     }
 
     @Test
@@ -568,5 +575,71 @@ public class IntegerStampTest extends GraphTest {
         assertEquals(IntegerStamp.create(bits, -100, 100), div.foldStamp(IntegerStamp.create(bits, -100, 100), IntegerStamp.create(bits, 1, max)));
         assertEquals(IntegerStamp.create(bits, 0, 1000), div.foldStamp(IntegerStamp.create(bits, 100, 1000), IntegerStamp.create(bits, 1, max)));
         assertEquals(IntegerStamp.create(bits, -1000, 0), div.foldStamp(IntegerStamp.create(bits, -1000, -100), IntegerStamp.create(bits, 1, max)));
+    }
+
+    @Test
+    public void testEmpty() {
+        IntegerStamp intStamp = StampFactory.forInteger(32);
+        IntegerStamp longStamp = StampFactory.forInteger(64);
+        Stamp intEmpty = StampFactory.empty(JavaKind.Int);
+        Stamp longEmpty = StampFactory.empty(JavaKind.Long);
+        assertEquals(intStamp.join(intEmpty), intEmpty);
+        assertEquals(intStamp.meet(intEmpty), intStamp);
+        assertEquals(longStamp.join(longEmpty), longEmpty);
+        assertEquals(longStamp.meet(longEmpty), longStamp);
+    }
+
+    @Test
+    public void testUnaryOpFoldEmpty() {
+        // boolean?, byte, short, int, long
+        Stream.of(1, 8, 16, 32, 64).map(bits -> StampFactory.forInteger(bits).empty()).forEach(empty -> {
+            for (ArithmeticOpTable.UnaryOp<?> op : IntegerStamp.OPS.getUnaryOps()) {
+                if (op != null) {
+                    Assert.assertTrue(op.foldStamp(empty).isEmpty());
+                }
+            }
+        });
+    }
+
+    @Test
+    public void testIntegerConvertOpWithEmpty() {
+        int[] bits = new int[]{1, 8, 16, 32, 64};
+
+        List<IntegerConvertOp<?>> extendOps = Arrays.asList(
+                        IntegerStamp.OPS.getSignExtend(),
+                        IntegerStamp.OPS.getZeroExtend());
+
+        for (int inputBits : bits) {
+            IntegerStamp emptyIn = StampFactory.forInteger(inputBits).empty();
+            for (int outputBits : bits) {
+                IntegerStamp emptyOut = StampFactory.forInteger(outputBits).empty();
+                if (inputBits <= outputBits) {
+                    for (IntegerConvertOp<?> stamp : extendOps) {
+                        IntegerStamp folded = (IntegerStamp) stamp.foldStamp(inputBits, outputBits, emptyIn);
+                        Assert.assertTrue(folded.isEmpty());
+                        Assert.assertEquals(outputBits, folded.getBits());
+
+                        // Widening is lossless, inversion is well-defined.
+                        IntegerStamp inverted = (IntegerStamp) stamp.invertStamp(inputBits, outputBits, emptyOut);
+                        Assert.assertTrue(inverted.isEmpty());
+                        Assert.assertEquals(inputBits, inverted.getBits());
+                    }
+                }
+
+                if (inputBits >= outputBits) {
+                    IntegerConvertOp<?> narrow = IntegerStamp.OPS.getNarrow();
+                    IntegerStamp folded = (IntegerStamp) narrow.foldStamp(inputBits, outputBits, emptyIn);
+                    Assert.assertTrue(folded.isEmpty());
+                    Assert.assertEquals(outputBits, folded.getBits());
+
+                    // Narrowing is lossy, inversion can potentially yield empty or unknown (null).
+                    IntegerStamp inverted = (IntegerStamp) narrow.invertStamp(inputBits, outputBits, emptyOut);
+                    Assert.assertTrue(inverted == null || inverted.isEmpty());
+                    if (inverted != null) {
+                        Assert.assertEquals(inputBits, inverted.getBits());
+                    }
+                }
+            }
+        }
     }
 }

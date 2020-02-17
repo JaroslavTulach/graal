@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * The Universal Permissive License (UPL), Version 1.0
@@ -41,11 +41,9 @@
 package com.oracle.truffle.sl.builtins;
 
 import com.oracle.truffle.api.dsl.Specialization;
-import com.oracle.truffle.api.interop.ForeignAccess;
-import com.oracle.truffle.api.interop.Message;
-import com.oracle.truffle.api.interop.TruffleObject;
+import com.oracle.truffle.api.interop.InteropLibrary;
 import com.oracle.truffle.api.interop.UnsupportedMessageException;
-import com.oracle.truffle.api.nodes.Node;
+import com.oracle.truffle.api.library.CachedLibrary;
 import com.oracle.truffle.api.nodes.NodeInfo;
 import com.oracle.truffle.sl.SLException;
 
@@ -56,14 +54,12 @@ import com.oracle.truffle.sl.SLException;
 @NodeInfo(shortName = "getSize")
 public abstract class SLGetSizeBuiltin extends SLBuiltinNode {
 
-    @Child private Node getSize = Message.GET_SIZE.createNode();
-
-    @Specialization
-    public Object getSize(TruffleObject obj) {
+    @Specialization(limit = "3")
+    public Object getSize(Object obj, @CachedLibrary("obj") InteropLibrary arrays) {
         try {
-            return ForeignAccess.sendGetSize(getSize, obj);
+            return arrays.getArraySize(obj);
         } catch (UnsupportedMessageException e) {
-            throw new SLException(e.getMessage());
+            throw new SLException("Element is not a valid array.", this);
         }
     }
 }

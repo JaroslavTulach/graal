@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2016, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -22,16 +24,19 @@
  */
 package org.graalvm.compiler.replacements.test;
 
+import jdk.vm.ci.code.InstalledCode;
+import jdk.vm.ci.meta.ResolvedJavaMethod;
 import org.graalvm.compiler.nodes.StructuredGraph;
 import org.graalvm.compiler.nodes.graphbuilderconf.GraphBuilderConfiguration;
 import org.graalvm.compiler.options.OptionValues;
 import org.graalvm.compiler.replacements.ConstantBindingParameterPlugin;
 import org.junit.Test;
 
-import jdk.vm.ci.code.InstalledCode;
-import jdk.vm.ci.meta.ResolvedJavaMethod;
-
 public class StringIndexOfConstantTest extends StringIndexOfTestBase {
+
+    public StringIndexOfConstantTest(String sourceString, String constantString) {
+        super(sourceString, constantString);
+    }
 
     /*
      * These test definitions could live in the superclass except that the mx junit individual test
@@ -86,6 +91,7 @@ public class StringIndexOfConstantTest extends StringIndexOfTestBase {
     @Override
     protected InstalledCode getCode(final ResolvedJavaMethod installedCodeOwner, StructuredGraph graph0, boolean ignoreForceCompile, boolean ignoreInstallAsDefault, OptionValues options) {
         // Force recompile if constant binding should be done
-        return super.getCode(installedCodeOwner, graph0, /* forceCompile */true, /* installAsDefault */false, options);
+        return super.getCode(installedCodeOwner, graph0,
+                        /* forceCompile */ true, /* installAsDefault */ false, options);
     }
 }

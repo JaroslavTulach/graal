@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -27,11 +29,6 @@ import static jdk.vm.ci.code.ValueUtil.asRegister;
 import java.util.ArrayList;
 import java.util.EnumSet;
 
-import jdk.vm.ci.code.CallingConvention;
-import jdk.vm.ci.meta.AllocatableValue;
-import jdk.vm.ci.meta.Constant;
-import jdk.vm.ci.meta.Value;
-
 import org.graalvm.compiler.asm.amd64.AMD64MacroAssembler;
 import org.graalvm.compiler.core.common.spi.ForeignCallLinkage;
 import org.graalvm.compiler.lir.LIRFrameState;
@@ -40,6 +37,11 @@ import org.graalvm.compiler.lir.LIRValueUtil;
 import org.graalvm.compiler.lir.ValueProcedure;
 import org.graalvm.compiler.lir.amd64.AMD64LIRInstruction;
 import org.graalvm.compiler.lir.asm.CompilationResultBuilder;
+
+import jdk.vm.ci.code.CallingConvention;
+import jdk.vm.ci.meta.AllocatableValue;
+import jdk.vm.ci.meta.Constant;
+import jdk.vm.ci.meta.Value;
 
 public final class AMD64HotSpotConstantRetrievalOp extends AMD64LIRInstruction {
     public static final LIRInstructionClass<AMD64HotSpotConstantRetrievalOp> TYPE = LIRInstructionClass.create(AMD64HotSpotConstantRetrievalOp.class);
@@ -113,8 +115,7 @@ public final class AMD64HotSpotConstantRetrievalOp extends AMD64LIRInstruction {
             masm.movq(asRegister(descriptionParameters[i]), asRegister(constantDescriptions[i]));
         }
 
-        final int before = masm.position();
-        masm.call();
+        final int before = masm.directCall(false, crb.target.arch.getMachineCodeCallDisplacementOffset(), crb.target.wordSize);
         final int after = masm.position();
         crb.recordDirectCall(before, after, callLinkage, frameState);
     }

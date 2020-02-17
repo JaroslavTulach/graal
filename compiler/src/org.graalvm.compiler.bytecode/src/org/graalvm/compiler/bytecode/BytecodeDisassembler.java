@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2012, 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -320,5 +322,62 @@ public class BytecodeDisassembler {
             }
         }
         // @formatter:on
+    }
+
+    public static JavaMethod getInvokedMethodAt(ResolvedJavaMethod method, int invokeBci) {
+        if (method.getCode() == null) {
+            return null;
+        }
+        ConstantPool cp = method.getConstantPool();
+        BytecodeStream stream = new BytecodeStream(method.getCode());
+        int opcode = stream.currentBC();
+        while (opcode != Bytecodes.END) {
+            int bci = stream.currentBCI();
+            if (bci == invokeBci) {
+                if (stream.nextBCI() > bci + 1) {
+                    switch (opcode) {
+                        case INVOKEVIRTUAL:
+                        case INVOKESPECIAL:
+                        case INVOKESTATIC: {
+                            int cpi = stream.readCPI();
+                            JavaMethod callee = cp.lookupMethod(cpi, opcode);
+                            return callee;
+                        }
+                        case INVOKEINTERFACE: {
+                            int cpi = stream.readCPI();
+                            JavaMethod callee = cp.lookupMethod(cpi, opcode);
+                            return callee;
+                        }
+                        case INVOKEDYNAMIC: {
+                            int cpi = stream.readCPI4();
+                            JavaMethod callee = cp.lookupMethod(cpi, opcode);
+                            return callee;
+                        }
+                        default:
+                            throw new InternalError(BytecodeDisassembler.disassembleOne(method, invokeBci));
+                    }
+                }
+            }
+            stream.next();
+            opcode = stream.currentBC();
+        }
+        return null;
+    }
+
+    public static int getBytecodeAt(ResolvedJavaMethod method, int invokeBci) {
+        if (method.getCode() == null) {
+            return -1;
+        }
+        BytecodeStream stream = new BytecodeStream(method.getCode());
+        int opcode = stream.currentBC();
+        while (opcode != Bytecodes.END) {
+            int bci = stream.currentBCI();
+            if (bci == invokeBci) {
+                return opcode;
+            }
+            stream.next();
+            opcode = stream.currentBC();
+        }
+        return -1;
     }
 }

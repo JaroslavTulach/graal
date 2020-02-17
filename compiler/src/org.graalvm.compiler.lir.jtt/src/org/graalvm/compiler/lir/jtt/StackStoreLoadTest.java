@@ -1,11 +1,13 @@
 /*
- * Copyright (c) 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2017, 2019, Oracle and/or its affiliates. All rights reserved.
  * Copyright (c) 2017, Red Hat Inc. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -137,7 +139,7 @@ public class StackStoreLoadTest extends LIRTest {
     }
 
     @Test
-    public void runByte() throws Throwable {
+    public void runByte() {
         runTest("testByte", Byte.MIN_VALUE, supply(() -> new byte[3]));
         runTest("testByte", (byte) -1, supply(() -> new byte[3]));
         runTest("testByte", (byte) 0, supply(() -> new byte[3]));

@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2016, 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2016, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -22,13 +24,11 @@
  */
 package org.graalvm.compiler.truffle.test;
 
-import static org.graalvm.compiler.truffle.TruffleCompilerOptions.TruffleCompilationThreshold;
-
-import org.graalvm.compiler.truffle.GraalTruffleRuntime;
-import org.graalvm.compiler.truffle.OptimizedCallTarget;
-import org.graalvm.compiler.truffle.OptimizedDirectCallNode;
-import org.graalvm.compiler.truffle.OptimizedIndirectCallNode;
-import org.graalvm.compiler.truffle.TruffleCompilerOptions;
+import org.graalvm.compiler.truffle.options.PolyglotCompilerOptions;
+import org.graalvm.compiler.truffle.runtime.GraalTruffleRuntime;
+import org.graalvm.compiler.truffle.runtime.OptimizedCallTarget;
+import org.graalvm.compiler.truffle.runtime.OptimizedDirectCallNode;
+import org.graalvm.compiler.truffle.runtime.OptimizedIndirectCallNode;
 import org.junit.Assert;
 import org.junit.Test;
 
@@ -36,6 +36,7 @@ import com.oracle.truffle.api.CallTarget;
 import com.oracle.truffle.api.CompilerDirectives;
 import com.oracle.truffle.api.Truffle;
 import com.oracle.truffle.api.frame.VirtualFrame;
+import com.oracle.truffle.api.nodes.IndirectCallNode;
 import com.oracle.truffle.api.nodes.RootNode;
 
 @SuppressWarnings("try")
@@ -70,7 +71,7 @@ public class IndirectCallSiteTest extends TestWithSynchronousCompiling {
                 }
             }
         });
-        final int compilationThreshold = TruffleCompilerOptions.getValue(TruffleCompilationThreshold);
+        final int compilationThreshold = outerTarget.getOptionValue(PolyglotCompilerOptions.CompilationThreshold);
         for (int i = 0; i < compilationThreshold; i++) {
             outerTarget.call(noArguments);
         }
@@ -106,11 +107,8 @@ public class IndirectCallSiteTest extends TestWithSynchronousCompiling {
         @Override
         public Object doExecute(VirtualFrame frame) {
             Object arg = frame.getArguments()[0];
-            if (arg instanceof String) {
-                assertTrue(CompilerDirectives.inInterpreter());
-            }
             globalState[0] = arg;
-            return null;
+            return arg;
         }
 
         @CompilerDirectives.TruffleBoundary
@@ -128,7 +126,7 @@ public class IndirectCallSiteTest extends TestWithSynchronousCompiling {
 
         DirectlyCallsTargetWithArguments(OptimizedCallTarget target, Object[] arguments) {
             super();
-            this.directCallNode = new OptimizedDirectCallNode(runtime, target);
+            this.directCallNode = (OptimizedDirectCallNode) GraalTruffleRuntime.getRuntime().createDirectCallNode(target);
             this.arguments = arguments;
         }
 
@@ -193,49 +191,50 @@ public class IndirectCallSiteTest extends TestWithSynchronousCompiling {
         Assert.assertFalse(rootNode.deoptimized);
     }
 
-    /*
-     * Tests that a CallTarget will not deoptimize if it calls (using an IndirectCallNode) a target
-     * previously compiled with a different argument assumption and also inlined into another
-     * compiled target.
+    /**
+     * Tests that a {@link CallTarget} will not deoptimize if it calls (using an
+     * {@link IndirectCallNode}) a target previously compiled with a different argument assumption
+     * and also inlined into another compiled target.
      */
     @Test
-    public void testIndirectCallNodeDoesNotDeopOnTypeChangeWithInlining1() {
-        try (TruffleCompilerOptions.TruffleOptionsOverrideScope scope = TruffleCompilerOptions.overrideOptions(TruffleCompilerOptions.TruffleFunctionInlining, true)) {
-            final int compilationThreshold = TruffleCompilerOptions.getValue(TruffleCompilationThreshold);
+    public void testIndirectCallNodeDoesNotDeoptOnTypeChangeWithInlining1() {
+        final OptimizedCallTarget toInterpreterOnString = (OptimizedCallTarget) runtime.createCallTarget(new WritesToGlobalState());
+        final Object[] directArguments = new Object[]{1};
+        final OptimizedCallTarget directCall = (OptimizedCallTarget) runtime.createCallTarget(new DirectlyCallsTargetWithArguments(toInterpreterOnString, directArguments));
+        final OptimizedCallTarget noOp = (OptimizedCallTarget) runtime.createCallTarget(new DummyTarget());
+        final OptimizedCallTarget indirectCall = (OptimizedCallTarget) runtime.createCallTarget(new IndirectCallTargetFromArgument());
 
-            final OptimizedCallTarget saveArgumentToGlobalState = (OptimizedCallTarget) runtime.createCallTarget(new WritesToGlobalState());
-            final OptimizedCallTarget targetWithDirectCall = (OptimizedCallTarget) runtime.createCallTarget(new DirectlyCallsTargetWithArguments(saveArgumentToGlobalState, new Object[]{1}));
-            final OptimizedCallTarget dummyInnerTarget = (OptimizedCallTarget) runtime.createCallTarget(new DummyTarget());
-            final OptimizedCallTarget targetWithIndirectCall = (OptimizedCallTarget) runtime.createCallTarget(new IndirectCallTargetFromArgument());
+        final int compilationThreshold = toInterpreterOnString.getOptionValue(PolyglotCompilerOptions.CompilationThreshold);
 
-            for (int i = 0; i < compilationThreshold; i++) {
-                targetWithDirectCall.call(new Object[0]);
-            }
-            assertCompiled(targetWithDirectCall);
-            assertNotDeoptimized(targetWithDirectCall);
-            assertCompiled(saveArgumentToGlobalState);
-            assertNotDeoptimized(saveArgumentToGlobalState);
-
-            for (int i = 0; i < compilationThreshold; i++) {
-                targetWithIndirectCall.call(new Object[]{dummyInnerTarget});
-            }
-            assertCompiled(targetWithIndirectCall);
-            assertNotDeoptimized(targetWithIndirectCall);
-
-            globalState[0] = 0;
-            targetWithIndirectCall.call(new Object[]{saveArgumentToGlobalState});
-            Assert.assertEquals("Global state not updated!", LOREM_IPSUM, globalState[0]);
-
-            assertCompiled(targetWithIndirectCall);
-
-            // targetWithDirectCall is unaffected due to inlining
-            assertCompiled(targetWithDirectCall);
-            assertNotDeoptimized(targetWithDirectCall);
-
-            // saveArgumentToGlobalState compilation is delayed by the invalidation
-            assertNotCompiled(saveArgumentToGlobalState);
-            assertNotDeoptimized(saveArgumentToGlobalState);
-            Assert.assertEquals("saveArgumentToGlobalState was not invlidated!", 1, saveArgumentToGlobalState.getCompilationProfile().getInvalidationCount());
+        for (int i = 0; i < compilationThreshold; i++) {
+            directCall.call();
         }
+        // make sure the direct call target is compiled too not just inlined
+        for (int i = 0; i < compilationThreshold; i++) {
+            toInterpreterOnString.callDirect(null, directArguments);
+        }
+        assertCompiled(directCall);
+        assertNotDeoptimized(directCall);
+        assertCompiled(toInterpreterOnString);
+        assertNotDeoptimized(toInterpreterOnString);
+
+        for (int i = 0; i < compilationThreshold; i++) {
+            indirectCall.call(noOp);
+        }
+        assertCompiled(indirectCall);
+        assertNotDeoptimized(indirectCall);
+
+        indirectCall.call(toInterpreterOnString);
+        Assert.assertEquals("Global state not updated!", LOREM_IPSUM, globalState[0]);
+
+        assertCompiled(indirectCall);
+
+        // targetWithDirectCall is unaffected by inlining
+        assertCompiled(directCall);
+        assertNotDeoptimized(directCall);
+
+        // saveArgumentToGlobalState compilation is delayed by the invalidation
+        assertNotCompiled(toInterpreterOnString);
+        assertNotDeoptimized(toInterpreterOnString);
     }
 }

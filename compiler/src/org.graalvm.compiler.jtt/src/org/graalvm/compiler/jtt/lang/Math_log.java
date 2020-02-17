@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2011, 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -22,13 +24,14 @@
  */
 package org.graalvm.compiler.jtt.lang;
 
+import org.graalvm.compiler.options.OptionValues;
 import org.junit.Test;
 
-import org.graalvm.compiler.jtt.JTTTest;
+import jdk.vm.ci.meta.ResolvedJavaMethod;
 
 /*
  */
-public class Math_log extends JTTTest {
+public class Math_log extends UnaryMath {
 
     @SuppressWarnings("serial")
     public static class NaN extends Throwable {
@@ -78,4 +81,10 @@ public class Math_log extends JTTTest {
         runTest("test", -0.0d);
     }
 
+    @Test
+    public void run7() {
+        OptionValues options = getInitialOptions();
+        ResolvedJavaMethod method = getResolvedJavaMethod("test");
+        testManyValues(options, method);
+    }
 }

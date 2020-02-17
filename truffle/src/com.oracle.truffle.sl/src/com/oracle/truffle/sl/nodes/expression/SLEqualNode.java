@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * The Universal Permissive License (UPL), Version 1.0
@@ -40,13 +40,14 @@
  */
 package com.oracle.truffle.sl.nodes.expression;
 
-import java.math.BigInteger;
-
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
+import com.oracle.truffle.api.dsl.Fallback;
 import com.oracle.truffle.api.dsl.Specialization;
 import com.oracle.truffle.api.interop.TruffleObject;
 import com.oracle.truffle.api.nodes.NodeInfo;
+import com.oracle.truffle.sl.SLException;
 import com.oracle.truffle.sl.nodes.SLBinaryNode;
+import com.oracle.truffle.sl.runtime.SLBigNumber;
 import com.oracle.truffle.sl.runtime.SLFunction;
 import com.oracle.truffle.sl.runtime.SLNull;
 
@@ -70,7 +71,7 @@ public abstract class SLEqualNode extends SLBinaryNode {
 
     @Specialization
     @TruffleBoundary
-    protected boolean equal(BigInteger left, BigInteger right) {
+    protected boolean equal(SLBigNumber left, SLBigNumber right) {
         return left.equals(right);
     }
 
@@ -120,9 +121,18 @@ public abstract class SLEqualNode extends SLBinaryNode {
      * (without the guard) also matches (long values can be boxed to Object), it is executed. The
      * wrong return value is "false".
      */
-    @Specialization(guards = "left.getClass() != right.getClass()")
+    @Specialization(guards = "differentClasses(left, right)")
     protected boolean equal(Object left, Object right) {
         assert !left.equals(right);
         return false;
+    }
+
+    static boolean differentClasses(Object left, Object right) {
+        return left.getClass() != right.getClass();
+    }
+
+    @Fallback
+    protected Object typeError(Object left, Object right) {
+        throw SLException.typeError(this, left, right);
     }
 }

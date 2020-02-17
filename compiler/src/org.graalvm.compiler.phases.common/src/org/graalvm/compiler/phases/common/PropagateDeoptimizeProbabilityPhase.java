@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2017, 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2017, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -22,6 +24,10 @@
  */
 package org.graalvm.compiler.phases.common;
 
+import org.graalvm.collections.EconomicMap;
+import org.graalvm.collections.EconomicSet;
+import org.graalvm.collections.Equivalence;
+import org.graalvm.collections.MapCursor;
 import org.graalvm.compiler.graph.NodeStack;
 import org.graalvm.compiler.nodes.AbstractBeginNode;
 import org.graalvm.compiler.nodes.AbstractDeoptimizeNode;
@@ -30,27 +36,24 @@ import org.graalvm.compiler.nodes.AbstractMergeNode;
 import org.graalvm.compiler.nodes.ControlSplitNode;
 import org.graalvm.compiler.nodes.FixedNode;
 import org.graalvm.compiler.nodes.StructuredGraph;
+import org.graalvm.compiler.nodes.spi.CoreProviders;
 import org.graalvm.compiler.phases.BasePhase;
-import org.graalvm.compiler.phases.tiers.PhaseContext;
-import org.graalvm.util.EconomicMap;
-import org.graalvm.util.EconomicSet;
-import org.graalvm.util.MapCursor;
 
 /**
  * This phase will make sure that the branch leading towards this deopt has 0.0 probability.
  *
  */
-public class PropagateDeoptimizeProbabilityPhase extends BasePhase<PhaseContext> {
+public class PropagateDeoptimizeProbabilityPhase extends BasePhase<CoreProviders> {
 
     @Override
     @SuppressWarnings("try")
-    protected void run(final StructuredGraph graph, PhaseContext context) {
+    protected void run(final StructuredGraph graph, CoreProviders context) {
         assert !graph.hasValueProxies() : "ConvertDeoptimizeToGuardPhase always creates proxies";
 
         if (graph.hasNode(AbstractDeoptimizeNode.TYPE)) {
 
             NodeStack stack = new NodeStack();
-            EconomicMap<ControlSplitNode, EconomicSet<AbstractBeginNode>> reachableSplits = EconomicMap.create();
+            EconomicMap<ControlSplitNode, EconomicSet<AbstractBeginNode>> reachableSplits = EconomicMap.create(Equivalence.IDENTITY);
 
             // Mark all control flow nodes that are post-dominated by a deoptimization.
             for (AbstractDeoptimizeNode d : graph.getNodes(AbstractDeoptimizeNode.TYPE)) {

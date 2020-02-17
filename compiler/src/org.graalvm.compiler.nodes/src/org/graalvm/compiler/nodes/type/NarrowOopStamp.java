@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2014, 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2014, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -30,7 +32,6 @@ import org.graalvm.compiler.core.common.type.ObjectStamp;
 import org.graalvm.compiler.core.common.type.Stamp;
 
 import jdk.vm.ci.meta.Constant;
-import jdk.vm.ci.meta.JavaConstant;
 import jdk.vm.ci.meta.MemoryAccessProvider;
 import jdk.vm.ci.meta.ResolvedJavaType;
 
@@ -41,6 +42,13 @@ public abstract class NarrowOopStamp extends AbstractObjectStamp {
     protected NarrowOopStamp(ResolvedJavaType type, boolean exactType, boolean nonNull, boolean alwaysNull, CompressEncoding encoding) {
         super(type, exactType, nonNull, alwaysNull);
         this.encoding = encoding;
+    }
+
+    @Override
+    public void accept(Visitor v) {
+        super.accept(v);
+        v.visitLong(encoding.getBase());
+        v.visitInt(encoding.getShift());
     }
 
     @Override
@@ -104,9 +112,6 @@ public abstract class NarrowOopStamp extends AbstractObjectStamp {
         }
         return super.equals(other);
     }
-
-    @Override
-    public abstract JavaConstant asConstant();
 
     @Override
     public abstract boolean isCompatible(Constant other);

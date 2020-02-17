@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -44,14 +46,14 @@ import org.graalvm.compiler.nodes.graphbuilderconf.InvocationPlugins;
 import org.graalvm.compiler.nodes.graphbuilderconf.InvocationPlugins.Registration;
 import org.graalvm.compiler.nodes.memory.FloatingReadNode;
 import org.graalvm.compiler.nodes.memory.ReadNode;
+import org.graalvm.compiler.nodes.spi.CoreProviders;
 import org.graalvm.compiler.nodes.spi.LoweringTool.StandardLoweringStage;
 import org.graalvm.compiler.phases.common.CanonicalizerPhase;
+import org.graalvm.compiler.phases.common.ConditionalEliminationPhase;
 import org.graalvm.compiler.phases.common.FloatingReadPhase;
 import org.graalvm.compiler.phases.common.LoweringPhase;
-import org.graalvm.compiler.phases.common.ConditionalEliminationPhase;
-import org.graalvm.compiler.phases.tiers.PhaseContext;
-import org.graalvm.compiler.truffle.nodes.ObjectLocationIdentity;
-import org.graalvm.compiler.truffle.substitutions.TruffleGraphBuilderPlugins;
+import org.graalvm.compiler.truffle.compiler.nodes.ObjectLocationIdentity;
+import org.graalvm.compiler.truffle.compiler.substitutions.TruffleGraphBuilderPlugins;
 import org.junit.Test;
 
 import jdk.vm.ci.meta.JavaKind;
@@ -110,8 +112,8 @@ public class ConditionAnchoringTest extends GraalCompilerTest {
         assertThat(unsafeNodes, hasCount(1));
 
         // lower unsafe load
-        PhaseContext context = new PhaseContext(getProviders());
-        LoweringPhase lowering = new LoweringPhase(new CanonicalizerPhase(), StandardLoweringStage.HIGH_TIER);
+        CoreProviders context = getProviders();
+        LoweringPhase lowering = new LoweringPhase(createCanonicalizerPhase(), StandardLoweringStage.HIGH_TIER);
         lowering.apply(graph, context);
 
         unsafeNodes = graph.getNodes().filter(RawLoadNode.class);
@@ -124,7 +126,7 @@ public class ConditionAnchoringTest extends GraalCompilerTest {
         // float reads and canonicalize to give a chance to conditions to GVN
         FloatingReadPhase floatingReadPhase = new FloatingReadPhase();
         floatingReadPhase.apply(graph);
-        CanonicalizerPhase canonicalizerPhase = new CanonicalizerPhase();
+        CanonicalizerPhase canonicalizerPhase = createCanonicalizerPhase();
         canonicalizerPhase.apply(graph, context);
 
         NodeIterable<FloatingReadNode> floatingReads = graph.getNodes().filter(FloatingReadNode.class);

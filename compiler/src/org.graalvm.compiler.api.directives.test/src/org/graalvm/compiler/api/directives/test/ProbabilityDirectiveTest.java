@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2015, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -22,6 +24,8 @@
  */
 package org.graalvm.compiler.api.directives.test;
 
+import jdk.vm.ci.meta.ResolvedJavaMethod;
+
 import org.graalvm.compiler.api.directives.GraalDirectives;
 import org.graalvm.compiler.core.test.GraalCompilerTest;
 import org.graalvm.compiler.graph.iterators.NodeIterable;
@@ -34,6 +38,15 @@ import org.junit.Assert;
 import org.junit.Test;
 
 public class ProbabilityDirectiveTest extends GraalCompilerTest {
+
+    /**
+     * Called before a test is compiled.
+     */
+    @Override
+    protected void before(ResolvedJavaMethod method) {
+        // don't let -Xcomp pollute profile
+        method.reprofile();
+    }
 
     public static int branchProbabilitySnippet(int arg) {
         if (GraalDirectives.injectBranchProbability(0.125, arg > 0)) {
@@ -50,8 +63,23 @@ public class ProbabilityDirectiveTest extends GraalCompilerTest {
         test("branchProbabilitySnippet", 5);
     }
 
+    public static int branchProbabilitySnippet2(int arg) {
+        if (!GraalDirectives.injectBranchProbability(0.125, arg <= 0)) {
+            GraalDirectives.controlFlowAnchor(); // prevent removal of the if
+            return 2;
+        } else {
+            GraalDirectives.controlFlowAnchor(); // prevent removal of the if
+            return 1;
+        }
+    }
+
+    @Test
+    public void testBranchProbability2() {
+        test("branchProbabilitySnippet2", 5);
+    }
+
     @Override
-    protected boolean checkLowTierGraph(StructuredGraph graph) {
+    protected void checkLowTierGraph(StructuredGraph graph) {
         NodeIterable<IfNode> ifNodes = graph.getNodes(IfNode.TYPE);
         Assert.assertEquals("IfNode count", 1, ifNodes.count());
 
@@ -64,8 +92,6 @@ public class ProbabilityDirectiveTest extends GraalCompilerTest {
             oneSuccessor = ifNode.falseSuccessor();
         }
         Assert.assertEquals("branch probability of " + ifNode, 0.125, ifNode.probability(oneSuccessor), 0);
-
-        return true;
     }
 
     private static int returnValue(AbstractBeginNode b) {

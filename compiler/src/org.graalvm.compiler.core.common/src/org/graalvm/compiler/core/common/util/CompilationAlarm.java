@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2016, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -22,6 +24,7 @@
  */
 package org.graalvm.compiler.core.common.util;
 
+import org.graalvm.compiler.debug.Assertions;
 import org.graalvm.compiler.options.Option;
 import org.graalvm.compiler.options.OptionKey;
 import org.graalvm.compiler.options.OptionType;
@@ -34,7 +37,8 @@ public final class CompilationAlarm implements AutoCloseable {
 
     public static class Options {
         // @formatter:off
-        @Option(help = "Time limit in seconds before a compilation expires (0 to disable the limit).", type = OptionType.Debug)
+        @Option(help = "Time limit in seconds before a compilation expires (0 to disable the limit). " +
+                       "The compilation alarm will be implicitly disabled if assertions are enabled.", type = OptionType.Debug)
         public static final OptionKey<Integer> CompilationExpirationPeriod = new OptionKey<>(300);
         // @formatter:on
     }
@@ -85,15 +89,16 @@ public final class CompilationAlarm implements AutoCloseable {
 
     /**
      * Starts an alarm for setting a time limit on a compilation if there isn't already an active
-     * alarm and {@link CompilationAlarm.Options#CompilationExpirationPeriod}{@code > 0}. The
-     * returned value can be used in a try-with-resource statement to disable the alarm once the
-     * compilation is finished.
+     * alarm, if assertions are disabled and
+     * {@link CompilationAlarm.Options#CompilationExpirationPeriod}{@code > 0}. The returned value
+     * can be used in a try-with-resource statement to disable the alarm once the compilation is
+     * finished.
      *
      * @return a {@link CompilationAlarm} if there was no current alarm for the calling thread
      *         before this call otherwise {@code null}
      */
     public static CompilationAlarm trackCompilationPeriod(OptionValues options) {
-        int period = Options.CompilationExpirationPeriod.getValue(options);
+        int period = Assertions.assertionsEnabled() ? 0 : Options.CompilationExpirationPeriod.getValue(options);
         if (period > 0) {
             CompilationAlarm current = currentAlarm.get();
             if (current == null) {
@@ -105,4 +110,5 @@ public final class CompilationAlarm implements AutoCloseable {
         }
         return null;
     }
+
 }

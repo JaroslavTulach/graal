@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2017, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -31,6 +33,7 @@ import org.graalvm.compiler.graph.spi.CanonicalizerTool;
 import org.graalvm.compiler.nodeinfo.NodeCycles;
 import org.graalvm.compiler.nodeinfo.NodeInfo;
 import org.graalvm.compiler.nodes.ConstantNode;
+import org.graalvm.compiler.nodes.NodeView;
 import org.graalvm.compiler.nodes.ValueNode;
 import org.graalvm.compiler.nodes.spi.Lowerable;
 import org.graalvm.compiler.nodes.spi.LoweringTool;
@@ -52,7 +55,8 @@ public final class UnpackEndianHalfNode extends UnaryNode implements Lowerable {
         this.firstHalf = firstHalf;
     }
 
-    public static ValueNode create(ValueNode value, boolean firstHalf) {
+    @SuppressWarnings("unused")
+    public static ValueNode create(ValueNode value, boolean firstHalf, NodeView view) {
         if (value.isConstant() && value.asConstant().isDefaultForKind()) {
             return ConstantNode.defaultForKind(JavaKind.Int);
         }
@@ -65,7 +69,7 @@ public final class UnpackEndianHalfNode extends UnaryNode implements Lowerable {
 
     @Override
     public Node canonical(CanonicalizerTool tool, ValueNode forValue) {
-        if (forValue.isConstant() && forValue.asConstant().isDefaultForKind()) {
+        if (forValue.isDefaultConstant()) {
             return ConstantNode.defaultForKind(stamp.getStackKind());
         }
         return this;
@@ -81,10 +85,10 @@ public final class UnpackEndianHalfNode extends UnaryNode implements Lowerable {
         if (value.getStackKind() == JavaKind.Double) {
             result = graph().unique(new ReinterpretNode(JavaKind.Long, value));
         }
-        if ((byteOrder == ByteOrder.LITTLE_ENDIAN) == firstHalf) {
+        if ((byteOrder == ByteOrder.BIG_ENDIAN) == firstHalf) {
             result = graph().unique(new UnsignedRightShiftNode(result, ConstantNode.forInt(32, graph())));
         }
-        result = IntegerConvertNode.convert(result, StampFactory.forKind(JavaKind.Int), graph());
+        result = IntegerConvertNode.convert(result, StampFactory.forKind(JavaKind.Int), graph(), NodeView.DEFAULT);
         replaceAtUsagesAndDelete(result);
     }
 }

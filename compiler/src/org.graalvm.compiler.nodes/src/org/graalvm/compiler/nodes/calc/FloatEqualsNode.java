@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2011, 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -22,10 +24,9 @@
  */
 package org.graalvm.compiler.nodes.calc;
 
-import jdk.vm.ci.meta.ConstantReflectionProvider;
-import jdk.vm.ci.meta.MetaAccessProvider;
-import jdk.vm.ci.meta.TriState;
-import org.graalvm.compiler.core.common.calc.Condition;
+import static org.graalvm.compiler.nodeinfo.NodeCycles.CYCLES_2;
+
+import org.graalvm.compiler.core.common.calc.CanonicalCondition;
 import org.graalvm.compiler.core.common.type.FloatStamp;
 import org.graalvm.compiler.core.common.type.IntegerStamp;
 import org.graalvm.compiler.core.common.type.Stamp;
@@ -37,11 +38,15 @@ import org.graalvm.compiler.graph.spi.CanonicalizerTool;
 import org.graalvm.compiler.nodeinfo.NodeInfo;
 import org.graalvm.compiler.nodes.LogicConstantNode;
 import org.graalvm.compiler.nodes.LogicNode;
+import org.graalvm.compiler.nodes.NodeView;
 import org.graalvm.compiler.nodes.ValueNode;
 import org.graalvm.compiler.nodes.util.GraphUtil;
 import org.graalvm.compiler.options.OptionValues;
 
-import static org.graalvm.compiler.nodeinfo.NodeCycles.CYCLES_2;
+import jdk.vm.ci.meta.ConstantReflectionProvider;
+import jdk.vm.ci.meta.JavaKind;
+import jdk.vm.ci.meta.MetaAccessProvider;
+import jdk.vm.ci.meta.TriState;
 
 @NodeInfo(shortName = "==", cycles = CYCLES_2)
 public final class FloatEqualsNode extends CompareNode implements BinaryCommutative<ValueNode> {
@@ -49,13 +54,14 @@ public final class FloatEqualsNode extends CompareNode implements BinaryCommutat
     private static final FloatEqualsOp OP = new FloatEqualsOp();
 
     public FloatEqualsNode(ValueNode x, ValueNode y) {
-        super(TYPE, Condition.EQ, false, x, y);
-        assert x.stamp() instanceof FloatStamp && y.stamp() instanceof FloatStamp : x.stamp() + " " + y.stamp();
-        assert x.stamp().isCompatible(y.stamp());
+        super(TYPE, CanonicalCondition.EQ, false, x, y);
+        assert !x.getStackKind().isNumericInteger() && x.getStackKind() != JavaKind.Object;
+        assert !y.getStackKind().isNumericInteger() && y.getStackKind() != JavaKind.Object;
+        assert x.stamp(NodeView.DEFAULT).isCompatible(y.stamp(NodeView.DEFAULT));
     }
 
-    public static LogicNode create(ValueNode x, ValueNode y) {
-        LogicNode result = CompareNode.tryConstantFoldPrimitive(Condition.EQ, x, y, false);
+    public static LogicNode create(ValueNode x, ValueNode y, NodeView view) {
+        LogicNode result = CompareNode.tryConstantFoldPrimitive(CanonicalCondition.EQ, x, y, false, view);
         if (result != null) {
             return result;
         } else {
@@ -64,30 +70,35 @@ public final class FloatEqualsNode extends CompareNode implements BinaryCommutat
     }
 
     public static LogicNode create(ConstantReflectionProvider constantReflection, MetaAccessProvider metaAccess, OptionValues options, Integer smallestCompareWidth,
-                    ValueNode x, ValueNode y) {
-        LogicNode value = OP.canonical(constantReflection, metaAccess, options, smallestCompareWidth, Condition.EQ, false, x, y);
+                    ValueNode x, ValueNode y, NodeView view) {
+        LogicNode value = OP.canonical(constantReflection, metaAccess, options, smallestCompareWidth, CanonicalCondition.EQ, false, x, y, view);
         if (value != null) {
             return value;
         }
-        return create(x, y);
+        return create(x, y, view);
     }
 
     @Override
     public boolean isIdentityComparison() {
-        FloatStamp xStamp = (FloatStamp) x.stamp();
-        FloatStamp yStamp = (FloatStamp) y.stamp();
-        /*
-         * If both stamps have at most one 0.0 and it's the same 0.0 then this is an identity
-         * comparison. FloatStamp isn't careful about tracking the presence of -0.0 so assume that
-         * anything that includes 0.0 might include -0.0. So if either one is non-zero then it's an
-         * identity comparison.
-         */
-        return (!xStamp.contains(0.0) || !yStamp.contains(0.0));
+        Stamp xStamp = x.stamp(NodeView.DEFAULT);
+        Stamp yStamp = y.stamp(NodeView.DEFAULT);
+        if (xStamp instanceof FloatStamp && yStamp instanceof FloatStamp) {
+            /*
+             * If both stamps have at most one 0.0 and it's the same 0.0 then this is an identity
+             * comparison. FloatStamp isn't careful about tracking the presence of -0.0 so assume
+             * that anything that includes 0.0 might include -0.0. So if either one is non-zero then
+             * it's an identity comparison.
+             */
+            return (!((FloatStamp) xStamp).contains(0.0) || !((FloatStamp) yStamp).contains(0.0));
+        } else {
+            return false;
+        }
     }
 
     @Override
     public Node canonical(CanonicalizerTool tool, ValueNode forX, ValueNode forY) {
-        ValueNode value = OP.canonical(tool.getConstantReflection(), tool.getMetaAccess(), tool.getOptions(), tool.smallestCompareWidth(), Condition.EQ, unorderedIsTrue, forX, forY);
+        NodeView view = NodeView.from(tool);
+        ValueNode value = OP.canonical(tool.getConstantReflection(), tool.getMetaAccess(), tool.getOptions(), tool.smallestCompareWidth(), CanonicalCondition.EQ, unorderedIsTrue, forX, forY, view);
         if (value != null) {
             return value;
         }
@@ -97,14 +108,14 @@ public final class FloatEqualsNode extends CompareNode implements BinaryCommutat
     public static class FloatEqualsOp extends CompareOp {
 
         @Override
-        public LogicNode canonical(ConstantReflectionProvider constantReflection, MetaAccessProvider metaAccess, OptionValues options, Integer smallestCompareWidth, Condition condition,
-                        boolean unorderedIsTrue, ValueNode forX, ValueNode forY) {
-            LogicNode result = super.canonical(constantReflection, metaAccess, options, smallestCompareWidth, condition, unorderedIsTrue, forX, forY);
+        public LogicNode canonical(ConstantReflectionProvider constantReflection, MetaAccessProvider metaAccess, OptionValues options, Integer smallestCompareWidth, CanonicalCondition condition,
+                        boolean unorderedIsTrue, ValueNode forX, ValueNode forY, NodeView view) {
+            LogicNode result = super.canonical(constantReflection, metaAccess, options, smallestCompareWidth, condition, unorderedIsTrue, forX, forY, view);
             if (result != null) {
                 return result;
             }
-            Stamp xStampGeneric = forX.stamp();
-            Stamp yStampGeneric = forY.stamp();
+            Stamp xStampGeneric = forX.stamp(view);
+            Stamp yStampGeneric = forY.stamp(view);
             if (xStampGeneric instanceof FloatStamp && yStampGeneric instanceof FloatStamp) {
                 FloatStamp xStamp = (FloatStamp) xStampGeneric;
                 FloatStamp yStamp = (FloatStamp) yStampGeneric;
@@ -118,10 +129,10 @@ public final class FloatEqualsNode extends CompareNode implements BinaryCommutat
         }
 
         @Override
-        protected CompareNode duplicateModified(ValueNode newX, ValueNode newY, boolean unorderedIsTrue) {
-            if (newX.stamp() instanceof FloatStamp && newY.stamp() instanceof FloatStamp) {
+        protected CompareNode duplicateModified(ValueNode newX, ValueNode newY, boolean unorderedIsTrue, NodeView view) {
+            if (newX.stamp(view) instanceof FloatStamp && newY.stamp(view) instanceof FloatStamp) {
                 return new FloatEqualsNode(newX, newY);
-            } else if (newX.stamp() instanceof IntegerStamp && newY.stamp() instanceof IntegerStamp) {
+            } else if (newX.stamp(view) instanceof IntegerStamp && newY.stamp(view) instanceof IntegerStamp) {
                 return new IntegerEqualsNode(newX, newY);
             }
             throw GraalError.shouldNotReachHere();

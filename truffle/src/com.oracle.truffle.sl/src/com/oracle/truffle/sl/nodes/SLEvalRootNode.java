@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * The Universal Permissive License (UPL), Version 1.0
@@ -44,16 +44,16 @@ import java.util.Map;
 
 import com.oracle.truffle.api.CompilerDirectives;
 import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
-import com.oracle.truffle.api.TruffleLanguage.ContextReference;
-import com.oracle.truffle.api.frame.FrameDescriptor;
+import com.oracle.truffle.api.RootCallTarget;
 import com.oracle.truffle.api.frame.VirtualFrame;
-import com.oracle.truffle.api.source.SourceSection;
+import com.oracle.truffle.api.nodes.DirectCallNode;
+import com.oracle.truffle.api.nodes.RootNode;
 import com.oracle.truffle.sl.SLLanguage;
 import com.oracle.truffle.sl.runtime.SLContext;
 import com.oracle.truffle.sl.runtime.SLNull;
 
 /**
- * In addition to {@link SLRootNode}, this class performs two additional tasks:
+ * This class performs two additional tasks:
  *
  * <ul>
  * <li>Lazily registration of functions on first execution. This fulfills the semantics of
@@ -63,17 +63,37 @@ import com.oracle.truffle.sl.runtime.SLNull;
  * understood by SL.</li>
  * </ul>
  */
-public final class SLEvalRootNode extends SLRootNode {
+public final class SLEvalRootNode extends RootNode {
 
-    private final Map<String, SLRootNode> functions;
+    private final Map<String, RootCallTarget> functions;
     @CompilationFinal private boolean registered;
 
-    private final ContextReference<SLContext> reference;
+    @Child private DirectCallNode mainCallNode;
 
-    public SLEvalRootNode(SLLanguage language, FrameDescriptor frameDescriptor, SLExpressionNode bodyNode, SourceSection sourceSection, String name, Map<String, SLRootNode> functions) {
-        super(language, frameDescriptor, bodyNode, sourceSection, name);
+    public SLEvalRootNode(SLLanguage language, RootCallTarget rootFunction, Map<String, RootCallTarget> functions) {
+        super(language);
         this.functions = functions;
-        this.reference = language.getContextReference();
+        this.mainCallNode = rootFunction != null ? DirectCallNode.create(rootFunction) : null;
+    }
+
+    @Override
+    public boolean isInternal() {
+        return true;
+    }
+
+    @Override
+    protected boolean isInstrumentable() {
+        return false;
+    }
+
+    @Override
+    public String getName() {
+        return "root eval";
+    }
+
+    @Override
+    public String toString() {
+        return getName();
     }
 
     @Override
@@ -82,22 +102,20 @@ public final class SLEvalRootNode extends SLRootNode {
         if (!registered) {
             /* Function registration is a slow-path operation that must not be compiled. */
             CompilerDirectives.transferToInterpreterAndInvalidate();
-            reference.get().getFunctionRegistry().register(functions);
+            lookupContextReference(SLLanguage.class).get().getFunctionRegistry().register(functions);
             registered = true;
         }
 
-        if (getBodyNode() == null) {
+        if (mainCallNode == null) {
             /* The source code did not have a "main" function, so nothing to execute. */
             return SLNull.SINGLETON;
+        } else {
+            /* Conversion of arguments to types understood by SL. */
+            Object[] arguments = frame.getArguments();
+            for (int i = 0; i < arguments.length; i++) {
+                arguments[i] = SLContext.fromForeignValue(arguments[i]);
+            }
+            return mainCallNode.call(arguments);
         }
-
-        /* Conversion of arguments to types understood by SL. */
-        Object[] arguments = frame.getArguments();
-        for (int i = 0; i < arguments.length; i++) {
-            arguments[i] = SLContext.fromForeignValue(arguments[i]);
-        }
-
-        /* Now we can execute the body of the "main" function. */
-        return super.execute(frame);
     }
 }

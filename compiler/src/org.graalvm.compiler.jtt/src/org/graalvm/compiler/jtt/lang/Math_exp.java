@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2011, 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -22,14 +24,12 @@
  */
 package org.graalvm.compiler.jtt.lang;
 
-import org.junit.Ignore;
+import org.graalvm.compiler.options.OptionValues;
 import org.junit.Test;
-
-import org.graalvm.compiler.jtt.JTTTest;
 
 /*
  */
-public class Math_exp extends JTTTest {
+public class Math_exp extends UnaryMath {
 
     public static double test(double arg) {
         return Math.exp(arg);
@@ -65,9 +65,19 @@ public class Math_exp extends JTTTest {
         runTest("test", 0.0D);
     }
 
-    @Ignore("java.lang.AssertionError: expected:<2.718281828459045> but was:<2.7182818284590455>")
     @Test
     public void run6() {
         runTest("test", 1.0D);
+    }
+
+    @Test
+    public void run7() {
+        runTest("test", -1024D);
+    }
+
+    @Test
+    public void run8() {
+        OptionValues options = getInitialOptions();
+        testManyValues(options, getResolvedJavaMethod("test"));
     }
 }

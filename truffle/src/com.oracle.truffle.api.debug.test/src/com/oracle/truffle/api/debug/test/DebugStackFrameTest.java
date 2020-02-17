@@ -1,45 +1,79 @@
 /*
- * Copyright (c) 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2016, 2020, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
- * This code is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.  Oracle designates this
- * particular file as subject to the "Classpath" exception as provided
- * by Oracle in the LICENSE file that accompanied this code.
+ * The Universal Permissive License (UPL), Version 1.0
  *
- * This code is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
- * version 2 for more details (a copy is included in the LICENSE file that
- * accompanied this code).
+ * Subject to the condition set forth below, permission is hereby granted to any
+ * person obtaining a copy of this software, associated documentation and/or
+ * data (collectively the "Software"), free of charge and under any and all
+ * copyright rights in the Software, and any and all patent rights owned or
+ * freely licensable by each licensor hereunder covering either (i) the
+ * unmodified Software as contributed to or provided by such licensor, or (ii)
+ * the Larger Works (as defined below), to deal in both
  *
- * You should have received a copy of the GNU General Public License version
- * 2 along with this work; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
+ * (a) the Software, and
  *
- * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
- * or visit www.oracle.com if you need additional information or have any
- * questions.
+ * (b) any piece of software and/or hardware listed in the lrgrwrks.txt file if
+ * one is included with the Software each a "Larger Work" to which the Software
+ * is contributed by such licensors),
+ *
+ * without restriction, including without limitation the rights to copy, create
+ * derivative works of, display, perform, and distribute the Software and make,
+ * use, sell, offer for sale, import, export, have made, and have sold the
+ * Software and the Larger Work(s), and to sublicense the foregoing rights on
+ * either these or other terms.
+ *
+ * This license is subject to the following condition:
+ *
+ * The above copyright notice and either this complete permission notice or at a
+ * minimum a reference to the UPL must be included in all copies or substantial
+ * portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
  */
 package com.oracle.truffle.api.debug.test;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
+import java.util.ArrayList;
 import java.util.Iterator;
+import java.util.List;
 
+import com.oracle.truffle.api.instrumentation.test.InstrumentationTestLanguage;
 import org.junit.Test;
 
+import com.oracle.truffle.api.CallTarget;
+import com.oracle.truffle.api.RootCallTarget;
+import com.oracle.truffle.api.Truffle;
+import com.oracle.truffle.api.TruffleLanguage;
 import com.oracle.truffle.api.debug.DebugStackFrame;
 import com.oracle.truffle.api.debug.DebugValue;
 import com.oracle.truffle.api.debug.DebuggerSession;
 import com.oracle.truffle.api.debug.SuspendedEvent;
+import com.oracle.truffle.api.frame.VirtualFrame;
+import com.oracle.truffle.api.instrumentation.GenerateWrapper;
+import com.oracle.truffle.api.instrumentation.InstrumentableNode;
+import com.oracle.truffle.api.instrumentation.ProbeNode;
+import com.oracle.truffle.api.instrumentation.StandardTags;
+import com.oracle.truffle.api.instrumentation.Tag;
+import com.oracle.truffle.api.nodes.DirectCallNode;
+import com.oracle.truffle.api.nodes.Node;
+import com.oracle.truffle.api.nodes.RootNode;
 import com.oracle.truffle.api.source.SourceSection;
+import com.oracle.truffle.api.test.polyglot.ProxyLanguage;
 
 import org.graalvm.polyglot.Source;
 
@@ -159,14 +193,8 @@ public class DebugStackFrameTest extends AbstractDebugTest {
                 assertInvalidDebugValue(data.stackValueWithIterator);
 
                 assertEquals("45", data.heapValue.as(String.class));
-                assertFalse(data.heapValue.isWritable());
+                assertTrue(data.heapValue.isWritable());
                 assertTrue(data.heapValue.isReadable());
-
-                try {
-                    data.heapValue.set(data.heapValue);
-                    fail();
-                } catch (IllegalStateException e) {
-                }
             });
 
             expectDone();
@@ -191,14 +219,14 @@ public class DebugStackFrameTest extends AbstractDebugTest {
                 SourceSection ss = frame.getSourceSection();
                 assertSection(ss, "STATEMENT()", 2, 3, 2, 13);
                 SourceSection fss = getFunctionSourceSection(frame);
-                assertSection(fss, "a,ROOT(\n  STATEMENT())\n", 1, 13, 2, 15);
+                assertSection(fss, "ROOT(\n  STATEMENT())\n", 1, 15, 2, 15);
                 Iterator<DebugStackFrame> stackFrames = event.getStackFrames().iterator();
                 assertEquals(frame, stackFrames.next()); // The top one
                 frame = stackFrames.next(); // b
                 ss = frame.getSourceSection();
                 assertSection(ss, "CALL(a)", 5, 3, 5, 9);
                 fss = getFunctionSourceSection(frame);
-                assertSection(fss, "b,ROOT(\n  CALL(a))\n", 4, 8, 5, 11);
+                assertSection(fss, "ROOT(\n  CALL(a))\n", 4, 10, 5, 11);
                 frame = stackFrames.next(); // root
                 ss = frame.getSourceSection();
                 assertSection(ss, "CALL(b)", 7, 1, 7, 7);
@@ -209,6 +237,31 @@ public class DebugStackFrameTest extends AbstractDebugTest {
             });
             expectDone();
         }
+    }
+
+    @Test
+    public void testStackNodes() {
+        int depth = 5;
+        TestStackLanguage language = new TestStackLanguage(depth);
+        ProxyLanguage.setDelegate(language);
+        try (DebuggerSession session = tester.startSession()) {
+            session.suspendNextExecution();
+            Source source = Source.create(ProxyLanguage.ID, "Stack Test");
+            tester.startEval(source);
+            expectSuspended((SuspendedEvent event) -> {
+                DebugStackFrame frame = event.getTopStackFrame();
+                assertEquals(3, frame.getSourceSection().getCharLength());
+                Iterator<DebugStackFrame> stackFrames = event.getStackFrames().iterator();
+                assertEquals(frame, stackFrames.next()); // The top one
+                for (int d = depth; d > 0; d--) {
+                    assertTrue("Depth: " + d, stackFrames.hasNext());
+                    frame = stackFrames.next();
+                    assertSection(frame.getSourceSection(), "St", 1, 1, 1, 2);
+                }
+                assertFalse(stackFrames.hasNext());
+            });
+        }
+        expectDone();
     }
 
     private static SourceSection getFunctionSourceSection(DebugStackFrame frame) {
@@ -304,4 +357,291 @@ public class DebugStackFrameTest extends AbstractDebugTest {
         }
     }
 
+    @Test
+    public void testRawNodes() {
+        int depth = 5;
+        TestStackLanguage language = new TestStackLanguage(depth);
+        ProxyLanguage.setDelegate(language);
+        try (DebuggerSession session = tester.startSession()) {
+            session.suspendNextExecution();
+            Source source = Source.create(ProxyLanguage.ID, "Stack Test");
+            tester.startEval(source);
+            expectSuspended((SuspendedEvent event) -> {
+                DebugStackFrame frame = event.getTopStackFrame();
+                assertEquals(TestStackLanguage.TestStackRootNode.class, frame.getRawNode(ProxyLanguage.class).getRootNode().getClass());
+                Iterator<DebugStackFrame> stackFrames = event.getStackFrames().iterator();
+                assertEquals(frame, stackFrames.next()); // The top one
+                for (int d = depth; d > 0; d--) {
+                    assertTrue("Depth: " + d, stackFrames.hasNext());
+                    frame = stackFrames.next();
+                    assertEquals(TestStackLanguage.TestStackRootNode.class, frame.getRawNode(ProxyLanguage.class).getRootNode().getClass());
+                }
+                assertFalse(stackFrames.hasNext());
+            });
+        }
+        expectDone();
+    }
+
+    @Test
+    public void testRawNodesRestricted() {
+        int depth = 5;
+        TestStackLanguage language = new TestStackLanguage(depth);
+        ProxyLanguage.setDelegate(language);
+        try (DebuggerSession session = tester.startSession()) {
+            session.suspendNextExecution();
+            Source source = Source.create(ProxyLanguage.ID, "Stack Test");
+            tester.startEval(source);
+            expectSuspended((SuspendedEvent event) -> {
+                DebugStackFrame frame = event.getTopStackFrame();
+                assertEquals(null, frame.getRawNode(InstrumentationTestLanguage.class));
+                Iterator<DebugStackFrame> stackFrames = event.getStackFrames().iterator();
+                assertEquals(frame, stackFrames.next()); // The top one
+                for (int d = depth; d > 0; d--) {
+                    assertTrue("Depth: " + d, stackFrames.hasNext());
+                    frame = stackFrames.next();
+                    assertEquals(null, frame.getRawNode(InstrumentationTestLanguage.class));
+                }
+                assertFalse(stackFrames.hasNext());
+            });
+        }
+        expectDone();
+    }
+
+    @Test
+    public void testRawFrame() {
+        int depth = 5;
+        TestStackLanguage language = new TestStackLanguage(depth);
+        ProxyLanguage.setDelegate(language);
+        try (DebuggerSession session = tester.startSession()) {
+            session.suspendNextExecution();
+            Source source = Source.create(ProxyLanguage.ID, "Stack Test");
+            tester.startEval(source);
+            expectSuspended((SuspendedEvent event) -> {
+                DebugStackFrame frame = event.getTopStackFrame();
+                assertNotNull(frame.getRawFrame(ProxyLanguage.class));
+                Iterator<DebugStackFrame> stackFrames = event.getStackFrames().iterator();
+                assertEquals(frame, stackFrames.next()); // The top one
+                for (int d = depth; d > 0; d--) {
+                    assertTrue("Depth: " + d, stackFrames.hasNext());
+                    frame = stackFrames.next();
+                    assertNotNull(frame.getRawFrame(ProxyLanguage.class));
+                }
+                assertFalse(stackFrames.hasNext());
+            });
+        }
+        expectDone();
+    }
+
+    @Test
+    public void testRawFrameRestricted() {
+        int depth = 5;
+        TestStackLanguage language = new TestStackLanguage(depth);
+        ProxyLanguage.setDelegate(language);
+        try (DebuggerSession session = tester.startSession()) {
+            session.suspendNextExecution();
+            Source source = Source.create(ProxyLanguage.ID, "Stack Test");
+            tester.startEval(source);
+            expectSuspended((SuspendedEvent event) -> {
+                DebugStackFrame frame = event.getTopStackFrame();
+                assertNull(frame.getRawFrame(InstrumentationTestLanguage.class));
+                Iterator<DebugStackFrame> stackFrames = event.getStackFrames().iterator();
+                assertEquals(frame, stackFrames.next()); // The top one
+                for (int d = depth; d > 0; d--) {
+                    assertTrue("Depth: " + d, stackFrames.hasNext());
+                    frame = stackFrames.next();
+                    assertNull(frame.getRawFrame(InstrumentationTestLanguage.class));
+                }
+                assertFalse(stackFrames.hasNext());
+            });
+        }
+        expectDone();
+    }
+
+    static final class TestStackLanguage extends ProxyLanguage {
+
+        private final int depth;
+
+        TestStackLanguage(int depth) {
+            this.depth = depth;
+        }
+
+        @Override
+        protected CallTarget parse(TruffleLanguage.ParsingRequest request) throws Exception {
+            com.oracle.truffle.api.source.Source source = request.getSource();
+            return Truffle.getRuntime().createCallTarget(new TestStackRootNode(languageInstance, source, depth));
+        }
+
+        private static final class TestStackRootNode extends RootNode {
+
+            @Node.Child private TestNode child;
+            private final TruffleLanguage<?> language;
+            private final String name;
+            private final SourceSection rootSection;
+
+            TestStackRootNode(TruffleLanguage<?> language, com.oracle.truffle.api.source.Source parsedSource, int depth) {
+                super(language);
+                this.language = language;
+                rootSection = parsedSource.createSection(1);
+                name = "Test Stack";
+                child = createTestNodes(depth);
+                insert(child);
+            }
+
+            @Override
+            public String getName() {
+                return name;
+            }
+
+            @Override
+            public SourceSection getSourceSection() {
+                return rootSection;
+            }
+
+            @Override
+            public Object execute(VirtualFrame frame) {
+                return child.execute(frame);
+            }
+
+            @Override
+            protected boolean isInstrumentable() {
+                return true;
+            }
+
+            private TestNode createTestNodes(int depth) {
+                TestNode node;
+                if (depth > 0) {
+                    RootCallTarget callTarget = Truffle.getRuntime().createCallTarget(new TestStackRootNode(language, rootSection.getSource(), depth - 1));
+                    DirectCallNode callNode = Truffle.getRuntime().createDirectCallNode(callTarget);
+                    if (depth % 2 == 0) {
+                        node = new TestNode() {
+                            @Child private DirectCallNode call = insert(callNode);
+
+                            @Override
+                            public Object execute(VirtualFrame frame) {
+                                return call.call();
+                            }
+                        };
+                    } else {
+                        node = new TestInstrumentableNode() {
+                            @Child private DirectCallNode call = insert(callNode);
+
+                            @Override
+                            public SourceSection getSourceSection() {
+                                return rootSection.getSource().createUnavailableSection();
+                            }
+
+                            @Override
+                            public Object execute(VirtualFrame frame) {
+                                return call.call();
+                            }
+                        };
+                    }
+                } else {
+                    node = new TestInstrumentableNode() {
+                        @Override
+                        public SourceSection getSourceSection() {
+                            return rootSection.getSource().createSection(0, 3);
+                        }
+
+                        @Override
+                        public boolean hasTag(Class<? extends Tag> tag) {
+                            return StandardTags.StatementTag.class == tag;
+                        }
+                    };
+                }
+                List<TestNode> nodes = new ArrayList<>();
+                // A non-instrumentable node with a SourceSection
+                nodes.add(new TestNode() {
+                    @Override
+                    public SourceSection getSourceSection() {
+                        return rootSection.getSource().createSection(0, 1);
+                    }
+                });
+                // A non-instrumentable node
+                nodes.add(new TestNode());
+                // An instrumentable node that says is not instrumentable
+                // and does not have SourceSection
+                nodes.add(new TestInstrumentableNode() {
+                    @Override
+                    public boolean isInstrumentable() {
+                        return false;
+                    }
+                });
+                // An instrumentable node with unavailable SourceSection
+                nodes.add(new TestInstrumentableNode() {
+                    @Override
+                    public SourceSection getSourceSection() {
+                        return rootSection.getSource().createUnavailableSection();
+                    }
+                });
+                // An instrumentable node that says is not instrumentable
+                // and has a SourceSection
+                nodes.add(new TestInstrumentableNode() {
+                    @Override
+                    public boolean isInstrumentable() {
+                        return false;
+                    }
+
+                    @Override
+                    public SourceSection getSourceSection() {
+                        return rootSection.getSource().createSection(0, 1);
+                    }
+                });
+                // An instrumentable node with a SourceSection
+                nodes.add(new TestInstrumentableNode() {
+                    @Override
+                    public SourceSection getSourceSection() {
+                        return rootSection.getSource().createSection(0, 2);
+                    }
+                });
+                // RootTag so that it's recognized as a guest code execution
+                nodes.add(new TestInstrumentableNode() {
+                    @Override
+                    public SourceSection getSourceSection() {
+                        return rootSection.getSource().createSection(1);
+                    }
+
+                    @Override
+                    public boolean hasTag(Class<? extends Tag> tag) {
+                        return StandardTags.RootTag.class == tag || StandardTags.RootBodyTag.class == tag;
+                    }
+                });
+                TestNode lastNode = node;
+                for (TestNode n : nodes) {
+                    n.testChild = lastNode;
+                    lastNode = n;
+                }
+                return lastNode;
+            }
+        }
+
+        @GenerateWrapper
+        static class TestInstrumentableNode extends TestNode implements InstrumentableNode {
+
+            @Override
+            public boolean isInstrumentable() {
+                return true;
+            }
+
+            @Override
+            public WrapperNode createWrapper(ProbeNode probe) {
+                return new TestInstrumentableNodeWrapper(this, probe);
+            }
+
+        }
+
+        private static class TestNode extends Node {
+
+            @Node.Child TestNode testChild;
+
+            public Object execute(VirtualFrame frame) {
+                if (testChild != null) {
+                    return testChild.execute(frame);
+                } else {
+                    return 42;
+                }
+            }
+
+        }
+    }
 }

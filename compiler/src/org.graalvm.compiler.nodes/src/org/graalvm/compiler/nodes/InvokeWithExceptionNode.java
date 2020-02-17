@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2011, 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -22,16 +24,23 @@
  */
 package org.graalvm.compiler.nodes;
 
-import jdk.vm.ci.meta.JavaKind;
+import static org.graalvm.compiler.nodeinfo.InputType.Extension;
+import static org.graalvm.compiler.nodeinfo.InputType.Memory;
+import static org.graalvm.compiler.nodeinfo.InputType.State;
+import static org.graalvm.compiler.nodeinfo.NodeCycles.CYCLES_UNKNOWN;
+import static org.graalvm.compiler.nodeinfo.NodeSize.SIZE_UNKNOWN;
+
+import java.util.Map;
 
 import org.graalvm.compiler.core.common.type.Stamp;
+import org.graalvm.compiler.debug.DebugCloseable;
+import org.graalvm.compiler.graph.IterableNodeType;
 import org.graalvm.compiler.graph.Node;
 import org.graalvm.compiler.graph.NodeClass;
 import org.graalvm.compiler.nodeinfo.NodeInfo;
 import org.graalvm.compiler.nodeinfo.Verbosity;
-import org.graalvm.compiler.nodes.extended.ForeignCallNode;
 import org.graalvm.compiler.nodes.java.MethodCallTargetNode;
-import org.graalvm.compiler.nodes.memory.MemoryCheckpoint;
+import org.graalvm.compiler.nodes.memory.SingleMemoryKill;
 import org.graalvm.compiler.nodes.spi.LIRLowerable;
 import org.graalvm.compiler.nodes.spi.LoweringTool;
 import org.graalvm.compiler.nodes.spi.NodeLIRBuilderTool;
@@ -39,16 +48,10 @@ import org.graalvm.compiler.nodes.spi.UncheckedInterfaceProvider;
 import org.graalvm.compiler.nodes.util.GraphUtil;
 import org.graalvm.word.LocationIdentity;
 
-import java.util.Map;
-
-import static org.graalvm.compiler.nodeinfo.InputType.Extension;
-import static org.graalvm.compiler.nodeinfo.InputType.Memory;
-import static org.graalvm.compiler.nodeinfo.InputType.State;
-import static org.graalvm.compiler.nodeinfo.NodeCycles.CYCLES_UNKNOWN;
-import static org.graalvm.compiler.nodeinfo.NodeSize.SIZE_UNKNOWN;
+import jdk.vm.ci.code.BytecodeFrame;
 
 @NodeInfo(nameTemplate = "Invoke!#{p#targetMethod/s}", allowedUsageTypes = {Memory}, cycles = CYCLES_UNKNOWN, size = SIZE_UNKNOWN)
-public final class InvokeWithExceptionNode extends ControlSplitNode implements Invoke, MemoryCheckpoint.Single, LIRLowerable, UncheckedInterfaceProvider {
+public final class InvokeWithExceptionNode extends ControlSplitNode implements Invoke, IterableNodeType, SingleMemoryKill, LIRLowerable, UncheckedInterfaceProvider {
     public static final NodeClass<InvokeWithExceptionNode> TYPE = NodeClass.create(InvokeWithExceptionNode.class);
 
     private static final double EXCEPTION_PROBA = 1e-5;
@@ -59,7 +62,7 @@ public final class InvokeWithExceptionNode extends ControlSplitNode implements I
     @Input(Extension) CallTargetNode callTarget;
     @OptionalInput(State) FrameState stateDuring;
     @OptionalInput(State) FrameState stateAfter;
-    protected final int bci;
+    protected int bci;
     protected boolean polymorphic;
     protected boolean useForInlining;
     protected double exceptionProbability;
@@ -72,6 +75,16 @@ public final class InvokeWithExceptionNode extends ControlSplitNode implements I
         this.polymorphic = false;
         this.useForInlining = true;
         this.exceptionProbability = EXCEPTION_PROBA;
+    }
+
+    @Override
+    protected void afterClone(Node other) {
+        updateInliningLogAfterClone(other);
+    }
+
+    @Override
+    public FixedNode asFixedNode() {
+        return this;
     }
 
     public AbstractBeginNode exceptionEdge() {
@@ -146,7 +159,7 @@ public final class InvokeWithExceptionNode extends ControlSplitNode implements I
     @Override
     public void setNext(FixedNode x) {
         if (x != null) {
-            this.setNext(KillingBeginNode.begin(x, getLocationIdentity()));
+            this.setNext(KillingBeginNode.begin(x, this.getKilledLocationIdentity()));
         } else {
             this.setNext(null);
         }
@@ -179,7 +192,7 @@ public final class InvokeWithExceptionNode extends ControlSplitNode implements I
     }
 
     @Override
-    public LocationIdentity getLocationIdentity() {
+    public LocationIdentity getKilledLocationIdentity() {
         return LocationIdentity.any();
     }
 
@@ -198,53 +211,25 @@ public final class InvokeWithExceptionNode extends ControlSplitNode implements I
         GraphUtil.killCFG(edge);
     }
 
-    public void replaceWithNewBci(int newBci) {
-        AbstractBeginNode nextNode = next();
-        AbstractBeginNode exceptionObject = exceptionEdge;
-        setExceptionEdge(null);
-        setNext(null);
-        InvokeWithExceptionNode repl = graph().add(new InvokeWithExceptionNode(callTarget(), exceptionObject, newBci));
-        repl.setStateAfter(stateAfter);
-        this.setStateAfter(null);
-        this.replaceAtPredecessor(repl);
-        repl.setNext(nextNode);
-        boolean removed = this.callTarget().removeUsage(this);
-        assert removed;
-        this.replaceAtUsages(repl);
-        this.markDeleted();
+    @SuppressWarnings("try")
+    public AbstractBeginNode killKillingBegin() {
+        AbstractBeginNode begin = next();
+        if (begin instanceof KillingBeginNode) {
+            try (DebugCloseable position = begin.withNodeSourcePosition()) {
+                AbstractBeginNode newBegin = new BeginNode();
+                graph().addAfterFixed(begin, graph().add(newBegin));
+                begin.replaceAtUsages(newBegin);
+                graph().removeFixed(begin);
+                return newBegin;
+            }
+        }
+        return begin;
     }
 
     @Override
-    public void intrinsify(Node node) {
-        assert !(node instanceof ValueNode) || (((ValueNode) node).getStackKind() == JavaKind.Void) == (getStackKind() == JavaKind.Void);
-        CallTargetNode call = callTarget;
-        FrameState state = stateAfter();
-        if (exceptionEdge != null) {
-            killExceptionEdge();
-        }
-        if (node instanceof StateSplit) {
-            StateSplit stateSplit = (StateSplit) node;
-            stateSplit.setStateAfter(state);
-        }
-        if (node instanceof ForeignCallNode) {
-            ForeignCallNode foreign = (ForeignCallNode) node;
-            foreign.setBci(bci());
-        }
-        if (node == null) {
-            assert getStackKind() == JavaKind.Void && hasNoUsages();
-            graph().removeSplit(this, next());
-        } else if (node instanceof ControlSinkNode) {
-            this.replaceAtPredecessor(node);
-            this.replaceAtUsages(null);
-            GraphUtil.killCFG(this);
-            return;
-        } else {
-            graph().replaceSplit(this, node, next());
-        }
-        GraphUtil.killWithUnusedFloatingInputs(call);
-        if (state.hasNoUsages()) {
-            GraphUtil.killWithUnusedFloatingInputs(state);
-        }
+    public void replaceBci(int newBci) {
+        assert BytecodeFrame.isPlaceholderBci(bci) && !BytecodeFrame.isPlaceholderBci(newBci) : "can only replace placeholder with better bci";
+        bci = newBci;
     }
 
     @Override
@@ -305,10 +290,12 @@ public final class InvokeWithExceptionNode extends ControlSplitNode implements I
      * code.
      */
     public InvokeNode replaceWithInvoke() {
-        InvokeNode invokeNode = graph().add(new InvokeNode(callTarget, bci));
+        InvokeNode newInvoke = graph().add(new InvokeNode(callTarget, bci, stamp, this.getKilledLocationIdentity()));
+        newInvoke.setStateAfter(stateAfter);
+        newInvoke.setStateDuring(stateDuring);
         AbstractBeginNode oldException = this.exceptionEdge;
-        graph().replaceSplitWithFixed(this, invokeNode, this.next());
+        graph().replaceSplitWithFixed(this, newInvoke, this.next());
         GraphUtil.killCFG(oldException);
-        return invokeNode;
+        return newInvoke;
     }
 }

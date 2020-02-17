@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2014, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2014, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -70,6 +72,13 @@ public final class KlassPointerStamp extends MetaspacePointerStamp {
     }
 
     @Override
+    public void accept(Visitor v) {
+        super.accept(v);
+        v.visitLong(encoding.getBase());
+        v.visitInt(encoding.getShift());
+    }
+
+    @Override
     protected AbstractPointerStamp copyWith(boolean newNonNull, boolean newAlwaysNull) {
         return new KlassPointerStamp(newNonNull, newAlwaysNull, encoding);
     }
@@ -120,11 +129,11 @@ public final class KlassPointerStamp extends MetaspacePointerStamp {
     }
 
     @Override
-    public Constant asConstant() {
-        if (alwaysNull() && isCompressed()) {
+    public JavaConstant nullConstant() {
+        if (isCompressed()) {
             return HotSpotCompressedNullConstant.COMPRESSED_NULL;
         } else {
-            return super.asConstant();
+            return super.nullConstant();
         }
     }
 

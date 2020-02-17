@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2013, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2013, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -31,14 +33,17 @@ import static org.graalvm.compiler.nodeinfo.NodeSize.SIZE_2;
 import org.graalvm.compiler.core.common.type.IntegerStamp;
 import org.graalvm.compiler.core.common.type.Stamp;
 import org.graalvm.compiler.core.common.type.StampFactory;
+import org.graalvm.compiler.graph.IterableNodeType;
 import org.graalvm.compiler.graph.NodeClass;
 import org.graalvm.compiler.graph.spi.CanonicalizerTool;
+import org.graalvm.compiler.nodeinfo.InputType;
 import org.graalvm.compiler.nodeinfo.NodeInfo;
-import org.graalvm.compiler.nodes.AbstractBeginNode;
 import org.graalvm.compiler.nodes.ConstantNode;
+import org.graalvm.compiler.nodes.NodeView;
 import org.graalvm.compiler.nodes.ValueNode;
 import org.graalvm.compiler.nodes.calc.AddNode;
-import org.graalvm.compiler.nodes.spi.LoweringTool;
+import org.graalvm.compiler.nodes.extended.GuardedNode;
+import org.graalvm.compiler.nodes.extended.GuardingNode;
 
 import jdk.vm.ci.code.CodeUtil;
 import jdk.vm.ci.meta.JavaConstant;
@@ -49,13 +54,16 @@ import jdk.vm.ci.meta.JavaKind;
  * case the addition would overflow the 32 bit range.
  */
 @NodeInfo(cycles = CYCLES_2, size = SIZE_2)
-public final class IntegerAddExactNode extends AddNode implements IntegerExactArithmeticNode {
+public final class IntegerAddExactNode extends AddNode implements GuardedNode, IntegerExactArithmeticNode, IterableNodeType {
     public static final NodeClass<IntegerAddExactNode> TYPE = NodeClass.create(IntegerAddExactNode.class);
 
-    public IntegerAddExactNode(ValueNode x, ValueNode y) {
+    @Input(InputType.Guard) protected GuardingNode guard;
+
+    public IntegerAddExactNode(ValueNode x, ValueNode y, GuardingNode guard) {
         super(TYPE, x, y);
-        setStamp(x.stamp().unrestricted());
-        assert x.stamp().isCompatible(y.stamp()) && x.stamp() instanceof IntegerStamp;
+        setStamp(x.stamp(NodeView.DEFAULT).unrestricted());
+        assert x.stamp(NodeView.DEFAULT).isCompatible(y.stamp(NodeView.DEFAULT)) && x.stamp(NodeView.DEFAULT) instanceof IntegerStamp;
+        this.guard = guard;
     }
 
     @Override
@@ -119,51 +127,50 @@ public final class IntegerAddExactNode extends AddNode implements IntegerExactAr
     @Override
     public ValueNode canonical(CanonicalizerTool tool, ValueNode forX, ValueNode forY) {
         if (forX.isConstant() && !forY.isConstant()) {
-            return new IntegerAddExactNode(forY, forX).canonical(tool);
+            return new IntegerAddExactNode(forY, forX, guard).canonical(tool);
         }
-        if (forX.isConstant()) {
-            ConstantNode constantNode = canonicalXconstant(forX, forY);
-            if (constantNode != null) {
-                return constantNode;
-            }
+        if (forX.isConstant() && forY.isConstant()) {
+            return canonicalXYconstant(forX, forY);
         } else if (forY.isConstant()) {
             long c = forY.asJavaConstant().asLong();
             if (c == 0) {
                 return forX;
             }
         }
-        if (!IntegerStamp.addCanOverflow((IntegerStamp) forX.stamp(), (IntegerStamp) forY.stamp())) {
+        if (!IntegerStamp.addCanOverflow((IntegerStamp) forX.stamp(NodeView.DEFAULT), (IntegerStamp) forY.stamp(NodeView.DEFAULT))) {
+            return new AddNode(forX, forY).canonical(tool);
+        }
+        if (getGuard() == null) {
             return new AddNode(forX, forY).canonical(tool);
         }
         return this;
     }
 
-    private static ConstantNode canonicalXconstant(ValueNode forX, ValueNode forY) {
+    private ValueNode canonicalXYconstant(ValueNode forX, ValueNode forY) {
         JavaConstant xConst = forX.asJavaConstant();
         JavaConstant yConst = forY.asJavaConstant();
-        if (xConst != null && yConst != null) {
-            assert xConst.getJavaKind() == yConst.getJavaKind();
-            try {
-                if (xConst.getJavaKind() == JavaKind.Int) {
-                    return ConstantNode.forInt(Math.addExact(xConst.asInt(), yConst.asInt()));
-                } else {
-                    assert xConst.getJavaKind() == JavaKind.Long;
-                    return ConstantNode.forLong(Math.addExact(xConst.asLong(), yConst.asLong()));
-                }
-            } catch (ArithmeticException ex) {
-                // The operation will result in an overflow exception, so do not canonicalize.
+        assert xConst.getJavaKind() == yConst.getJavaKind();
+        try {
+            if (xConst.getJavaKind() == JavaKind.Int) {
+                return ConstantNode.forInt(Math.addExact(xConst.asInt(), yConst.asInt()));
+            } else {
+                assert xConst.getJavaKind() == JavaKind.Long;
+                return ConstantNode.forLong(Math.addExact(xConst.asLong(), yConst.asLong()));
             }
+        } catch (ArithmeticException ex) {
+            // The operation will result in an overflow exception, so do not canonicalize.
         }
-        return null;
+        return this;
     }
 
     @Override
-    public IntegerExactArithmeticSplitNode createSplit(AbstractBeginNode next, AbstractBeginNode deopt) {
-        return graph().add(new IntegerAddExactSplitNode(stamp(), getX(), getY(), next, deopt));
+    public GuardingNode getGuard() {
+        return guard;
     }
 
     @Override
-    public void lower(LoweringTool tool) {
-        IntegerExactArithmeticSplitNode.lower(tool, this);
+    public void setGuard(GuardingNode guard) {
+        updateUsagesInterface(this.guard, guard);
+        this.guard = guard;
     }
 }

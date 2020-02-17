@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2013, 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2013, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -22,14 +24,15 @@
  */
 package org.graalvm.compiler.hotspot.test;
 
-import static org.graalvm.compiler.core.common.GraalOptions.ImmutableCode;
-import static org.graalvm.compiler.nodes.ConstantNode.getConstantNodes;
-
+import jdk.vm.ci.aarch64.AArch64;
+import jdk.vm.ci.hotspot.HotSpotResolvedObjectType;
+import jdk.vm.ci.meta.JavaConstant;
+import jdk.vm.ci.meta.JavaKind;
 import org.graalvm.compiler.core.common.type.Stamp;
-import org.graalvm.compiler.core.test.GraalCompilerTest;
 import org.graalvm.compiler.graph.iterators.NodeIterable;
 import org.graalvm.compiler.hotspot.nodes.type.KlassPointerStamp;
 import org.graalvm.compiler.nodes.ConstantNode;
+import org.graalvm.compiler.nodes.NodeView;
 import org.graalvm.compiler.nodes.PiNode;
 import org.graalvm.compiler.nodes.StructuredGraph;
 import org.graalvm.compiler.nodes.StructuredGraph.AllowAssumptions;
@@ -41,10 +44,8 @@ import org.junit.Assume;
 import org.junit.Before;
 import org.junit.Test;
 
-import jdk.vm.ci.aarch64.AArch64;
-import jdk.vm.ci.hotspot.HotSpotResolvedObjectType;
-import jdk.vm.ci.meta.JavaConstant;
-import jdk.vm.ci.meta.JavaKind;
+import static org.graalvm.compiler.core.common.GraalOptions.ImmutableCode;
+import static org.graalvm.compiler.nodes.ConstantNode.getConstantNodes;
 
 /**
  * use
@@ -55,7 +56,7 @@ import jdk.vm.ci.meta.JavaKind;
  *
  * to print disassembly.
  */
-public class AheadOfTimeCompilationTest extends GraalCompilerTest {
+public class AheadOfTimeCompilationTest extends HotSpotGraalCompilerTest {
 
     public static final Object STATICFINALOBJECT = new Object();
     public static final String STATICFINALSTRING = "test string";
@@ -74,9 +75,10 @@ public class AheadOfTimeCompilationTest extends GraalCompilerTest {
     public void testStaticFinalObjectAOT() {
         StructuredGraph result = compile("getStaticFinalObject", true);
         assertDeepEquals(1, getConstantNodes(result).count());
-        Stamp constantStamp = getConstantNodes(result).first().stamp();
+        Stamp constantStamp = getConstantNodes(result).first().stamp(NodeView.DEFAULT);
         Assert.assertTrue(constantStamp.toString(), constantStamp instanceof KlassPointerStamp);
-        assertDeepEquals(2, result.getNodes().filter(ReadNode.class).count());
+        int expected = runtime().getVMConfig().classMirrorIsHandle ? 3 : 2;
+        assertDeepEquals(expected, result.getNodes().filter(ReadNode.class).count());
     }
 
     @Test
@@ -99,8 +101,8 @@ public class AheadOfTimeCompilationTest extends GraalCompilerTest {
         assertDeepEquals(1, filter.count());
         HotSpotResolvedObjectType type = (HotSpotResolvedObjectType) getMetaAccess().lookupJavaType(AheadOfTimeCompilationTest.class);
         assertDeepEquals(type.klass(), filter.first().asConstant());
-
-        assertDeepEquals(1, result.getNodes().filter(ReadNode.class).count());
+        int expected = runtime().getVMConfig().classMirrorIsHandle ? 2 : 1;
+        assertDeepEquals(expected, result.getNodes().filter(ReadNode.class).count());
     }
 
     @Test
@@ -124,10 +126,10 @@ public class AheadOfTimeCompilationTest extends GraalCompilerTest {
         StructuredGraph result = compile("getPrimitiveClassObject", true);
         NodeIterable<ConstantNode> filter = getConstantNodes(result);
         assertDeepEquals(1, filter.count());
-        Stamp constantStamp = filter.first().stamp();
+        Stamp constantStamp = filter.first().stamp(NodeView.DEFAULT);
         Assert.assertTrue(constantStamp instanceof KlassPointerStamp);
-
-        assertDeepEquals(2, result.getNodes().filter(ReadNode.class).count());
+        int expected = runtime().getVMConfig().classMirrorIsHandle ? 3 : 2;
+        assertDeepEquals(expected, result.getNodes().filter(ReadNode.class).count());
     }
 
     @Test
@@ -177,7 +179,7 @@ public class AheadOfTimeCompilationTest extends GraalCompilerTest {
         StructuredGraph result = compile("getBoxedBoolean", true);
 
         assertDeepEquals(0, result.getNodes().filter(FloatingReadNode.class).count());
-        assertDeepEquals(0, result.getNodes(PiNode.TYPE).count());
+        assertDeepEquals(0, result.getNodes().filter(PiNode.class).count());
         assertDeepEquals(1, getConstantNodes(result).count());
         ConstantNode constant = getConstantNodes(result).first();
         assertDeepEquals(JavaKind.Object, constant.getStackKind());
@@ -190,7 +192,7 @@ public class AheadOfTimeCompilationTest extends GraalCompilerTest {
     public void testBoxedBoolean() {
         StructuredGraph result = compile("getBoxedBoolean", false);
         assertDeepEquals(0, result.getNodes().filter(FloatingReadNode.class).count());
-        assertDeepEquals(0, result.getNodes(PiNode.TYPE).count());
+        assertDeepEquals(0, result.getNodes().filter(PiNode.class).count());
         assertDeepEquals(1, getConstantNodes(result).count());
         ConstantNode constant = getConstantNodes(result).first();
         assertDeepEquals(JavaKind.Object, constant.getStackKind());

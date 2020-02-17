@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -51,17 +53,19 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Formatter;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.SortedMap;
 import java.util.TreeMap;
 
+import org.graalvm.collections.EconomicMap;
+import org.graalvm.collections.EconomicSet;
+import org.graalvm.collections.Pair;
 import org.graalvm.compiler.options.OptionKey;
 import org.graalvm.compiler.options.OptionValues;
+import org.graalvm.compiler.serviceprovider.GraalServices;
 import org.graalvm.graphio.GraphOutput;
-import org.graalvm.util.EconomicMap;
-import org.graalvm.util.EconomicSet;
-import org.graalvm.util.Pair;
 
 import jdk.vm.ci.meta.JavaMethod;
 
@@ -77,7 +81,7 @@ import jdk.vm.ci.meta.JavaMethod;
  */
 public final class DebugContext implements AutoCloseable {
 
-    public static final Description NO_DESCRIPTION = null;
+    public static final Description NO_DESCRIPTION = new Description(null, "NO_DESCRIPTION");
     public static final GlobalMetrics NO_GLOBAL_METRIC_VALUES = null;
     public static final Iterable<DebugHandlersFactory> NO_CONFIG_CUSTOMIZERS = Collections.emptyList();
 
@@ -95,7 +99,7 @@ public final class DebugContext implements AutoCloseable {
      */
     boolean metricsEnabled;
 
-    DebugConfig currentConfig;
+    DebugConfigImpl currentConfig;
     ScopeImpl currentScope;
     CloseableCounter currentTimer;
     CloseableCounter currentMemUseTracker;
@@ -127,6 +131,20 @@ public final class DebugContext implements AutoCloseable {
             parentOutput = output;
             return output;
         }
+    }
+
+    /**
+     * Adds version properties to the provided map. The version properties are read at a start of
+     * the JVM from a JVM specific location. Each property identifiers a commit of a certain
+     * component in the system. The properties added to the {@code properties} map are prefixed with
+     * {@code "version."} prefix.
+     *
+     * @param properties map to add the version properties to or {@code null}
+     * @return {@code properties} with version properties added or an unmodifiable map containing
+     *         the version properties if {@code properties == null}
+     */
+    public static Map<Object, Object> addVersionProperties(Map<Object, Object> properties) {
+        return Versions.VERSIONS.withVersions(properties);
     }
 
     /**
@@ -222,14 +240,9 @@ public final class DebugContext implements AutoCloseable {
             this.unscopedTimers = parseUnscopedMetricSpec(Timers.getValue(options), "".equals(timeValue), true);
             this.unscopedMemUseTrackers = parseUnscopedMetricSpec(MemUseTrackers.getValue(options), "".equals(trackMemUseValue), true);
 
-            if (unscopedTimers != null ||
-                            unscopedMemUseTrackers != null ||
-                            timeValue != null ||
-                            trackMemUseValue != null) {
-                try {
-                    Class.forName("java.lang.management.ManagementFactory");
-                } catch (ClassNotFoundException ex) {
-                    throw new IllegalArgumentException("Time, Timers, MemUseTrackers and TrackMemUse options require java.management module");
+            if (unscopedMemUseTrackers != null || trackMemUseValue != null) {
+                if (!GraalServices.isThreadAllocatedMemorySupported()) {
+                    TTY.println("WARNING: Missing VM support for MemUseTrackers and TrackMemUse options so all reported memory usage will be 0");
                 }
             }
 
@@ -299,9 +312,19 @@ public final class DebugContext implements AutoCloseable {
     }
 
     /**
-     * Shared object used to represent a disabled debug context.
+     * Singleton used to represent a disabled debug context.
      */
-    public static final DebugContext DISABLED = new DebugContext(NO_DESCRIPTION, NO_GLOBAL_METRIC_VALUES, DEFAULT_LOG_STREAM, new Immutable(), NO_CONFIG_CUSTOMIZERS);
+    private static final DebugContext DISABLED = new DebugContext(NO_DESCRIPTION, NO_GLOBAL_METRIC_VALUES, DEFAULT_LOG_STREAM, new Immutable(), NO_CONFIG_CUSTOMIZERS);
+
+    /**
+     * Create a DebugContext with debugging disabled.
+     */
+    public static DebugContext disabled(OptionValues options) {
+        if (options == null || options.getMap().isEmpty()) {
+            return DISABLED;
+        }
+        return new DebugContext(NO_DESCRIPTION, NO_GLOBAL_METRIC_VALUES, DEFAULT_LOG_STREAM, Immutable.create(options), NO_CONFIG_CUSTOMIZERS);
+    }
 
     /**
      * Gets the debug context for the current thread. This should only be used when there is no
@@ -386,6 +409,18 @@ public final class DebugContext implements AutoCloseable {
         return new DebugContext(NO_DESCRIPTION, NO_GLOBAL_METRIC_VALUES, DEFAULT_LOG_STREAM, Immutable.create(options), factories);
     }
 
+    public static DebugContext create(OptionValues options, PrintStream logStream, DebugHandlersFactory factory) {
+        return new DebugContext(NO_DESCRIPTION, NO_GLOBAL_METRIC_VALUES, logStream, Immutable.create(options), Collections.singletonList(factory));
+    }
+
+    /**
+     * Creates a {@link DebugContext} based on a given set of option values and {@code factories}.
+     * The {@link DebugHandlersFactory#LOADER} can be used for the latter.
+     */
+    public static DebugContext create(OptionValues options, Description description, Iterable<DebugHandlersFactory> factories) {
+        return new DebugContext(description, NO_GLOBAL_METRIC_VALUES, DEFAULT_LOG_STREAM, Immutable.create(options), factories);
+    }
+
     /**
      * Creates a {@link DebugContext}.
      */
@@ -420,11 +455,11 @@ public final class DebugContext implements AutoCloseable {
         }
     }
 
-    public Path getDumpPath(String extension, boolean directory) {
+    public Path getDumpPath(String extension, boolean createMissingDirectory) {
         try {
             String id = description == null ? null : description.identifier;
             String label = description == null ? null : description.getLabel();
-            Path result = PathUtilities.createUnique(immutable.options, DumpPath, id, label, extension, directory);
+            Path result = PathUtilities.createUnique(immutable.options, DumpPath, id, label, extension, createMissingDirectory);
             if (ShowDumpFiles.getValue(immutable.options)) {
                 TTY.println("Dumping debug output to %s", result.toAbsolutePath().toString());
             }
@@ -723,6 +758,19 @@ public final class DebugContext implements AutoCloseable {
     }
 
     /**
+     * Create an unnamed scope that appends some context to the current scope.
+     *
+     * @param context an object to be appended to the {@linkplain #context() current} debug context
+     */
+    public DebugContext.Scope withContext(Object context) throws Throwable {
+        if (currentScope != null) {
+            return enterScope("", null, context);
+        } else {
+            return null;
+        }
+    }
+
+    /**
      * Creates and enters a new debug scope which will be disjoint from the current debug scope.
      * <p>
      * It is recommended to use the try-with-resource statement for managing entering and leaving
@@ -764,14 +812,15 @@ public final class DebugContext implements AutoCloseable {
                 return true;
             }
             return !currentScope.isTopLevel();
+        } else {
+            return false;
         }
-        return immutable.scopesEnabled && currentScope == null;
     }
 
     class DisabledScope implements DebugContext.Scope {
         final boolean savedMetricsEnabled;
         final ScopeImpl savedScope;
-        final DebugConfig savedConfig;
+        final DebugConfigImpl savedConfig;
 
         DisabledScope() {
             this.savedMetricsEnabled = metricsEnabled;
@@ -1794,23 +1843,46 @@ public final class DebugContext implements AutoCloseable {
     }
 
     /**
+     * Gets the name to use for a class based on whether it appears to be an obfuscated name. The
+     * heuristic for an obfuscated name is that it is less than 6 characters in length and consists
+     * only of lower case letters.
+     */
+    private static String getBaseName(Class<?> c) {
+        String simpleName = c.getSimpleName();
+        if (simpleName.length() < 6) {
+            for (int i = 0; i < simpleName.length(); i++) {
+                if (!Character.isLowerCase(simpleName.charAt(0))) {
+                    return simpleName;
+                }
+            }
+            // Looks like an obfuscated simple class name so use qualified class name
+            return c.getName();
+        }
+        return simpleName;
+    }
+
+    /**
      * There are paths where construction of formatted class names are common and the code below is
      * surprisingly expensive, so compute it once and cache it.
      */
     private static final ClassValue<String> formattedClassName = new ClassValue<String>() {
         @Override
         protected String computeValue(Class<?> c) {
-            final String simpleName = c.getSimpleName();
+            String baseName = getBaseName(c);
+            if (Character.isLowerCase(baseName.charAt(0))) {
+                // Looks like an obfuscated simple class name so use qualified class name
+                baseName = c.getName();
+            }
             Class<?> enclosingClass = c.getEnclosingClass();
             if (enclosingClass != null) {
                 String prefix = "";
                 while (enclosingClass != null) {
-                    prefix = enclosingClass.getSimpleName() + "_" + prefix;
+                    prefix = getBaseName(enclosingClass) + "_" + prefix;
                     enclosingClass = enclosingClass.getEnclosingClass();
                 }
-                return prefix + simpleName;
+                return prefix + baseName;
             } else {
-                return simpleName;
+                return baseName;
             }
         }
     };
@@ -1923,10 +1995,17 @@ public final class DebugContext implements AutoCloseable {
         if (description != null) {
             printMetrics(description);
         }
-        if (metricsEnabled && globalMetrics != null && metricValues != null) {
+        if (metricsEnabled && metricValues != null && globalMetrics != null) {
             globalMetrics.add(this);
         }
         metricValues = null;
+        if (sharedChannel != null) {
+            try {
+                sharedChannel.realClose();
+            } catch (IOException ex) {
+                // ignore.
+            }
+        }
     }
 
     public void closeDumpHandlers(boolean ignoreErrors) {
@@ -2008,7 +2087,6 @@ public final class DebugContext implements AutoCloseable {
                 }
             }
         }
-
     }
 
     /**
@@ -2082,6 +2160,18 @@ public final class DebugContext implements AutoCloseable {
             out.printf("%-" + String.valueOf(maxKeyWidth) + "s = %20s%n", e.getKey(), e.getValue());
         }
         out.println();
+    }
+
+    public Map<MetricKey, Long> getMetricsSnapshot() {
+        Map<MetricKey, Long> res = new HashMap<>();
+        for (MetricKey key : KeyRegistry.getKeys()) {
+            int index = ((AbstractKey) key).getIndex();
+            if (index < metricValues.length && metricValues[index] != 0) {
+                long value = metricValues[index];
+                res.put(key, value);
+            }
+        }
+        return res;
     }
 
     @SuppressWarnings({"unused", "unchecked"})

@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -29,7 +31,6 @@ import java.util.Map;
 import org.graalvm.compiler.nodes.Invoke;
 import org.graalvm.compiler.nodes.StructuredGraph;
 import org.graalvm.compiler.nodes.spi.Replacements;
-import org.graalvm.compiler.phases.common.inlining.InliningUtil;
 import org.graalvm.compiler.phases.common.inlining.info.InlineInfo;
 import org.graalvm.compiler.phases.common.inlining.info.elem.Inlineable;
 
@@ -67,7 +68,7 @@ public abstract class AbstractInliningPolicy implements InliningPolicy {
 
     private static boolean onlyIntrinsics(Replacements replacements, InlineInfo info) {
         for (int i = 0; i < info.numberOfMethods(); i++) {
-            if (!InliningUtil.canIntrinsify(replacements, info.methodAt(i), info.invoke().bci())) {
+            if (!replacements.hasSubstitution(info.methodAt(i), info.invoke().bci())) {
                 return false;
             }
         }
@@ -84,7 +85,7 @@ public abstract class AbstractInliningPolicy implements InliningPolicy {
         return true;
     }
 
-    protected static int previousLowLevelGraphSize(InlineInfo info) {
+    protected int previousLowLevelGraphSize(InlineInfo info) {
         int size = 0;
         for (int i = 0; i < info.numberOfMethods(); i++) {
             ResolvedJavaMethod m = info.methodAt(i);
@@ -97,7 +98,7 @@ public abstract class AbstractInliningPolicy implements InliningPolicy {
         return size;
     }
 
-    protected static double determineInvokeProbability(InlineInfo info) {
+    protected double determineInvokeProbability(InlineInfo info) {
         double invokeProbability = 0;
         for (int i = 0; i < info.numberOfMethods(); i++) {
             Inlineable callee = info.inlineableElementAt(i);

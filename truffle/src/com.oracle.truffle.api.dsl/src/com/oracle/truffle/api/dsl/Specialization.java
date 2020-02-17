@@ -1,38 +1,56 @@
 /*
- * Copyright (c) 2012, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
- * This code is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.  Oracle designates this
- * particular file as subject to the "Classpath" exception as provided
- * by Oracle in the LICENSE file that accompanied this code.
+ * The Universal Permissive License (UPL), Version 1.0
  *
- * This code is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
- * version 2 for more details (a copy is included in the LICENSE file that
- * accompanied this code).
+ * Subject to the condition set forth below, permission is hereby granted to any
+ * person obtaining a copy of this software, associated documentation and/or
+ * data (collectively the "Software"), free of charge and under any and all
+ * copyright rights in the Software, and any and all patent rights owned or
+ * freely licensable by each licensor hereunder covering either (i) the
+ * unmodified Software as contributed to or provided by such licensor, or (ii)
+ * the Larger Works (as defined below), to deal in both
  *
- * You should have received a copy of the GNU General Public License version
- * 2 along with this work; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
+ * (a) the Software, and
  *
- * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
- * or visit www.oracle.com if you need additional information or have any
- * questions.
+ * (b) any piece of software and/or hardware listed in the lrgrwrks.txt file if
+ * one is included with the Software each a "Larger Work" to which the Software
+ * is contributed by such licensors),
+ *
+ * without restriction, including without limitation the rights to copy, create
+ * derivative works of, display, perform, and distribute the Software and make,
+ * use, sell, offer for sale, import, export, have made, and have sold the
+ * Software and the Larger Work(s), and to sublicense the foregoing rights on
+ * either these or other terms.
+ *
+ * This license is subject to the following condition:
+ *
+ * The above copyright notice and either this complete permission notice or at a
+ * minimum a reference to the UPL must be included in all copies or substantial
+ * portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
  */
 package com.oracle.truffle.api.dsl;
+
+import java.lang.annotation.ElementType;
+import java.lang.annotation.Retention;
+import java.lang.annotation.RetentionPolicy;
+import java.lang.annotation.Target;
 
 import com.oracle.truffle.api.Assumption;
 import com.oracle.truffle.api.frame.Frame;
 import com.oracle.truffle.api.frame.MaterializedFrame;
 import com.oracle.truffle.api.frame.VirtualFrame;
 import com.oracle.truffle.api.nodes.Node;
-import java.lang.annotation.ElementType;
-import java.lang.annotation.Retention;
-import java.lang.annotation.RetentionPolicy;
-import java.lang.annotation.Target;
+import com.oracle.truffle.api.nodes.UnexpectedResultException;
 
 /**
  * <p>
@@ -108,7 +126,6 @@ import java.lang.annotation.Target;
  * </p>
  *
  * @see NodeChild
- * @see ShortCircuit
  * @see Fallback
  * @see Cached
  * @see TypeSystem
@@ -116,7 +133,7 @@ import java.lang.annotation.Target;
  * @see UnsupportedSpecializationException
  * @since 0.8 or earlier
  */
-@Retention(RetentionPolicy.RUNTIME)
+@Retention(RetentionPolicy.CLASS)
 @Target({ElementType.METHOD})
 public @interface Specialization {
     /**
@@ -125,7 +142,7 @@ public @interface Specialization {
      * specializations are partly declared in the super class and partly declared in a derived
      * class. By default all specializations declared in the derived class are appended to those in
      * the super class. This attribute can be used to override the default behavior.
-     * 
+     *
      * @since 0.8 or earlier
      */
     String insertBefore() default "";
@@ -141,9 +158,12 @@ public @interface Specialization {
      * <p>
      * If an event guard exception is triggered then all instantiations of this specialization are
      * removed. If one of theses exceptions is thrown once then no further instantiations of this
-     * specialization are going to be created for this node. A specialization that rewrites on an
-     * exception must ensure that no non-repeatable side-effect is caused until the rewrite is
-     * triggered.
+     * specialization are going to be created for this node.
+     *
+     * In case of explicitly declared {@link UnexpectedResultException}s, the result from the
+     * exception will be used. For all other exception types, the next available specialization will
+     * be executed, so that the original specialization must ensure that no non-repeatable
+     * side-effect is caused until the rewrite is triggered.
      * </p>
      *
      * <b>Example usage:</b>
@@ -151,7 +171,7 @@ public @interface Specialization {
      * <pre>
      * &#064;Specialization(rewriteOn = ArithmeticException.class)
      * int doAddNoOverflow(int a, int b) {
-     *     return ExactMath.addExact(a, b);
+     *     return Math.addExact(a, b);
      * }
      * &#064;Specialization
      * long doAddWithOverflow(int a, int b) {
@@ -172,14 +192,6 @@ public @interface Specialization {
      * @since 0.8 or earlier
      */
     Class<? extends Throwable>[] rewriteOn() default {};
-
-    /**
-     * @see #replaces()
-     * @deprecated renamed to {@link #replaces()} since 0.22
-     * @since 0.8 or earlier
-     */
-    @Deprecated
-    String[] contains() default {};
 
     /**
      * <p>
@@ -234,9 +246,9 @@ public @interface Specialization {
      * <p>
      * Guard expressions are defined using a subset of Java. This subset includes field/parameter
      * accesses, function calls, type exact infix comparisons (==, !=, <, <=, >, >=), logical
-     * negation (!), logical disjunction (||) and integer literals. The return type of guard
-     * expressions must be <code>boolean</code>. Bound elements without receivers are resolved using
-     * the following order:
+     * negation (!), logical disjunction (||), null, true, false, and integer literals. The return
+     * type of guard expressions must be <code>boolean</code>. Bound elements without receivers are
+     * resolved using the following order:
      * <ol>
      * <li>Dynamic and cached parameters of the enclosing specialization.</li>
      * <li>Fields defined using {@link NodeField} for the enclosing node.</li>
@@ -274,10 +286,11 @@ public @interface Specialization {
      * <p>
      * Assumption expressions are defined using a subset of Java. This subset includes
      * field/parameter accesses, function calls, type exact infix comparisons (==, !=, <, <=, >,
-     * >=), logical negation (!), logical disjunction (||) and integer literals. The return type of
-     * the expression must be {@link Assumption} or an array of {@link Assumption} instances.
-     * Assumption expressions are not allowed to bind to dynamic parameter values of the
-     * specialization. Bound elements without receivers are resolved using the following order:
+     * >=), logical negation (!), logical disjunction (||), null, true, false, and integer literals.
+     * The return type of the expression must be {@link Assumption} or an array of
+     * {@link Assumption} instances. Assumption expressions are not allowed to bind to dynamic
+     * parameter values of the specialization. Bound elements without receivers are resolved using
+     * the following order:
      * <ol>
      * <li>Cached parameters of the enclosing specialization.</li>
      * <li>Fields defined using {@link NodeField} for the enclosing node.</li>
@@ -292,7 +305,7 @@ public @interface Specialization {
      * <b>Example usage:</b>
      *
      * <pre>
-     * static abstract class DynamicObject() { abstract Shape getShape(); ... } static
+     * abstract static class DynamicObject() { abstract Shape getShape(); ... } static
      * abstract class Shape() { abstract Assumption getUnmodifiedAssuption(); ... }
      * &#064;Specialization(guards = "operand.getShape() == cachedShape", assumptions =
      * "cachedShape.getUnmodifiedAssumption()") void doAssumeUnmodifiedShape(DynamicObject
@@ -319,10 +332,10 @@ public @interface Specialization {
      * <p>
      * The limit expression is defined using a subset of Java. This subset includes field/parameter
      * accesses, function calls, type exact infix comparisons (==, !=, <, <=, >, >=), logical
-     * negation (!), logical disjunction (||) and integer literals. The return type of the limit
-     * expression must be <code>int</code>. Limit expressions are not allowed to bind to dynamic
-     * parameter values of the specialization. Bound elements without receivers are resolved using
-     * the following order:
+     * negation (!), logical disjunction (||), null, true, false, and integer literals. The return
+     * type of the limit expression must be <code>int</code>. Limit expressions are not allowed to
+     * bind to dynamic parameter values of the specialization. Bound elements without receivers are
+     * resolved using the following order:
      * <ol>
      * <li>Cached parameters of the enclosing specialization.</li>
      * <li>Fields defined using {@link NodeField} for the enclosing node.</li>

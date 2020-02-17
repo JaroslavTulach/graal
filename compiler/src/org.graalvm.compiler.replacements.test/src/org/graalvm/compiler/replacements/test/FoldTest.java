@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -79,10 +81,10 @@ public class FoldTest extends ReplacementsTest {
 
     @Override
     protected void registerInvocationPlugins(InvocationPlugins invocationPlugins) {
-        InjectionProvider injection = new NodeIntrinsificationProvider(getMetaAccess(), getSnippetReflection(), getProviders().getForeignCalls(), null);
+        InjectionProvider injection = new NodeIntrinsificationProvider(getMetaAccess(), getSnippetReflection(), getProviders().getForeignCalls(), null, getTarget());
         new PluginFactory_FoldTest().registerPlugins(invocationPlugins, injection);
         BytecodeProvider replacementBytecodeProvider = getSystemClassLoaderBytecodeProvider();
-        Registration r = new Registration(invocationPlugins, TestMethod.class, replacementBytecodeProvider);
+        Registration r = new Registration(invocationPlugins, TestMethod.class, getReplacements(), replacementBytecodeProvider);
         r.registerMethodSubstitution(TestMethodSubstitution.class, "test");
         super.registerInvocationPlugins(invocationPlugins);
     }
@@ -92,14 +94,13 @@ public class FoldTest extends ReplacementsTest {
     }
 
     @Override
-    protected boolean checkHighTierGraph(StructuredGraph graph) {
+    protected void checkHighTierGraph(StructuredGraph graph) {
         // check that folding happened correctly
         StartNode start = graph.start();
         assert start.next() instanceof ReturnNode : "expected ReturnNode, got " + start.next();
 
         ReturnNode ret = (ReturnNode) start.next();
         assert ret.result().isConstant() : "expected ConstantNode, got " + ret.result();
-        return true;
     }
 
     @Test

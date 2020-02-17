@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2015, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -53,6 +55,11 @@ public class LoadJavaMirrorWithKlassTest extends GraalCompilerTest {
         public int hashCode() {
             return clazz.hashCode();
         }
+
+        @Override
+        public String toString() {
+            return "Wrapper-" + clazz;
+        }
     }
 
     @Override
@@ -66,13 +73,12 @@ public class LoadJavaMirrorWithKlassTest extends GraalCompilerTest {
     }
 
     @Override
-    protected boolean checkLowTierGraph(StructuredGraph graph) {
+    protected void checkLowTierGraph(StructuredGraph graph) {
         for (ConstantNode constantNode : graph.getNodes().filter(ConstantNode.class)) {
             assert constantNode.asJavaConstant() == null || constantNode.asJavaConstant().getJavaKind() != JavaKind.Object ||
                             constantNode.asJavaConstant().isDefaultForKind() : "Found unexpected object constant " +
                                             constantNode + ", this should have been removed by the LoadJavaMirrorWithKlassPhase.";
         }
-        return true;
     }
 
     public static Class<?> classConstant() {

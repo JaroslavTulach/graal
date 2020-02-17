@@ -1,29 +1,46 @@
 /*
- * Copyright (c) 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2017, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
- * This code is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.  Oracle designates this
- * particular file as subject to the "Classpath" exception as provided
- * by Oracle in the LICENSE file that accompanied this code.
+ * The Universal Permissive License (UPL), Version 1.0
  *
- * This code is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
- * version 2 for more details (a copy is included in the LICENSE file that
- * accompanied this code).
+ * Subject to the condition set forth below, permission is hereby granted to any
+ * person obtaining a copy of this software, associated documentation and/or
+ * data (collectively the "Software"), free of charge and under any and all
+ * copyright rights in the Software, and any and all patent rights owned or
+ * freely licensable by each licensor hereunder covering either (i) the
+ * unmodified Software as contributed to or provided by such licensor, or (ii)
+ * the Larger Works (as defined below), to deal in both
  *
- * You should have received a copy of the GNU General Public License version
- * 2 along with this work; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
+ * (a) the Software, and
  *
- * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
- * or visit www.oracle.com if you need additional information or have any
- * questions.
+ * (b) any piece of software and/or hardware listed in the lrgrwrks.txt file if
+ * one is included with the Software each a "Larger Work" to which the Software
+ * is contributed by such licensors),
+ *
+ * without restriction, including without limitation the rights to copy, create
+ * derivative works of, display, perform, and distribute the Software and make,
+ * use, sell, offer for sale, import, export, have made, and have sold the
+ * Software and the Larger Work(s), and to sublicense the foregoing rights on
+ * either these or other terms.
+ *
+ * This license is subject to the following condition:
+ *
+ * The above copyright notice and either this complete permission notice or at a
+ * minimum a reference to the UPL must be included in all copies or substantial
+ * portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
  */
 #include "native.h"
 
+#include <errno.h>
 #include <stdlib.h>
 #include <ffi.h>
 #include "internal.h"
@@ -43,29 +60,37 @@ static int align_up(int index, int alignment) {
 
 static void executeHelper(JNIEnv *env, TruffleContext *ctx, void *ret, ffi_cif *cif, jlong address, jbyteArray primArgs, jint patchCount, jintArray patch, jobjectArray objArgs) {
     struct __TruffleEnvInternal truffleEnv;
+    void **argPtrs;
+    jbyte *primArgValues;
+    int primIdx, i;
+    jint *patches;
+
+    enum TypeTag *tagsForRelease;
+    jobject *objectsForRelease;
+    const void **ptrsForRelease;
+    int releaseCount;
 
     truffleEnv.functions = &truffleNativeAPI;
     truffleEnv.context = (struct __TruffleContextInternal *) ctx;
     truffleEnv.jniEnv = env;
 
-    void *argPtrs[cif->nargs];
+    argPtrs = alloca(sizeof(*argPtrs) * cif->nargs);
 
-    jbyte *primArgValues = (*env)->GetByteArrayElements(env, primArgs, NULL);
+    primArgValues = (*env)->GetByteArrayElements(env, primArgs, NULL);
 
-    int primIdx = 0;
-    int i;
+    primIdx = 0;
     for (i = 0; i < cif->nargs; i++) {
         primIdx = align_up(primIdx, cif->arg_types[i]->alignment);
         argPtrs[i] = primArgValues + primIdx;
         primIdx += cif->arg_types[i]->size;
     }
 
-    jint *patches = patchCount > 0 ? (*env)->GetIntArrayElements(env, patch, NULL) : NULL;
+    patches = patchCount > 0 ? (*env)->GetIntArrayElements(env, patch, NULL) : NULL;
 
-    enum TypeTag tagsForRelease[patchCount];
-    jobject objectsForRelease[patchCount];
-    const void *ptrsForRelease[patchCount];
-    int releaseCount = 0;
+    tagsForRelease = alloca(sizeof(*tagsForRelease) * patchCount);
+    objectsForRelease = alloca(sizeof(*objectsForRelease) * patchCount);
+    ptrsForRelease = alloca(sizeof(*ptrsForRelease) * patchCount);
+    releaseCount = 0;
 
     for (i = 0; i < patchCount; i++) {
         jobject arg = (*env)->GetObjectArrayElement(env, objArgs, i);
@@ -137,7 +162,11 @@ static void executeHelper(JNIEnv *env, TruffleContext *ctx, void *ret, ffi_cif *
         (*env)->ReleaseIntArrayElements(env, patch, patches, JNI_ABORT);
     }
 
-    ffi_call(cif, (void (*)()) address, ret, argPtrs);
+    errno = errnoMirror;
+
+    ffi_call(cif, (void (*)(void)) address, ret, argPtrs);
+
+    errnoMirror = errno;
 
     (*env)->ReleaseByteArrayElements(env, primArgs, primArgValues, JNI_ABORT);
 
@@ -179,7 +208,7 @@ static void executeHelper(JNIEnv *env, TruffleContext *ctx, void *ret, ffi_cif *
     }
 }
 
-JNIEXPORT void JNICALL Java_com_oracle_truffle_nfi_NFIContext_executeNative(JNIEnv *env, jclass self, jlong truffleContext, jlong cif, jlong address,
+JNIEXPORT void JNICALL Java_com_oracle_truffle_nfi_impl_NFIContext_executeNative(JNIEnv *env, jclass self, jlong truffleContext, jlong cif, jlong address,
         jbyteArray primArgs, jint patchCount, jintArray patch, jobjectArray objArgs, jbyteArray retArray) {
     jbyte *ret = retArray ? (*env)->GetByteArrayElements(env, retArray, NULL) : NULL;
     executeHelper(env, (TruffleContext*) truffleContext, ret, (ffi_cif*) cif, address, primArgs, patchCount, patch, objArgs);
@@ -188,14 +217,14 @@ JNIEXPORT void JNICALL Java_com_oracle_truffle_nfi_NFIContext_executeNative(JNIE
     }
 }
 
-JNIEXPORT jlong JNICALL Java_com_oracle_truffle_nfi_NFIContext_executePrimitive(JNIEnv *env, jclass self, jlong truffleContext, jlong cif, jlong address,
+JNIEXPORT jlong JNICALL Java_com_oracle_truffle_nfi_impl_NFIContext_executePrimitive(JNIEnv *env, jclass self, jlong truffleContext, jlong cif, jlong address,
         jbyteArray primArgs, jint patchCount, jintArray patch, jobjectArray objArgs) {
     ffi_arg ret;
     executeHelper(env, (TruffleContext*) truffleContext, &ret, (ffi_cif*) cif, address, primArgs, patchCount, patch, objArgs);
     return (jlong) ret;
 }
 
-JNIEXPORT jobject JNICALL Java_com_oracle_truffle_nfi_NFIContext_executeObject(JNIEnv *env, jclass self, jlong truffleContext, jlong cif, jlong address,
+JNIEXPORT jobject JNICALL Java_com_oracle_truffle_nfi_impl_NFIContext_executeObject(JNIEnv *env, jclass self, jlong truffleContext, jlong cif, jlong address,
         jbyteArray primArgs, jint patchCount, jintArray patch, jobjectArray objArgs) {
     jobject ret;
     executeHelper(env, (TruffleContext*) truffleContext, &ret, (ffi_cif*) cif, address, primArgs, patchCount, patch, objArgs);
@@ -213,7 +242,7 @@ static struct cif_data *prepareArgs(JNIEnv *env, struct __TruffleContextInternal
     return data;
 }
 
-JNIEXPORT jlong JNICALL Java_com_oracle_truffle_nfi_NFIContext_prepareSignature(JNIEnv *env, jclass self, jlong nativeContext, jobject retType, jobjectArray argTypes) {
+JNIEXPORT jlong JNICALL Java_com_oracle_truffle_nfi_impl_NFIContext_prepareSignature(JNIEnv *env, jclass self, jlong nativeContext, jobject retType, jobjectArray argTypes) {
     struct __TruffleContextInternal *ctx = (struct __TruffleContextInternal *) nativeContext;
     int nargs = (*env)->GetArrayLength(env, argTypes);
 
@@ -230,7 +259,7 @@ JNIEXPORT jlong JNICALL Java_com_oracle_truffle_nfi_NFIContext_prepareSignature(
     }
 }
 
-JNIEXPORT jlong JNICALL Java_com_oracle_truffle_nfi_NFIContext_prepareSignatureVarargs(JNIEnv *env, jclass self, jlong nativeContext, jobject retType, jint nFixedArgs, jobjectArray argTypes) {
+JNIEXPORT jlong JNICALL Java_com_oracle_truffle_nfi_impl_NFIContext_prepareSignatureVarargs(JNIEnv *env, jclass self, jlong nativeContext, jobject retType, jint nFixedArgs, jobjectArray argTypes) {
     struct __TruffleContextInternal *ctx = (struct __TruffleContextInternal *) nativeContext;
     int nargs = (*env)->GetArrayLength(env, argTypes);
 

@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2012, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -25,6 +27,7 @@ package org.graalvm.compiler.replacements.nodes;
 import static org.graalvm.compiler.nodeinfo.NodeCycles.CYCLES_64;
 import static org.graalvm.compiler.nodeinfo.NodeSize.SIZE_1;
 
+import jdk.vm.ci.meta.Value;
 import org.graalvm.compiler.core.common.spi.ForeignCallDescriptor;
 import org.graalvm.compiler.core.common.type.FloatStamp;
 import org.graalvm.compiler.core.common.type.PrimitiveStamp;
@@ -36,15 +39,15 @@ import org.graalvm.compiler.graph.spi.CanonicalizerTool;
 import org.graalvm.compiler.lir.gen.ArithmeticLIRGeneratorTool;
 import org.graalvm.compiler.nodeinfo.NodeInfo;
 import org.graalvm.compiler.nodes.ConstantNode;
+import org.graalvm.compiler.nodes.NodeView;
 import org.graalvm.compiler.nodes.ValueNode;
 import org.graalvm.compiler.nodes.calc.UnaryNode;
 import org.graalvm.compiler.nodes.spi.ArithmeticLIRLowerable;
 import org.graalvm.compiler.nodes.spi.Lowerable;
 import org.graalvm.compiler.nodes.spi.LoweringTool;
-import org.graalvm.compiler.nodes.spi.NodeLIRBuilderTool;
 
 import jdk.vm.ci.meta.JavaKind;
-import jdk.vm.ci.meta.Value;
+import org.graalvm.compiler.nodes.spi.NodeLIRBuilderTool;
 
 @NodeInfo(nameTemplate = "MathIntrinsic#{p#operation/s}", cycles = CYCLES_64, size = SIZE_1)
 public final class UnaryMathIntrinsicNode extends UnaryNode implements ArithmeticLIRLowerable, Lowerable {
@@ -84,6 +87,43 @@ public final class UnaryMathIntrinsicNode extends UnaryNode implements Arithmeti
                     throw new GraalError("unknown op %s", this);
             }
         }
+
+        public Stamp computeStamp(Stamp valueStamp) {
+            if (valueStamp instanceof FloatStamp) {
+                FloatStamp floatStamp = (FloatStamp) valueStamp;
+                switch (this) {
+                    case COS:
+                    case SIN: {
+                        boolean nonNaN = floatStamp.lowerBound() != Double.NEGATIVE_INFINITY && floatStamp.upperBound() != Double.POSITIVE_INFINITY && floatStamp.isNonNaN();
+                        return StampFactory.forFloat(JavaKind.Double, -1.0, 1.0, nonNaN);
+                    }
+                    case TAN: {
+                        boolean nonNaN = floatStamp.lowerBound() != Double.NEGATIVE_INFINITY && floatStamp.upperBound() != Double.POSITIVE_INFINITY && floatStamp.isNonNaN();
+                        return StampFactory.forFloat(JavaKind.Double, Double.NEGATIVE_INFINITY, Double.POSITIVE_INFINITY, nonNaN);
+                    }
+                    case LOG:
+                    case LOG10: {
+                        double lowerBound = compute(floatStamp.lowerBound());
+                        double upperBound = compute(floatStamp.upperBound());
+                        if (floatStamp.contains(0.0)) {
+                            // 0.0 and -0.0 infinity produces -Inf
+                            lowerBound = Double.NEGATIVE_INFINITY;
+                        }
+                        boolean nonNaN = floatStamp.lowerBound() >= 0.0 && floatStamp.isNonNaN();
+                        return StampFactory.forFloat(JavaKind.Double, lowerBound, upperBound, nonNaN);
+                    }
+                    case EXP: {
+                        double lowerBound = Math.exp(floatStamp.lowerBound());
+                        double upperBound = Math.exp(floatStamp.upperBound());
+                        boolean nonNaN = floatStamp.isNonNaN();
+                        return StampFactory.forFloat(JavaKind.Double, lowerBound, upperBound, nonNaN);
+                    }
+
+                }
+            }
+            return StampFactory.forKind(JavaKind.Double);
+        }
+
     }
 
     public UnaryOperation getOperation() {
@@ -106,50 +146,14 @@ public final class UnaryMathIntrinsicNode extends UnaryNode implements Arithmeti
     }
 
     protected UnaryMathIntrinsicNode(ValueNode value, UnaryOperation op) {
-        super(TYPE, computeStamp(value.stamp(), op), value);
-        assert value.stamp() instanceof FloatStamp && PrimitiveStamp.getBits(value.stamp()) == 64;
+        super(TYPE, op.computeStamp(value.stamp(NodeView.DEFAULT)), value);
+        assert value.stamp(NodeView.DEFAULT) instanceof FloatStamp && PrimitiveStamp.getBits(value.stamp(NodeView.DEFAULT)) == 64;
         this.operation = op;
     }
 
     @Override
     public Stamp foldStamp(Stamp valueStamp) {
-        return computeStamp(valueStamp, getOperation());
-    }
-
-    static Stamp computeStamp(Stamp valueStamp, UnaryOperation op) {
-        if (valueStamp instanceof FloatStamp) {
-            FloatStamp floatStamp = (FloatStamp) valueStamp;
-            switch (op) {
-                case COS:
-                case SIN: {
-                    boolean nonNaN = floatStamp.lowerBound() != Double.NEGATIVE_INFINITY && floatStamp.upperBound() != Double.POSITIVE_INFINITY && floatStamp.isNonNaN();
-                    return StampFactory.forFloat(JavaKind.Double, -1.0, 1.0, nonNaN);
-                }
-                case TAN: {
-                    boolean nonNaN = floatStamp.lowerBound() != Double.NEGATIVE_INFINITY && floatStamp.upperBound() != Double.POSITIVE_INFINITY && floatStamp.isNonNaN();
-                    return StampFactory.forFloat(JavaKind.Double, Double.NEGATIVE_INFINITY, Double.POSITIVE_INFINITY, nonNaN);
-                }
-                case LOG:
-                case LOG10: {
-                    double lowerBound = op.compute(floatStamp.lowerBound());
-                    double upperBound = op.compute(floatStamp.upperBound());
-                    if (floatStamp.contains(0.0)) {
-                        // 0.0 and -0.0 infinity produces -Inf
-                        lowerBound = Double.NEGATIVE_INFINITY;
-                    }
-                    boolean nonNaN = floatStamp.lowerBound() >= 0.0 && floatStamp.isNonNaN();
-                    return StampFactory.forFloat(JavaKind.Double, lowerBound, upperBound, nonNaN);
-                }
-                case EXP: {
-                    double lowerBound = Math.exp(floatStamp.lowerBound());
-                    double upperBound = Math.exp(floatStamp.upperBound());
-                    boolean nonNaN = floatStamp.isNonNaN();
-                    return StampFactory.forFloat(JavaKind.Double, lowerBound, upperBound, nonNaN);
-                }
-
-            }
-        }
-        return StampFactory.forKind(JavaKind.Double);
+        return getOperation().computeStamp(valueStamp);
     }
 
     @Override
@@ -159,6 +163,7 @@ public final class UnaryMathIntrinsicNode extends UnaryNode implements Arithmeti
 
     @Override
     public void generate(NodeLIRBuilderTool nodeValueMap, ArithmeticLIRGeneratorTool gen) {
+        // We can only reach here in the math stubs
         Value input = nodeValueMap.operand(getValue());
         Value result;
         switch (getOperation()) {

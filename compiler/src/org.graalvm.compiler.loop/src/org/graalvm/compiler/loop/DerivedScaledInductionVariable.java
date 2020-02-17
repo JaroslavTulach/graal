@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2012, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -27,6 +29,7 @@ import static org.graalvm.compiler.loop.MathUtil.mul;
 import org.graalvm.compiler.core.common.type.IntegerStamp;
 import org.graalvm.compiler.core.common.type.Stamp;
 import org.graalvm.compiler.nodes.ConstantNode;
+import org.graalvm.compiler.nodes.NodeView;
 import org.graalvm.compiler.nodes.ValueNode;
 import org.graalvm.compiler.nodes.calc.IntegerConvertNode;
 import org.graalvm.compiler.nodes.calc.NegateNode;
@@ -45,7 +48,7 @@ public class DerivedScaledInductionVariable extends DerivedInductionVariable {
 
     public DerivedScaledInductionVariable(LoopEx loop, InductionVariable base, NegateNode value) {
         super(loop, base);
-        this.scale = ConstantNode.forIntegerStamp(value.stamp(), -1, value.graph());
+        this.scale = ConstantNode.forIntegerStamp(value.stamp(NodeView.DEFAULT), -1, value.graph());
         this.value = value;
     }
 
@@ -60,13 +63,17 @@ public class DerivedScaledInductionVariable extends DerivedInductionVariable {
 
     @Override
     public Direction direction() {
-        Stamp stamp = scale.stamp();
+        Direction baseDirection = base.direction();
+        if (baseDirection == null) {
+            return null;
+        }
+        Stamp stamp = scale.stamp(NodeView.DEFAULT);
         if (stamp instanceof IntegerStamp) {
             IntegerStamp integerStamp = (IntegerStamp) stamp;
             if (integerStamp.isStrictlyPositive()) {
-                return base.direction();
+                return baseDirection;
             } else if (integerStamp.isStrictlyNegative()) {
-                return base.direction().opposite();
+                return baseDirection.opposite();
             }
         }
         return null;
@@ -103,8 +110,8 @@ public class DerivedScaledInductionVariable extends DerivedInductionVariable {
     }
 
     @Override
-    public ValueNode extremumNode(boolean assumePositiveTripCount, Stamp stamp) {
-        return mul(graph(), base.extremumNode(assumePositiveTripCount, stamp), IntegerConvertNode.convert(scale, stamp, graph()));
+    public ValueNode extremumNode(boolean assumeLoopEntered, Stamp stamp) {
+        return mul(graph(), base.extremumNode(assumeLoopEntered, stamp), IntegerConvertNode.convert(scale, stamp, graph(), NodeView.DEFAULT));
     }
 
     @Override

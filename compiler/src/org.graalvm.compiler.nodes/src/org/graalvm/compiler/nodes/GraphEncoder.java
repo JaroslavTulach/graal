@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2015, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -27,6 +29,8 @@ import java.util.Deque;
 import java.util.Iterator;
 import java.util.Objects;
 
+import org.graalvm.collections.Pair;
+import org.graalvm.collections.UnmodifiableMapCursor;
 import org.graalvm.compiler.core.common.Fields;
 import org.graalvm.compiler.core.common.util.FrequencyEncoder;
 import org.graalvm.compiler.core.common.util.TypeConversion;
@@ -42,8 +46,6 @@ import org.graalvm.compiler.graph.NodeMap;
 import org.graalvm.compiler.graph.iterators.NodeIterable;
 import org.graalvm.compiler.nodes.StructuredGraph.AllowAssumptions;
 import org.graalvm.compiler.nodes.java.ExceptionObjectNode;
-import org.graalvm.util.Pair;
-import org.graalvm.util.UnmodifiableMapCursor;
 
 import jdk.vm.ci.code.Architecture;
 
@@ -110,9 +112,13 @@ import jdk.vm.ci.code.Architecture;
  */
 public class GraphEncoder {
 
-    /** The orderId that always represents {@code null}. */
+    /**
+     * The orderId that always represents {@code null}.
+     */
     public static final int NULL_ORDER_ID = 0;
-    /** The orderId of the {@link StructuredGraph#start() start node} of the encoded graph. */
+    /**
+     * The orderId of the {@link StructuredGraph#start() start node} of the encoded graph.
+     */
     public static final int START_NODE_ORDER_ID = 1;
     /**
      * The orderId of the first actual node after the {@link StructuredGraph#start() start node}.
@@ -146,6 +152,8 @@ public class GraphEncoder {
     /** The last snapshot of {@link #nodeClasses} that was retrieved. */
     protected NodeClass<?>[] nodeClassesArray;
 
+    protected DebugContext debug;
+
     /**
      * Utility method that does everything necessary to encode a single graph.
      */
@@ -154,11 +162,16 @@ public class GraphEncoder {
         encoder.prepare(graph);
         encoder.finishPrepare();
         int startOffset = encoder.encode(graph);
-        return new EncodedGraph(encoder.getEncoding(), startOffset, encoder.getObjects(), encoder.getNodeClasses(), graph.getAssumptions(), graph.getMethods());
+        return new EncodedGraph(encoder.getEncoding(), startOffset, encoder.getObjects(), encoder.getNodeClasses(), graph);
     }
 
     public GraphEncoder(Architecture architecture) {
+        this(architecture, null);
+    }
+
+    public GraphEncoder(Architecture architecture, DebugContext debug) {
         this.architecture = architecture;
+        this.debug = debug;
         objects = FrequencyEncoder.createEqualityEncoder();
         nodeClasses = FrequencyEncoder.createIdentityEncoder();
         writer = UnsafeArrayTypeWriter.create(architecture.supportsUnalignedMemoryAccess());
@@ -168,6 +181,7 @@ public class GraphEncoder {
      * Must be invoked before {@link #finishPrepare()} and {@link #encode}.
      */
     public void prepare(StructuredGraph graph) {
+        objects.addObject(graph.getGuardsStage());
         for (Node node : graph.getNodes()) {
             NodeClass<? extends Node> nodeClass = node.getNodeClass();
             nodeClasses.addObject(nodeClass);
@@ -286,10 +300,10 @@ public class GraphEncoder {
         for (int i = 0; i < nodeCount; i++) {
             writer.putUV(metadataStart - nodeStartOffsets[i]);
         }
+        writeObjectId(graph.getGuardsStage());
 
         /* Check that the decoding of the encode graph is the same as the input. */
-        assert verifyEncoding(graph, new EncodedGraph(getEncoding(), metadataStart, getObjects(), getNodeClasses(), graph.getAssumptions(), graph.getMethods()),
-                        architecture);
+        assert verifyEncoding(graph, new EncodedGraph(getEncoding(), metadataStart, getObjects(), getNodeClasses(), graph));
 
         return metadataStart;
     }
@@ -433,9 +447,15 @@ public class GraphEncoder {
      * original graph.
      */
     @SuppressWarnings("try")
-    public static boolean verifyEncoding(StructuredGraph originalGraph, EncodedGraph encodedGraph, Architecture architecture) {
-        DebugContext debug = originalGraph.getDebug();
-        StructuredGraph decodedGraph = new StructuredGraph.Builder(originalGraph.getOptions(), debug, AllowAssumptions.YES).method(originalGraph.method()).build();
+    public boolean verifyEncoding(StructuredGraph originalGraph, EncodedGraph encodedGraph) {
+        DebugContext debugContext = debug != null ? debug : originalGraph.getDebug();
+        // @formatter:off
+        StructuredGraph decodedGraph = new StructuredGraph.Builder(originalGraph.getOptions(), debugContext, AllowAssumptions.YES).
+                        method(originalGraph.method()).
+                        setIsSubstitution(originalGraph.isSubstitution()).
+                        trackNodeSourcePosition(originalGraph.trackNodeSourcePosition()).
+                        build();
+        // @formatter:off
         GraphDecoder decoder = new GraphDecoder(architecture, decodedGraph);
         decoder.decode(encodedGraph);
 
@@ -444,9 +464,9 @@ public class GraphEncoder {
             GraphComparison.verifyGraphsEqual(originalGraph, decodedGraph);
         } catch (Throwable ex) {
             originalGraph.getDebug();
-            try (DebugContext.Scope scope = debug.scope("GraphEncoder")) {
-                debug.dump(DebugContext.VERBOSE_LEVEL, originalGraph, "Original Graph");
-                debug.dump(DebugContext.VERBOSE_LEVEL, decodedGraph, "Decoded Graph");
+            try (DebugContext.Scope scope = debugContext.scope("GraphEncoder")) {
+                debugContext.dump(DebugContext.VERBOSE_LEVEL, originalGraph, "Original Graph");
+                debugContext.dump(DebugContext.VERBOSE_LEVEL, decodedGraph, "Decoded Graph");
             }
             throw ex;
         }
@@ -492,8 +512,8 @@ class GraphComparison {
 
             if (expectedNode instanceof EndNode) {
                 /* Visit the merge node, which is the one and only usage of the EndNode. */
-                assert expectedNode.usages().count() == 1;
-                assert actualNode.usages().count() == 1;
+                assert expectedNode.hasExactlyOneUsage();
+                assert actualNode.hasExactlyOneUsage();
                 verifyNodesEqual(expectedNode.usages(), actualNode.usages(), nodeMapping, workList, false);
             }
 

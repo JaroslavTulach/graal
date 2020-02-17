@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2014, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2014, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -24,8 +26,6 @@ package org.graalvm.compiler.core.match;
 
 import static org.graalvm.compiler.debug.DebugOptions.LogVerbose;
 
-import java.util.List;
-
 import org.graalvm.compiler.core.gen.NodeLIRBuilder;
 import org.graalvm.compiler.core.match.MatchPattern.MatchResultCode;
 import org.graalvm.compiler.core.match.MatchPattern.Result;
@@ -36,6 +36,8 @@ import org.graalvm.compiler.graph.Node;
 import org.graalvm.compiler.nodeinfo.Verbosity;
 
 import jdk.vm.ci.meta.Value;
+import org.graalvm.compiler.nodes.StructuredGraph;
+import org.graalvm.compiler.nodes.cfg.Block;
 
 /**
  * A named {@link MatchPattern} along with a {@link MatchGenerator} that can be evaluated to replace
@@ -78,20 +80,21 @@ public class MatchStatement {
      *
      * @param builder the current builder instance.
      * @param node the node to be matched
-     * @param nodes the nodes in the current block
+     * @param block the current block
+     * @param schedule the schedule that's being used
      * @return true if the statement matched something and set a {@link ComplexMatchResult} to be
      *         evaluated by the NodeLIRBuilder.
      */
-    public boolean generate(NodeLIRBuilder builder, int index, Node node, List<Node> nodes) {
+    public boolean generate(NodeLIRBuilder builder, int index, Node node, Block block, StructuredGraph.ScheduleResult schedule) {
         DebugContext debug = node.getDebug();
-        assert index == nodes.indexOf(node);
+        assert index == schedule.getBlockToNodesMap().get(block).indexOf(node);
         // Check that the basic shape matches
         Result result = pattern.matchShape(node, this);
         if (result != Result.OK) {
             return false;
         }
         // Now ensure that the other safety constraints are matched.
-        MatchContext context = new MatchContext(builder, this, index, node, nodes);
+        MatchContext context = new MatchContext(builder, this, index, node, block, schedule);
         result = pattern.matchUsage(node, context);
         if (result == Result.OK) {
             // Invoke the generator method and set the result if it's non null.

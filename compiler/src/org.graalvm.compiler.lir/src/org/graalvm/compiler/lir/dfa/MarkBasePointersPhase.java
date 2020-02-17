@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2015, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -26,6 +28,7 @@ import org.graalvm.compiler.core.common.LIRKind;
 import org.graalvm.compiler.lir.LIR;
 import org.graalvm.compiler.lir.LIRFrameState;
 import org.graalvm.compiler.lir.LIRInstruction;
+import org.graalvm.compiler.lir.LIRValueUtil;
 import org.graalvm.compiler.lir.Variable;
 import org.graalvm.compiler.lir.framemap.FrameMap;
 import org.graalvm.compiler.lir.gen.LIRGenerationResult;
@@ -68,9 +71,13 @@ public final class MarkBasePointersPhase extends AllocationPhase {
 
             @Override
             public void put(Value v) {
-                Variable base = (Variable) v.getValueKind(LIRKind.class).getDerivedReferenceBase();
-                assert !base.getValueKind(LIRKind.class).isValue();
-                variables.put(base.index, base);
+                LIRKind lirKind = v.getValueKind(LIRKind.class);
+                if (lirKind.isDerivedReference()) {
+                    // Only derived references are interesting usages.
+                    Variable base = (Variable) lirKind.getDerivedReferenceBase();
+                    assert !base.getValueKind(LIRKind.class).isValue();
+                    variables.put(base.index, base);
+                }
             }
 
             @Override
@@ -80,9 +87,11 @@ public final class MarkBasePointersPhase extends AllocationPhase {
 
             @Override
             public void remove(Value v) {
-                Variable base = (Variable) v.getValueKind(LIRKind.class).getDerivedReferenceBase();
-                assert !base.getValueKind(LIRKind.class).isValue();
-                variables.put(base.index, null);
+                if (LIRValueUtil.isVariable(v)) {
+                    // All (non-value) variables are potential base pointers.
+                    Variable base = LIRValueUtil.asVariable(v);
+                    variables.put(base.index, null);
+                }
             }
 
             @Override
@@ -114,10 +123,13 @@ public final class MarkBasePointersPhase extends AllocationPhase {
         protected boolean shouldProcessValue(Value operand) {
             ValueKind<?> kind = operand.getValueKind();
             if (kind instanceof LIRKind) {
-                return ((LIRKind) kind).isDerivedReference();
-            } else {
-                return false;
+                /*
+                 * We are interested in all kinds that are not values (base pointers and derived
+                 * references).
+                 */
+                return !((LIRKind) kind).isValue();
             }
+            return false;
         }
 
         @Override

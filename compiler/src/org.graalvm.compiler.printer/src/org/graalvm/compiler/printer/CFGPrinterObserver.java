@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2011, 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -50,7 +52,6 @@ import org.graalvm.compiler.debug.TTY;
 import org.graalvm.compiler.graph.Graph;
 import org.graalvm.compiler.java.BciBlockMapping;
 import org.graalvm.compiler.lir.LIR;
-import org.graalvm.compiler.lir.alloc.trace.GlobalLivenessInfo;
 import org.graalvm.compiler.lir.debug.IntervalDumper;
 import org.graalvm.compiler.lir.gen.LIRGenerationResult;
 import org.graalvm.compiler.nodes.StructuredGraph;
@@ -63,6 +64,7 @@ import jdk.vm.ci.code.CodeCacheProvider;
 import jdk.vm.ci.code.InstalledCode;
 import jdk.vm.ci.meta.JavaMethod;
 import jdk.vm.ci.meta.ResolvedJavaMethod;
+import jdk.vm.ci.services.Services;
 
 /**
  * Observes compilation events and uses {@link CFGPrinter} to produce a control flow graph for the
@@ -176,7 +178,6 @@ public class CFGPrinterObserver implements DebugDumpHandler {
                 cfgPrinter.lir = debug.contextLookup(LIR.class);
             }
             cfgPrinter.nodeLirGenerator = debug.contextLookup(NodeLIRBuilder.class);
-            cfgPrinter.livenessInfo = debug.contextLookup(GlobalLivenessInfo.class);
             cfgPrinter.res = debug.contextLookup(LIRGenerationResult.class);
             if (cfgPrinter.nodeLirGenerator != null) {
                 cfgPrinter.target = cfgPrinter.nodeLirGenerator.getLIRGeneratorTool().target();
@@ -210,12 +211,14 @@ public class CFGPrinterObserver implements DebugDumpHandler {
             } else if (object instanceof StructuredGraph) {
                 if (cfgPrinter.cfg == null) {
                     StructuredGraph graph = (StructuredGraph) object;
-                    cfgPrinter.cfg = ControlFlowGraph.compute(graph, true, true, true, false);
-                    cfgPrinter.printCFG(message, cfgPrinter.cfg.getBlocks(), true);
-                } else {
+                    ScheduleResult scheduleResult = GraalDebugHandlersFactory.tryGetSchedule(debug, graph);
+                    if (scheduleResult != null) {
+                        cfgPrinter.cfg = scheduleResult.getCFG();
+                    }
+                }
+                if (cfgPrinter.cfg != null) {
                     cfgPrinter.printCFG(message, cfgPrinter.cfg.getBlocks(), true);
                 }
-
             } else if (object instanceof CompilationResult) {
                 final CompilationResult compResult = (CompilationResult) object;
                 cfgPrinter.printMachineCode(disassemble(codeCache, compResult, null), message);
@@ -245,7 +248,6 @@ public class CFGPrinterObserver implements DebugDumpHandler {
             cfgPrinter.lir = null;
             cfgPrinter.res = null;
             cfgPrinter.nodeLirGenerator = null;
-            cfgPrinter.livenessInfo = null;
             cfgPrinter.cfg = null;
             cfgPrinter.flush();
         }
@@ -257,11 +259,19 @@ public class CFGPrinterObserver implements DebugDumpHandler {
 
         static {
             DisassemblerProvider selected = null;
+            String arch = Services.getSavedProperties().get("os.arch");
             for (DisassemblerProvider d : GraalServices.load(DisassemblerProvider.class)) {
                 String name = d.getName().toLowerCase();
-                if (name.contains("hcf") || name.contains("hexcodefile")) {
-                    selected = d;
-                    break;
+                if (arch.equals("aarch64")) {
+                    if (name.contains("hsdis-objdump")) {
+                        selected = d;
+                        break;
+                    }
+                } else {
+                    if (name.contains("hcf") || name.contains("hexcodefile")) {
+                        selected = d;
+                        break;
+                    }
                 }
             }
             if (selected == null) {

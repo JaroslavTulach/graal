@@ -1,32 +1,53 @@
 /*
- * Copyright (c) 2012, 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
- * This code is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * The Universal Permissive License (UPL), Version 1.0
  *
- * This code is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
- * version 2 for more details (a copy is included in the LICENSE file that
- * accompanied this code).
+ * Subject to the condition set forth below, permission is hereby granted to any
+ * person obtaining a copy of this software, associated documentation and/or
+ * data (collectively the "Software"), free of charge and under any and all
+ * copyright rights in the Software, and any and all patent rights owned or
+ * freely licensable by each licensor hereunder covering either (i) the
+ * unmodified Software as contributed to or provided by such licensor, or (ii)
+ * the Larger Works (as defined below), to deal in both
  *
- * You should have received a copy of the GNU General Public License version
- * 2 along with this work; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
+ * (a) the Software, and
  *
- * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
- * or visit www.oracle.com if you need additional information or have any
- * questions.
+ * (b) any piece of software and/or hardware listed in the lrgrwrks.txt file if
+ * one is included with the Software each a "Larger Work" to which the Software
+ * is contributed by such licensors),
+ *
+ * without restriction, including without limitation the rights to copy, create
+ * derivative works of, display, perform, and distribute the Software and make,
+ * use, sell, offer for sale, import, export, have made, and have sold the
+ * Software and the Larger Work(s), and to sublicense the foregoing rights on
+ * either these or other terms.
+ *
+ * This license is subject to the following condition:
+ *
+ * The above copyright notice and either this complete permission notice or at a
+ * minimum a reference to the UPL must be included in all copies or substantial
+ * portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
  */
 package com.oracle.truffle.api.dsl.test;
 
 import static com.oracle.truffle.api.dsl.test.TestHelper.createCallTarget;
+import static com.oracle.truffle.api.test.polyglot.AbstractPolyglotTest.assertFails;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertSame;
 
 import org.junit.Test;
 
+import com.oracle.truffle.api.dsl.GenerateUncached;
 import com.oracle.truffle.api.dsl.NodeField;
 import com.oracle.truffle.api.dsl.Specialization;
 import com.oracle.truffle.api.dsl.test.NodeFieldTestFactory.IntFieldNoGetterTestNodeFactory;
@@ -36,7 +57,13 @@ import com.oracle.truffle.api.dsl.test.NodeFieldTestFactory.ObjectContainerNodeF
 import com.oracle.truffle.api.dsl.test.NodeFieldTestFactory.RewriteTestNodeFactory;
 import com.oracle.truffle.api.dsl.test.NodeFieldTestFactory.StringFieldTestNodeFactory;
 import com.oracle.truffle.api.dsl.test.NodeFieldTestFactory.TestContainerFactory;
+import com.oracle.truffle.api.dsl.test.NodeFieldTestFactory.UncachedNodeIntFieldRefNodeGen;
+import com.oracle.truffle.api.dsl.test.NodeFieldTestFactory.UncachedNodeIntFieldTestNodeGen;
+import com.oracle.truffle.api.dsl.test.NodeFieldTestFactory.UncachedNodeObjectFieldTestNodeGen;
+import com.oracle.truffle.api.dsl.test.NodeFieldTestFactory.UncachedNodeSettableIntFieldRefNodeGen;
 import com.oracle.truffle.api.dsl.test.TypeSystemTest.ValueNode;
+import com.oracle.truffle.api.nodes.Node;
+import com.oracle.truffle.api.source.SourceSection;
 
 public class NodeFieldTest {
 
@@ -89,7 +116,6 @@ public class NodeFieldTest {
         int intField() {
             return getField0() + getField1();
         }
-
     }
 
     @Test
@@ -167,6 +193,106 @@ public class NodeFieldTest {
             return getObject();
         }
 
+    }
+
+    @Test
+    public void testUncachedNodeIntFieldTest() {
+        assertEquals(42, UncachedNodeIntFieldTestNodeGen.create(42).execute());
+        assertFails(() -> UncachedNodeObjectFieldTestNodeGen.getUncached().execute(), UnsupportedOperationException.class);
+    }
+
+    @GenerateUncached
+    @NodeField(name = "field", type = int.class)
+    public abstract static class UncachedNodeIntFieldTest extends Node {
+
+        abstract Object execute();
+
+        protected abstract int getField();
+
+        @Specialization
+        Object s0() {
+            return getField();
+        }
+
+        @Override
+        public SourceSection getSourceSection() {
+            // uses getSourceLength
+            return null;
+        }
+    }
+
+    @Test
+    public void testUncachedNodeObjectFieldTest() {
+        Object instance = new Object();
+        assertSame(instance, UncachedNodeObjectFieldTestNodeGen.create(instance).execute());
+        assertFails(() -> UncachedNodeObjectFieldTestNodeGen.getUncached().execute(), UnsupportedOperationException.class);
+    }
+
+    @GenerateUncached
+    @NodeField(name = "field", type = Object.class)
+    public abstract static class UncachedNodeObjectFieldTest extends Node {
+
+        abstract Object execute();
+
+        protected abstract Object getField();
+
+        @Specialization
+        Object s0() {
+            return getField();
+        }
+
+        @Override
+        public SourceSection getSourceSection() {
+            // uses getSourceLength
+            return null;
+        }
+    }
+
+    @Test
+    public void testUncachedNodeIntFieldRef() {
+        assertEquals(42, UncachedNodeIntFieldRefNodeGen.create(42).execute());
+        assertEquals(0, UncachedNodeIntFieldRefNodeGen.getUncached().execute());
+    }
+
+    @GenerateUncached
+    @NodeField(name = "foo", type = int.class)
+    public abstract static class UncachedNodeIntFieldRef extends Node {
+
+        abstract Object execute();
+
+        @Specialization
+        static Object s0(int foo) {
+            return foo;
+        }
+    }
+
+    @Test
+    public void testUncachedNodeSettableIntFieldRef() {
+        UncachedNodeSettableIntFieldRef cached = UncachedNodeSettableIntFieldRefNodeGen.create();
+        assertEquals(0, cached.execute());
+        assertEquals(0, cached.getFoo());
+        cached.setFoo(42);
+        assertEquals(42, cached.execute());
+        assertEquals(42, cached.getFoo());
+        assertFails(() -> UncachedNodeSettableIntFieldRefNodeGen.getUncached().execute(), UnsupportedOperationException.class);
+        assertFails(() -> UncachedNodeSettableIntFieldRefNodeGen.getUncached().getFoo(), UnsupportedOperationException.class);
+        assertFails(() -> UncachedNodeSettableIntFieldRefNodeGen.getUncached().setFoo(42), UnsupportedOperationException.class);
+    }
+
+    @GenerateUncached
+    @NodeField(name = "foo", type = int.class)
+    public abstract static class UncachedNodeSettableIntFieldRef extends Node {
+
+        abstract Object execute();
+
+        abstract int getFoo();
+
+        abstract void setFoo(int foo);
+
+        @Specialization
+        Object s0() {
+            return getFoo();
+        }
     }
 
 }

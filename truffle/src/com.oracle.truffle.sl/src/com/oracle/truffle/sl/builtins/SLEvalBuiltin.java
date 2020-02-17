@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * The Universal Permissive License (UPL), Version 1.0
@@ -43,10 +43,13 @@ package com.oracle.truffle.sl.builtins;
 import com.oracle.truffle.api.CallTarget;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 import com.oracle.truffle.api.dsl.Cached;
+import com.oracle.truffle.api.dsl.CachedContext;
 import com.oracle.truffle.api.dsl.Specialization;
 import com.oracle.truffle.api.nodes.DirectCallNode;
 import com.oracle.truffle.api.nodes.NodeInfo;
 import com.oracle.truffle.api.source.Source;
+import com.oracle.truffle.sl.SLLanguage;
+import com.oracle.truffle.sl.runtime.SLContext;
 
 /**
  * Builtin function to evaluate source code in any supported language.
@@ -59,23 +62,24 @@ import com.oracle.truffle.api.source.Source;
 @SuppressWarnings("unused")
 public abstract class SLEvalBuiltin extends SLBuiltinNode {
 
-    @Specialization(guards = {"stringsEqual(cachedMimeType, mimeType)", "stringsEqual(cachedCode, code)"})
-    public Object evalCached(String mimeType, String code,
-                    @Cached("mimeType") String cachedMimeType,
+    @Specialization(guards = {"stringsEqual(cachedId, id)", "stringsEqual(cachedCode, code)"})
+    public Object evalCached(String id, String code,
+                    @Cached("id") String cachedId,
                     @Cached("code") String cachedCode,
-                    @Cached("create(parse(mimeType, code))") DirectCallNode callNode) {
+                    @CachedContext(SLLanguage.class) SLContext context,
+                    @Cached("create(parse(id, code, context))") DirectCallNode callNode) {
         return callNode.call(new Object[]{});
     }
 
     @TruffleBoundary
     @Specialization(replaces = "evalCached")
-    public Object evalUncached(String mimeType, String code) {
-        return parse(mimeType, code).call();
+    public Object evalUncached(String id, String code, @CachedContext(SLLanguage.class) SLContext context) {
+        return parse(id, code, context).call();
     }
 
-    protected CallTarget parse(String mimeType, String code) {
-        final Source source = Source.newBuilder(code).name("(eval)").mimeType(mimeType).build();
-        return getContext().parse(source);
+    protected CallTarget parse(String id, String code, SLContext context) {
+        final Source source = Source.newBuilder(id, code, "(eval)").build();
+        return context.parse(source);
     }
 
     /* Work around findbugs warning in generate code. */

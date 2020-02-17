@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2016, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * The Universal Permissive License (UPL), Version 1.0
@@ -40,11 +40,10 @@
  */
 package com.oracle.truffle.sl.nodes.expression;
 
-import com.oracle.truffle.api.dsl.UnsupportedSpecializationException;
 import com.oracle.truffle.api.frame.VirtualFrame;
-import com.oracle.truffle.api.nodes.Node;
 import com.oracle.truffle.api.nodes.UnexpectedResultException;
 import com.oracle.truffle.api.profiles.ConditionProfile;
+import com.oracle.truffle.sl.SLException;
 import com.oracle.truffle.sl.nodes.SLExpressionNode;
 
 /**
@@ -79,7 +78,7 @@ public abstract class SLShortCircuitNode extends SLExpressionNode {
         try {
             leftValue = left.executeBoolean(frame);
         } catch (UnexpectedResultException e) {
-            throw new UnsupportedSpecializationException(this, new Node[]{left, right}, new Object[]{e.getResult(), null});
+            throw SLException.typeError(this, e.getResult(), null);
         }
         boolean rightValue;
         try {
@@ -89,7 +88,7 @@ public abstract class SLShortCircuitNode extends SLExpressionNode {
                 rightValue = false;
             }
         } catch (UnexpectedResultException e) {
-            throw new UnsupportedSpecializationException(this, new Node[]{left, right}, new Object[]{leftValue, e.getResult()});
+            throw SLException.typeError(this, leftValue, e.getResult());
         }
         return execute(leftValue, rightValue);
     }

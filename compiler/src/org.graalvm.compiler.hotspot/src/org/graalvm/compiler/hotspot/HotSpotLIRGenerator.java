@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2012, 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -59,7 +61,19 @@ public interface HotSpotLIRGenerator extends LIRGeneratorTool {
      */
     void emitTailcall(Value[] args, Value address);
 
+    /**
+     * Emits code that jumps to the deopt blob uncommon_trap entry point with {@code action} and
+     * {@code reason}.
+     */
     void emitDeoptimizeCaller(DeoptimizationAction action, DeoptimizationReason reason);
+
+    /**
+     * Emits code that jumps to the deopt blob unpack_with_exception entry point with
+     * {@code exception}.
+     *
+     * @param exception
+     */
+    void emitDeoptimizeWithExceptionInCaller(Value exception);
 
     /**
      * Emits code for a {@link LoadConstantIndirectlyNode}.

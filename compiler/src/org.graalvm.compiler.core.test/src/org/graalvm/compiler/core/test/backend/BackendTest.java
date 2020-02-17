@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2014, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2014, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -23,6 +25,7 @@
 package org.graalvm.compiler.core.test.backend;
 
 import org.graalvm.compiler.core.GraalCompiler;
+import org.graalvm.compiler.core.gen.LIRCompilerBackend;
 import org.graalvm.compiler.core.test.GraalCompilerTest;
 import org.graalvm.compiler.debug.DebugContext;
 import org.graalvm.compiler.lir.gen.LIRGenerationResult;
@@ -42,16 +45,19 @@ public abstract class BackendTest extends GraalCompilerTest {
     }
 
     @SuppressWarnings("try")
-    protected LIRGenerationResult getLIRGenerationResult(final StructuredGraph graph) {
+    protected LIRGenerationResult getLIRGenerationResult(final StructuredGraph graph, OptimisticOptimizations optimizations) {
         DebugContext debug = graph.getDebug();
         try (DebugContext.Scope s = debug.scope("FrontEnd")) {
-            GraalCompiler.emitFrontEnd(getProviders(), getBackend(), graph, getDefaultGraphBuilderSuite(), OptimisticOptimizations.NONE, graph.getProfilingInfo(), createSuites(graph.getOptions()));
+            GraalCompiler.emitFrontEnd(getProviders(), getBackend(), graph, getDefaultGraphBuilderSuite(), optimizations, graph.getProfilingInfo(), createSuites(graph.getOptions()));
         } catch (Throwable e) {
             throw debug.handle(e);
         }
 
-        LIRGenerationResult lirGen = GraalCompiler.emitLIR(getBackend(), graph, null, null, createLIRSuites(graph.getOptions()));
+        LIRGenerationResult lirGen = LIRCompilerBackend.emitLIR(getBackend(), graph, null, null, createLIRSuites(graph.getOptions()));
         return lirGen;
     }
 
+    protected LIRGenerationResult getLIRGenerationResult(final StructuredGraph graph) {
+        return getLIRGenerationResult(graph, OptimisticOptimizations.NONE);
+    }
 }

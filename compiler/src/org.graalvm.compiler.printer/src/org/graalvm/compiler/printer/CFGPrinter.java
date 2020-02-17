@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2009, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2009, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -33,6 +35,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
 
+import org.graalvm.collections.UnmodifiableMapCursor;
 import org.graalvm.compiler.bytecode.Bytecode;
 import org.graalvm.compiler.bytecode.BytecodeDisassembler;
 import org.graalvm.compiler.core.common.alloc.Trace;
@@ -47,7 +50,6 @@ import org.graalvm.compiler.graph.Position;
 import org.graalvm.compiler.java.BciBlockMapping;
 import org.graalvm.compiler.lir.LIR;
 import org.graalvm.compiler.lir.LIRInstruction;
-import org.graalvm.compiler.lir.alloc.trace.GlobalLivenessInfo;
 import org.graalvm.compiler.lir.debug.IntervalDumper;
 import org.graalvm.compiler.lir.debug.IntervalDumper.IntervalVisitor;
 import org.graalvm.compiler.lir.gen.LIRGenerationResult;
@@ -66,7 +68,6 @@ import org.graalvm.compiler.nodes.ValuePhiNode;
 import org.graalvm.compiler.nodes.calc.FloatingNode;
 import org.graalvm.compiler.nodes.cfg.Block;
 import org.graalvm.compiler.nodes.cfg.ControlFlowGraph;
-import org.graalvm.util.UnmodifiableMapCursor;
 
 import jdk.vm.ci.code.DebugInfo;
 import jdk.vm.ci.code.TargetDescription;
@@ -85,7 +86,6 @@ class CFGPrinter extends CompilationPrinter {
     protected ControlFlowGraph cfg;
     protected ScheduleResult schedule;
     protected ResolvedJavaMethod method;
-    protected GlobalLivenessInfo livenessInfo;
     protected LIRGenerationResult res;
 
     /**
@@ -116,38 +116,38 @@ class CFGPrinter extends CompilationPrinter {
     }
 
     private void printBlock(BciBlockMapping.BciBlock block) {
-        out.print("name \"B").print(block.startBci).println('"');
-        out.print("from_bci ").println(block.startBci);
-        out.print("to_bci ").println(block.endBci);
+        out.print("name \"B").print(block.getStartBci()).println('"');
+        out.print("from_bci ").println(block.getStartBci());
+        out.print("to_bci ").println(block.getEndBci());
 
         out.println("predecessors ");
 
         out.print("successors ");
         for (BciBlockMapping.BciBlock succ : block.getSuccessors()) {
-            if (!succ.isExceptionEntry) {
-                out.print("\"B").print(succ.startBci).print("\" ");
+            if (!succ.isExceptionEntry()) {
+                out.print("\"B").print(succ.getStartBci()).print("\" ");
             }
         }
         out.println();
 
         out.print("xhandlers");
         for (BciBlockMapping.BciBlock succ : block.getSuccessors()) {
-            if (succ.isExceptionEntry) {
-                out.print("\"B").print(succ.startBci).print("\" ");
+            if (succ.isExceptionEntry()) {
+                out.print("\"B").print(succ.getStartBci()).print("\" ");
             }
         }
         out.println();
 
         out.print("flags ");
-        if (block.isExceptionEntry) {
+        if (block.isExceptionEntry()) {
             out.print("\"ex\" ");
         }
-        if (block.isLoopHeader) {
+        if (block.isLoopHeader()) {
             out.print("\"plh\" ");
         }
         out.println();
 
-        out.print("loop_depth ").println(Long.bitCount(block.loops));
+        out.print("loop_depth ").println(Long.bitCount(block.getLoops()));
     }
 
     private NodeMap<Block> latestScheduling;
@@ -293,7 +293,7 @@ class CFGPrinter extends CompilationPrinter {
             out.print("loop_depth ").println(block.getLoop().getDepth());
         }
 
-        out.print("probability ").println(Double.doubleToRawLongBits(block.probability()));
+        out.print("probability ").println(Double.doubleToRawLongBits(block.getRelativeFrequency()));
     }
 
     private void printNodes(Block block) {
@@ -485,53 +485,11 @@ class CFGPrinter extends CompilationPrinter {
         begin("IR");
         out.println("LIR");
 
-        if (livenessInfo != null) {
-            int opId = lirInstructions.get(0).id();
-            printLiveVars(livenessInfo.getBlockIn(block), "in(var)", opId);
-            printLiveLoc(livenessInfo.getInLocation(block), "in(loc)", opId);
-        }
         for (int i = 0; i < lirInstructions.size(); i++) {
             LIRInstruction inst = lirInstructions.get(i);
             printLIRInstruction(inst);
         }
-        if (livenessInfo != null) {
-            int opId = lirInstructions.get(lirInstructions.size() - 1).id();
-            printLiveVars(livenessInfo.getBlockOut(block), "out(var)", opId);
-            printLiveLoc(livenessInfo.getOutLocation(block), "out(loc)", opId);
-        }
         end("IR");
-    }
-
-    private void printLiveVars(int[] live, String lbl, int opId) {
-        out.printf("nr %4d ", opId).print(COLUMN_END).print(" instruction ");
-        out.print(lbl).print(" [");
-        for (int i = 0; i < live.length; i++) {
-            if (i > 0) {
-                out.print(", ");
-            }
-            int varNum = live[i];
-            Value value = varNum >= 0 ? livenessInfo.getVariable(varNum) : Value.ILLEGAL;
-            out.print(i).print(": ").print(value.toString());
-        }
-        out.print(']');
-        out.print(COLUMN_END);
-        out.println(COLUMN_END);
-    }
-
-    private void printLiveLoc(Value[] values, String lbl, int opId) {
-        if (values != null) {
-            out.printf("nr %4d ", opId).print(COLUMN_END).print(" instruction ");
-            out.print(lbl).print(" [");
-            for (int i = 0; i < values.length; i++) {
-                if (i > 0) {
-                    out.print(", ");
-                }
-                out.print(i).print(": ").print(values[i].toString());
-            }
-            out.print(']');
-            out.print(COLUMN_END);
-            out.println(COLUMN_END);
-        }
     }
 
     private void printLIRInstruction(LIRInstruction inst) {

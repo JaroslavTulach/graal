@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2016, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -28,11 +30,11 @@ import org.graalvm.compiler.nodes.StructuredGraph.AllowAssumptions;
 import org.graalvm.compiler.nodes.extended.UnsafeAccessNode;
 import org.graalvm.compiler.nodes.memory.ReadNode;
 import org.graalvm.compiler.nodes.memory.WriteNode;
+import org.graalvm.compiler.nodes.spi.CoreProviders;
 import org.graalvm.compiler.nodes.spi.LoweringTool;
 import org.graalvm.compiler.options.OptionValues;
 import org.graalvm.compiler.phases.common.CanonicalizerPhase;
 import org.graalvm.compiler.phases.common.LoweringPhase;
-import org.graalvm.compiler.phases.tiers.PhaseContext;
 import org.graalvm.compiler.virtual.phases.ea.EarlyReadEliminationPhase;
 import org.graalvm.compiler.virtual.phases.ea.PartialEscapePhase;
 import org.junit.Assert;
@@ -58,14 +60,16 @@ public class UnsafeReadEliminationTest extends GraalCompilerTest {
         longArrayBaseOffset = UNSAFE.arrayBaseOffset(long[].class);
     }
 
+    private static final long ARRAY_LONG_BASE_OFFSET = Unsafe.ARRAY_LONG_BASE_OFFSET;
+
     public static long test1Snippet(double a) {
         final Object m = Memory;
         if (a > 0) {
-            UNSAFE.putDouble(m, (long) Unsafe.ARRAY_LONG_BASE_OFFSET, a);
+            UNSAFE.putDouble(m, ARRAY_LONG_BASE_OFFSET, a);
         } else {
-            SideEffectL = UNSAFE.getLong(m, (long) Unsafe.ARRAY_LONG_BASE_OFFSET);
+            SideEffectL = UNSAFE.getLong(m, ARRAY_LONG_BASE_OFFSET);
         }
-        return UNSAFE.getLong(m, (long) Unsafe.ARRAY_LONG_BASE_OFFSET);
+        return UNSAFE.getLong(m, ARRAY_LONG_BASE_OFFSET);
     }
 
     public static class A {
@@ -78,14 +82,14 @@ public class UnsafeReadEliminationTest extends GraalCompilerTest {
         if (c != 0) {
             long[][] r = a.o;
             phi = r;
-            UNSAFE.putDouble(r, (long) Unsafe.ARRAY_LONG_BASE_OFFSET, 12d);
+            UNSAFE.putDouble(r, ARRAY_LONG_BASE_OFFSET, 12d);
         } else {
             long[][] r = a.p;
             phi = r;
-            UNSAFE.putLong(r, (long) Unsafe.ARRAY_LONG_BASE_OFFSET, 123);
+            UNSAFE.putLong(r, ARRAY_LONG_BASE_OFFSET, 123);
         }
         GraalDirectives.controlFlowAnchor();
-        SideEffectD = UNSAFE.getDouble(phi, (long) Unsafe.ARRAY_LONG_BASE_OFFSET);
+        SideEffectD = UNSAFE.getDouble(phi, ARRAY_LONG_BASE_OFFSET);
         return phi;
     }
 
@@ -114,8 +118,8 @@ public class UnsafeReadEliminationTest extends GraalCompilerTest {
     }
 
     public void testEarlyReadElimination(StructuredGraph graph, int reads, int writes) {
-        PhaseContext context = getDefaultHighTierContext();
-        CanonicalizerPhase canonicalizer = new CanonicalizerPhase();
+        CoreProviders context = getDefaultHighTierContext();
+        CanonicalizerPhase canonicalizer = createCanonicalizerPhase();
         canonicalizer.apply(graph, context);
         new EarlyReadEliminationPhase(canonicalizer).apply(graph, context);
         Assert.assertEquals(3, graph.getNodes().filter(UnsafeAccessNode.class).count());
@@ -129,8 +133,8 @@ public class UnsafeReadEliminationTest extends GraalCompilerTest {
 
     public void testPartialEscapeReadElimination(StructuredGraph graph, int reads, int writes) {
         OptionValues options = graph.getOptions();
-        PhaseContext context = getDefaultHighTierContext();
-        CanonicalizerPhase canonicalizer = new CanonicalizerPhase();
+        CoreProviders context = getDefaultHighTierContext();
+        CanonicalizerPhase canonicalizer = createCanonicalizerPhase();
         canonicalizer.apply(graph, context);
         new PartialEscapePhase(true, true, canonicalizer, null, options).apply(graph, context);
         Assert.assertEquals(3, graph.getNodes().filter(UnsafeAccessNode.class).count());

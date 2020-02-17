@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2009, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2009, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -58,7 +60,7 @@ public class NewInstanceNode extends AbstractNewObjectNode implements Virtualiza
 
     protected NewInstanceNode(NodeClass<? extends NewInstanceNode> c, ResolvedJavaType type, boolean fillContents, FrameState stateBefore) {
         super(c, StampFactory.objectNonNull(TypeReference.createExactTrusted(type)), fillContents, stateBefore);
-        assert !type.isArray() && !type.isInterface() && !type.isPrimitive();
+        assert !type.isArray() && !type.isInterface() && !type.isPrimitive() && !type.isAbstract() : type;
         this.instanceClass = type;
     }
 
@@ -77,7 +79,7 @@ public class NewInstanceNode extends AbstractNewObjectNode implements Virtualiza
          * Reference objects can escape into their ReferenceQueue at any safepoint, therefore
          * they're excluded from escape analysis.
          */
-        if (!tool.getMetaAccessProvider().lookupJavaType(Reference.class).isAssignableFrom(instanceClass)) {
+        if (!tool.getMetaAccess().lookupJavaType(Reference.class).isAssignableFrom(instanceClass)) {
             VirtualInstanceNode virtualObject = createVirtualInstanceNode(true);
             ResolvedJavaField[] fields = virtualObject.getFields();
             ValueNode[] state = new ValueNode[fields.length];

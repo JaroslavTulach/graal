@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2013, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2013, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -42,9 +44,9 @@ import org.graalvm.compiler.nodes.ValueNode;
 import org.graalvm.compiler.nodes.memory.FloatingReadNode;
 import org.graalvm.compiler.nodes.memory.address.AddressNode;
 import org.graalvm.compiler.nodes.memory.address.OffsetAddressNode;
+import org.graalvm.compiler.nodes.spi.CoreProviders;
 import org.graalvm.compiler.phases.BasePhase;
 import org.graalvm.compiler.phases.common.LoweringPhase;
-import org.graalvm.compiler.phases.tiers.PhaseContext;
 
 import jdk.vm.ci.hotspot.HotSpotObjectConstant;
 import jdk.vm.ci.hotspot.HotSpotResolvedJavaField;
@@ -66,7 +68,7 @@ import jdk.vm.ci.meta.ResolvedJavaType;
  *
  * @see AheadOfTimeVerificationPhase
  */
-public class LoadJavaMirrorWithKlassPhase extends BasePhase<PhaseContext> {
+public class LoadJavaMirrorWithKlassPhase extends BasePhase<CoreProviders> {
 
     private final CompressEncoding oopEncoding;
 
@@ -74,7 +76,7 @@ public class LoadJavaMirrorWithKlassPhase extends BasePhase<PhaseContext> {
         this.oopEncoding = config.useCompressedOops ? config.getOopEncoding() : null;
     }
 
-    private ValueNode getClassConstantReplacement(StructuredGraph graph, PhaseContext context, JavaConstant constant) {
+    private ValueNode getClassConstantReplacement(StructuredGraph graph, CoreProviders context, JavaConstant constant) {
         if (constant instanceof HotSpotObjectConstant) {
             ConstantReflectionProvider constantReflection = context.getConstantReflection();
             ResolvedJavaType type = constantReflection.asJavaType(constant);
@@ -114,7 +116,7 @@ public class LoadJavaMirrorWithKlassPhase extends BasePhase<PhaseContext> {
                     if (oopEncoding != null) {
                         stamp = HotSpotNarrowOopStamp.compressed((AbstractObjectStamp) stamp, oopEncoding);
                     }
-                    AddressNode address = graph.unique(new OffsetAddressNode(clazz, ConstantNode.forLong(typeField.offset(), graph)));
+                    AddressNode address = graph.unique(new OffsetAddressNode(clazz, ConstantNode.forLong(typeField.getOffset(), graph)));
                     ValueNode read = graph.unique(new FloatingReadNode(address, FINAL_LOCATION, null, stamp));
 
                     if (oopEncoding == null || ((HotSpotObjectConstant) constant).isCompressed()) {
@@ -129,7 +131,7 @@ public class LoadJavaMirrorWithKlassPhase extends BasePhase<PhaseContext> {
     }
 
     @Override
-    protected void run(StructuredGraph graph, PhaseContext context) {
+    protected void run(StructuredGraph graph, CoreProviders context) {
         for (ConstantNode node : getConstantNodes(graph)) {
             JavaConstant constant = node.asJavaConstant();
             ValueNode freadNode = getClassConstantReplacement(graph, context, constant);

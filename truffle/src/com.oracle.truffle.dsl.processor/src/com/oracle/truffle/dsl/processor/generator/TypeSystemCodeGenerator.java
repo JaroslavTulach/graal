@@ -1,24 +1,42 @@
 /*
- * Copyright (c) 2012, 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
- * This code is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * The Universal Permissive License (UPL), Version 1.0
  *
- * This code is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
- * version 2 for more details (a copy is included in the LICENSE file that
- * accompanied this code).
+ * Subject to the condition set forth below, permission is hereby granted to any
+ * person obtaining a copy of this software, associated documentation and/or
+ * data (collectively the "Software"), free of charge and under any and all
+ * copyright rights in the Software, and any and all patent rights owned or
+ * freely licensable by each licensor hereunder covering either (i) the
+ * unmodified Software as contributed to or provided by such licensor, or (ii)
+ * the Larger Works (as defined below), to deal in both
  *
- * You should have received a copy of the GNU General Public License version
- * 2 along with this work; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
+ * (a) the Software, and
  *
- * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
- * or visit www.oracle.com if you need additional information or have any
- * questions.
+ * (b) any piece of software and/or hardware listed in the lrgrwrks.txt file if
+ * one is included with the Software each a "Larger Work" to which the Software
+ * is contributed by such licensors),
+ *
+ * without restriction, including without limitation the rights to copy, create
+ * derivative works of, display, perform, and distribute the Software and make,
+ * use, sell, offer for sale, import, export, have made, and have sold the
+ * Software and the Larger Work(s), and to sublicense the foregoing rights on
+ * either these or other terms.
+ *
+ * This license is subject to the following condition:
+ *
+ * The above copyright notice and either this complete permission notice or at a
+ * minimum a reference to the UPL must be included in all copies or substantial
+ * portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
  */
 package com.oracle.truffle.dsl.processor.generator;
 
@@ -31,13 +49,14 @@ import static javax.lang.model.element.Modifier.PROTECTED;
 import static javax.lang.model.element.Modifier.PUBLIC;
 import static javax.lang.model.element.Modifier.STATIC;
 
+import java.util.Arrays;
 import java.util.List;
 
 import javax.lang.model.element.Modifier;
 import javax.lang.model.type.DeclaredType;
 import javax.lang.model.type.TypeMirror;
 
-import com.oracle.truffle.api.nodes.UnexpectedResultException;
+import com.oracle.truffle.dsl.processor.AnnotationProcessor;
 import com.oracle.truffle.dsl.processor.ProcessorContext;
 import com.oracle.truffle.dsl.processor.java.ElementUtils;
 import com.oracle.truffle.dsl.processor.java.model.CodeAnnotationMirror;
@@ -57,15 +76,15 @@ public class TypeSystemCodeGenerator extends CodeTypeElementFactory<TypeSystemDa
 
     private static final String LOCAL_VALUE = "value";
 
-    public static CodeTree implicitCastFlat(TypeSystemData typeSystem, TypeMirror type, CodeTree value, CodeTree state) {
+    static CodeTree implicitCastFlat(TypeSystemData typeSystem, TypeMirror type, CodeTree value, CodeTree state) {
         return callImplictMethodFlat(typeSystem, type, asImplicitTypeMethodName(typeSystem, type), value, state);
     }
 
-    public static CodeTree implicitCheckFlat(TypeSystemData typeSystem, TypeMirror type, CodeTree value, CodeTree state) {
+    static CodeTree implicitCheckFlat(TypeSystemData typeSystem, TypeMirror type, CodeTree value, CodeTree state) {
         return callImplictMethodFlat(typeSystem, type, isImplicitTypeMethodName(typeSystem, type), value, state);
     }
 
-    public static CodeTree implicitSpecializeFlat(TypeSystemData typeSystem, TypeMirror type, CodeTree value) {
+    static CodeTree implicitSpecializeFlat(TypeSystemData typeSystem, TypeMirror type, CodeTree value) {
         return callImplictMethodFlat(typeSystem, type, specializeImplicitTypeMethodName(typeSystem, type), value, null);
     }
 
@@ -83,60 +102,22 @@ public class TypeSystemCodeGenerator extends CodeTypeElementFactory<TypeSystemDa
         return builder.build();
     }
 
-    public static CodeTree implicitExpectFlat(TypeSystemData typeSystem, TypeMirror type, CodeTree value, CodeTree state) {
+    static CodeTree implicitExpectFlat(TypeSystemData typeSystem, TypeMirror type, CodeTree value, CodeTree state) {
         return callImplictMethodFlat(typeSystem, type, expectImplicitTypeMethodName(typeSystem, type), value, state);
     }
 
-    public static CodeTree cast(TypeSystemData typeSystem, TypeMirror type, String content) {
+    static CodeTree cast(TypeSystemData typeSystem, TypeMirror type, String content) {
         return cast(typeSystem, type, CodeTreeBuilder.singleString(content));
     }
 
-    public static CodeTree implicitType(TypeSystemData typeSystem, TypeMirror type, CodeTree value) {
-        if (ElementUtils.isObject(type)) {
-            return value;
-        }
-        CodeTreeBuilder builder = CodeTreeBuilder.createBuilder();
-        builder.startStaticCall(createTypeSystemGen(typeSystem), getImplicitClass(typeSystem, type)).tree(value);
-        builder.end();
-        return builder.build();
-    }
-
-    public static CodeTree invokeImplicitCast(TypeSystemData typeSystem, ImplicitCastData cast, CodeTree expression) {
+    static CodeTree invokeImplicitCast(TypeSystemData typeSystem, ImplicitCastData cast, CodeTree expression) {
         CodeTreeBuilder builder = CodeTreeBuilder.createBuilder();
         builder.startStaticCall(createTypeSystemGen(typeSystem), cast.getMethodName()).tree(expression);
         builder.end();
         return builder.build();
     }
 
-    public static CodeTree implicitCheck(TypeSystemData typeSystem, TypeMirror type, CodeTree value, String typeHint) {
-        return callImplictMethod(typeSystem, type, isImplicitTypeMethodName(typeSystem, type), value, typeHint);
-    }
-
-    public static CodeTree implicitExpect(TypeSystemData typeSystem, TypeMirror type, CodeTree value, String typeHint) {
-        return callImplictMethod(typeSystem, type, expectImplicitTypeMethodName(typeSystem, type), value, typeHint);
-    }
-
-    public static CodeTree implicitCast(TypeSystemData typeSystem, TypeMirror type, CodeTree value, String typeHint) {
-        return callImplictMethod(typeSystem, type, asImplicitTypeMethodName(typeSystem, type), value, typeHint);
-    }
-
-    private static CodeTree callImplictMethod(TypeSystemData typeSystem, TypeMirror type, String methodName, CodeTree value, String typeHint) {
-        if (ElementUtils.isObject(type)) {
-            return value;
-        }
-        CodeTreeBuilder builder = CodeTreeBuilder.createBuilder();
-        builder.startStaticCall(createTypeSystemGen(typeSystem), methodName).tree(value);
-        if (typeHint != null) {
-            builder.string(typeHint);
-        }
-        builder.end();
-        return builder.build();
-    }
-
-    public static CodeTree cast(TypeSystemData typeSystem, TypeMirror type, CodeTree content) {
-        if (ElementUtils.isObject(type)) {
-            return content;
-        }
+    static CodeTree cast(TypeSystemData typeSystem, TypeMirror type, CodeTree content) {
         CodeTreeBuilder builder = CodeTreeBuilder.createBuilder();
 
         TypeCastData cast = typeSystem.getCast(type);
@@ -148,7 +129,7 @@ public class TypeSystemCodeGenerator extends CodeTypeElementFactory<TypeSystemDa
         return builder.build();
     }
 
-    public static CodeTree expect(TypeSystemData typeSystem, TypeMirror type, CodeTree content) {
+    static CodeTree expect(TypeSystemData typeSystem, TypeMirror type, CodeTree content) {
         if (ElementUtils.isObject(type) || ElementUtils.isVoid(type)) {
             return content;
         }
@@ -162,7 +143,7 @@ public class TypeSystemCodeGenerator extends CodeTypeElementFactory<TypeSystemDa
         return builder.build();
     }
 
-    public static CodeExecutableElement createExpectMethod(Modifier visibility, TypeSystemData typeSystem, TypeMirror sourceTypeOriginal, TypeMirror expectedTypeOriginal) {
+    static CodeExecutableElement createExpectMethod(Modifier visibility, TypeSystemData typeSystem, TypeMirror sourceTypeOriginal, TypeMirror expectedTypeOriginal) {
         TypeMirror expectedType = ElementUtils.fillInGenericWildcards(expectedTypeOriginal);
         TypeMirror sourceType = ElementUtils.fillInGenericWildcards(sourceTypeOriginal);
         if (ElementUtils.isObject(expectedType) || ElementUtils.isVoid(expectedType)) {
@@ -172,33 +153,25 @@ public class TypeSystemCodeGenerator extends CodeTypeElementFactory<TypeSystemDa
         CodeExecutableElement method = new CodeExecutableElement(modifiers(STATIC), expectedType, TypeSystemCodeGenerator.expectTypeMethodName(typeSystem, expectedType));
         method.setVisibility(visibility);
         method.addParameter(new CodeVariableElement(sourceType, LOCAL_VALUE));
-        method.addThrownType(typeSystem.getContext().getTruffleTypes().getUnexpectedValueException());
+        method.addThrownType(typeSystem.getContext().getTypes().UnexpectedResultException);
 
         CodeTreeBuilder body = method.createBuilder();
         body.startIf().tree(check(typeSystem, expectedType, LOCAL_VALUE)).end().startBlock();
         body.startReturn().tree(cast(typeSystem, expectedType, LOCAL_VALUE)).end();
         body.end();
-        body.startThrow().startNew(typeSystem.getContext().getTruffleTypes().getUnexpectedValueException()).string(LOCAL_VALUE).end().end();
+        body.startThrow().startNew(typeSystem.getContext().getTypes().UnexpectedResultException).string(LOCAL_VALUE).end().end();
         return method;
     }
 
-    public static CodeTree expect(TypeSystemData typeSystem, TypeMirror sourceType, TypeMirror targetType, CodeTree content) {
-        if (sourceType != null && !ElementUtils.needsCastTo(sourceType, targetType)) {
-            return content;
-        } else {
-            return expect(typeSystem, targetType, content);
-        }
-    }
-
-    public static CodeTypeMirror createTypeSystemGen(TypeSystemData typeSystem) {
+    private static CodeTypeMirror createTypeSystemGen(TypeSystemData typeSystem) {
         return new GeneratedTypeMirror(ElementUtils.getPackageName(typeSystem.getTemplateType()), typeName(typeSystem));
     }
 
-    public static CodeTree check(TypeSystemData typeSystem, TypeMirror type, String content) {
+    private static CodeTree check(TypeSystemData typeSystem, TypeMirror type, String content) {
         return check(typeSystem, type, CodeTreeBuilder.singleString(content));
     }
 
-    public static CodeTree check(TypeSystemData typeSystem, TypeMirror type, CodeTree content) {
+    static CodeTree check(TypeSystemData typeSystem, TypeMirror type, CodeTree content) {
         if (ElementUtils.isObject(type)) {
             return content;
         }
@@ -213,7 +186,7 @@ public class TypeSystemCodeGenerator extends CodeTypeElementFactory<TypeSystemDa
         return builder.build();
     }
 
-    public static String isTypeMethodName(TypeSystemData typeSystem, TypeMirror type) {
+    private static String isTypeMethodName(TypeSystemData typeSystem, TypeMirror type) {
         return "is" + getTypeId(typeSystem, type);
     }
 
@@ -221,31 +194,27 @@ public class TypeSystemCodeGenerator extends CodeTypeElementFactory<TypeSystemDa
         return ElementUtils.getTypeId(typeSystem.boxType(type));
     }
 
-    static String isImplicitTypeMethodName(TypeSystemData typeSystem, TypeMirror type) {
+    private static String isImplicitTypeMethodName(TypeSystemData typeSystem, TypeMirror type) {
         return "isImplicit" + getTypeId(typeSystem, type);
     }
 
-    public static String asTypeMethodName(TypeSystemData typeSystem, TypeMirror type) {
+    private static String asTypeMethodName(TypeSystemData typeSystem, TypeMirror type) {
         return "as" + getTypeId(typeSystem, type);
     }
 
-    static String asImplicitTypeMethodName(TypeSystemData typeSystem, TypeMirror type) {
+    private static String asImplicitTypeMethodName(TypeSystemData typeSystem, TypeMirror type) {
         return "asImplicit" + getTypeId(typeSystem, type);
     }
 
-    static String specializeImplicitTypeMethodName(TypeSystemData typeSystem, TypeMirror type) {
+    private static String specializeImplicitTypeMethodName(TypeSystemData typeSystem, TypeMirror type) {
         return "specializeImplicit" + getTypeId(typeSystem, type);
     }
 
-    static String expectImplicitTypeMethodName(TypeSystemData typeSystem, TypeMirror type) {
+    private static String expectImplicitTypeMethodName(TypeSystemData typeSystem, TypeMirror type) {
         return "expectImplicit" + getTypeId(typeSystem, type);
     }
 
-    static String getImplicitClass(TypeSystemData typeSystem, TypeMirror type) {
-        return "getImplicit" + getTypeId(typeSystem, type) + "Class";
-    }
-
-    public static String expectTypeMethodName(TypeSystemData typeSystem, TypeMirror type) {
+    private static String expectTypeMethodName(TypeSystemData typeSystem, TypeMirror type) {
         return "expect" + getTypeId(typeSystem, type);
     }
 
@@ -254,21 +223,14 @@ public class TypeSystemCodeGenerator extends CodeTypeElementFactory<TypeSystemDa
         return name + "Gen";
     }
 
-    static String singletonName(TypeSystemData type) {
+    private static String singletonName(TypeSystemData type) {
         return createConstantName(getSimpleName(type.getTemplateType().asType()));
     }
 
-    @SuppressWarnings("deprecation")
     @Override
-    public CodeTypeElement create(ProcessorContext context, TypeSystemData typeSystem) {
+    public List<CodeTypeElement> create(ProcessorContext context, AnnotationProcessor<?> processor, TypeSystemData typeSystem) {
         CodeTypeElement clazz = new TypeClassFactory(context, typeSystem).create();
-
-        if (typeSystem.getOptions().implicitCastOptimization().isMergeCasts()) {
-            for (TypeMirror type : typeSystem.lookupTargetTypes()) {
-                clazz.add(new ImplicitCastNodeFactory(context, typeSystem, type).create());
-            }
-        }
-        return clazz;
+        return Arrays.asList(clazz);
     }
 
     private static class TypeClassFactory {
@@ -281,7 +243,6 @@ public class TypeSystemCodeGenerator extends CodeTypeElementFactory<TypeSystemDa
             this.typeSystem = typeSystem;
         }
 
-        @SuppressWarnings("deprecation")
         public CodeTypeElement create() {
             String name = typeName(typeSystem);
             CodeTypeElement clazz = GeneratorUtils.createClass(typeSystem, null, modifiers(PUBLIC, FINAL), name, typeSystem.getTemplateType().asType());
@@ -303,30 +264,12 @@ public class TypeSystemCodeGenerator extends CodeTypeElementFactory<TypeSystemDa
 
             List<TypeMirror> lookupTargetTypes = typeSystem.lookupTargetTypes();
             for (TypeMirror type : lookupTargetTypes) {
-
-                switch (typeSystem.getOptions().defaultGenerator()) {
-                    case DEFAULT:
-                        clazz.add(createAsImplicitTypeMethod(type, false));
-                        if (typeSystem.getOptions().implicitCastOptimization().isNone()) {
-                            clazz.add(createExpectImplicitTypeMethod(type, false));
-                        }
-                        clazz.add(createIsImplicitTypeMethod(type, false));
-
-                        if (typeSystem.getOptions().implicitCastOptimization().isDuplicateTail()) {
-                            clazz.add(createAsImplicitTypeMethod(type, true));
-                            clazz.add(createExpectImplicitTypeMethod(type, true));
-                            clazz.add(createIsImplicitTypeMethod(type, true));
-                            clazz.add(createGetImplicitClass(type));
-                        }
-                        break;
-                    case FLAT:
-                        clazz.add(createExpectImplicitTypeMethodFlat(type));
-                        clazz.add(createIsImplicitTypeMethodFlat(type));
-                        clazz.add(createAsImplicitTypeMethodFlat(type));
-                        clazz.add(createSpecializeImplictTypeMethodFlat(type));
-                        break;
-                }
-
+                clazz.add(createExpectImplicitTypeMethodFlat(type));
+                clazz.add(createIsImplicitTypeMethodFlat(type, true));
+                clazz.add(createIsImplicitTypeMethodFlat(type, false));
+                clazz.add(createAsImplicitTypeMethodFlat(type, true));
+                clazz.add(createAsImplicitTypeMethodFlat(type, false));
+                clazz.add(createSpecializeImplictTypeMethodFlat(type));
             }
             return clazz;
         }
@@ -373,7 +316,7 @@ public class TypeSystemCodeGenerator extends CodeTypeElementFactory<TypeSystemDa
             CodeExecutableElement method = new CodeExecutableElement(modifiers(PUBLIC, STATIC), type, name);
             method.addParameter(new CodeVariableElement(context.getType(int.class), "state"));
             method.addParameter(new CodeVariableElement(context.getType(Object.class), LOCAL_VALUE));
-            method.getThrownTypes().add(context.getType(UnexpectedResultException.class));
+            method.getThrownTypes().add(context.getTypes().UnexpectedResultException);
             List<TypeMirror> sourceTypes = typeSystem.lookupSourceTypes(type);
 
             CodeTreeBuilder builder = method.createBuilder();
@@ -401,15 +344,17 @@ public class TypeSystemCodeGenerator extends CodeTypeElementFactory<TypeSystemDa
             }
 
             builder.startElseBlock();
-            builder.startThrow().startNew(context.getType(UnexpectedResultException.class)).string(LOCAL_VALUE).end().end();
+            builder.startThrow().startNew(context.getTypes().UnexpectedResultException).string(LOCAL_VALUE).end().end();
             builder.end();
             return method;
         }
 
-        private CodeExecutableElement createAsImplicitTypeMethodFlat(TypeMirror type) {
+        private CodeExecutableElement createAsImplicitTypeMethodFlat(TypeMirror type, boolean cachedVersion) {
             String name = asImplicitTypeMethodName(typeSystem, type);
             CodeExecutableElement method = new CodeExecutableElement(modifiers(PUBLIC, STATIC), type, name);
-            method.addParameter(new CodeVariableElement(context.getType(int.class), "state"));
+            if (cachedVersion) {
+                method.addParameter(new CodeVariableElement(context.getType(int.class), "state"));
+            }
             method.addParameter(new CodeVariableElement(context.getType(Object.class), LOCAL_VALUE));
 
             List<TypeMirror> sourceTypes = typeSystem.lookupSourceTypes(type);
@@ -420,115 +365,12 @@ public class TypeSystemCodeGenerator extends CodeTypeElementFactory<TypeSystemDa
             int mask = 1;
             for (TypeMirror sourceType : sourceTypes) {
                 elseIf = builder.startIf(elseIf);
-                builder.string("(state & 0b").string(Integer.toBinaryString(mask)).string(") != 0 && ");
-                builder.tree(check(typeSystem, sourceType, LOCAL_VALUE));
-                builder.end().startBlock();
-
-                builder.startReturn();
-                ImplicitCastData cast = typeSystem.lookupCast(sourceType, type);
-                if (cast != null) {
-                    builder.startCall(cast.getMethodName());
-                }
-                builder.tree(cast(typeSystem, sourceType, LOCAL_VALUE)).end();
-                if (cast != null) {
-                    builder.end();
-                }
-                builder.end();
-                builder.end();
-                mask = mask << 1;
-            }
-
-            builder.startElseBlock();
-            builder.tree(createTransferToInterpreterAndInvalidate());
-            builder.startThrow().startNew(context.getType(IllegalArgumentException.class)).doubleQuote("Illegal type ").end().end();
-            builder.end();
-            return method;
-        }
-
-        private CodeExecutableElement createIsImplicitTypeMethodFlat(TypeMirror type) {
-            CodeExecutableElement method = new CodeExecutableElement(modifiers(PUBLIC, STATIC), context.getType(boolean.class), TypeSystemCodeGenerator.isImplicitTypeMethodName(typeSystem, type));
-            method.addParameter(new CodeVariableElement(context.getType(int.class), "state"));
-            method.addParameter(new CodeVariableElement(context.getType(Object.class), LOCAL_VALUE));
-            CodeTreeBuilder builder = method.createBuilder();
-
-            List<TypeMirror> sourceTypes = typeSystem.lookupSourceTypes(type);
-
-            builder.startReturn();
-            String sep = "";
-            int mask = 1;
-            for (TypeMirror sourceType : sourceTypes) {
-                builder.string(sep);
-                builder.string("((state & 0b").string(Integer.toBinaryString(mask)).string(") != 0 && ");
-                builder.tree(check(typeSystem, sourceType, LOCAL_VALUE));
-                builder.string(")");
-                if (sourceTypes.lastIndexOf(sourceType) != sourceTypes.size() - 1) {
-                    builder.newLine();
-                }
-                if (sep.equals("")) {
-                    builder.startIndention();
-                }
-                sep = " || ";
-                mask = mask << 1;
-            }
-            builder.end();
-            builder.end();
-            return method;
-        }
-
-        private CodeExecutableElement createIsImplicitTypeMethod(TypeMirror type, boolean typed) {
-            CodeExecutableElement method = new CodeExecutableElement(modifiers(PUBLIC, STATIC), context.getType(boolean.class), TypeSystemCodeGenerator.isImplicitTypeMethodName(typeSystem, type));
-            method.addParameter(new CodeVariableElement(context.getType(Object.class), LOCAL_VALUE));
-            if (typed) {
-                method.addParameter(new CodeVariableElement(context.getType(Class.class), "typeHint"));
-            }
-            CodeTreeBuilder builder = method.createBuilder();
-
-            List<TypeMirror> sourceTypes = typeSystem.lookupSourceTypes(type);
-
-            builder.startReturn();
-            String sep = "";
-            for (TypeMirror sourceType : sourceTypes) {
-                builder.string(sep);
-                if (typed) {
-                    builder.string("(typeHint == ").typeLiteral(sourceType).string(" && ");
-                }
-                builder.tree(check(typeSystem, sourceType, LOCAL_VALUE));
-                if (typed) {
-                    builder.string(")");
-                }
-                if (sourceTypes.lastIndexOf(sourceType) != sourceTypes.size() - 1) {
-                    builder.newLine();
-                }
-                if (sep.equals("")) {
-                    builder.startIndention();
-                }
-                sep = " || ";
-            }
-            builder.end();
-            builder.end();
-            return method;
-        }
-
-        private CodeExecutableElement createAsImplicitTypeMethod(TypeMirror type, boolean useTypeHint) {
-            String name = asImplicitTypeMethodName(typeSystem, type);
-            CodeExecutableElement method = new CodeExecutableElement(modifiers(PUBLIC, STATIC), type, name);
-            method.addParameter(new CodeVariableElement(context.getType(Object.class), LOCAL_VALUE));
-            if (useTypeHint) {
-                method.addParameter(new CodeVariableElement(context.getType(Class.class), "typeHint"));
-            }
-
-            List<TypeMirror> sourceTypes = typeSystem.lookupSourceTypes(type);
-
-            CodeTreeBuilder builder = method.createBuilder();
-            boolean elseIf = false;
-            for (TypeMirror sourceType : sourceTypes) {
-                elseIf = builder.startIf(elseIf);
-                if (useTypeHint) {
-                    builder.string("typeHint == ").typeLiteral(sourceType);
+                if (cachedVersion) {
+                    builder.string("(state & 0b").string(Integer.toBinaryString(mask)).string(") != 0 && ");
+                    builder.tree(check(typeSystem, sourceType, LOCAL_VALUE));
                 } else {
                     builder.tree(check(typeSystem, sourceType, LOCAL_VALUE));
                 }
-
                 builder.end().startBlock();
 
                 builder.startReturn();
@@ -542,82 +384,51 @@ public class TypeSystemCodeGenerator extends CodeTypeElementFactory<TypeSystemDa
                 }
                 builder.end();
                 builder.end();
+                mask = mask << 1;
             }
 
             builder.startElseBlock();
-            builder.tree(createTransferToInterpreterAndInvalidate());
-            builder.startThrow().startNew(context.getType(IllegalArgumentException.class)).doubleQuote("Illegal type ").end().end();
+            if (cachedVersion) {
+                builder.tree(createTransferToInterpreterAndInvalidate());
+            }
+            builder.startThrow().startNew(context.getType(IllegalArgumentException.class)).doubleQuote("Illegal implicit source type.").end().end();
             builder.end();
             return method;
         }
 
-        private CodeExecutableElement createExpectImplicitTypeMethod(TypeMirror type, boolean useTypeHint) {
-            String name = expectImplicitTypeMethodName(typeSystem, type);
-            CodeExecutableElement method = new CodeExecutableElement(modifiers(PUBLIC, STATIC), type, name);
-            method.addParameter(new CodeVariableElement(context.getType(Object.class), LOCAL_VALUE));
-            if (useTypeHint) {
-                method.addParameter(new CodeVariableElement(context.getType(Class.class), "typeHint"));
+        private CodeExecutableElement createIsImplicitTypeMethodFlat(TypeMirror type, boolean cachedVersion) {
+            CodeExecutableElement method = new CodeExecutableElement(modifiers(PUBLIC, STATIC), context.getType(boolean.class), TypeSystemCodeGenerator.isImplicitTypeMethodName(typeSystem, type));
+            if (cachedVersion) {
+                method.addParameter(new CodeVariableElement(context.getType(int.class), "state"));
             }
-            method.getThrownTypes().add(context.getType(UnexpectedResultException.class));
+            method.addParameter(new CodeVariableElement(context.getType(Object.class), LOCAL_VALUE));
+            CodeTreeBuilder builder = method.createBuilder();
 
             List<TypeMirror> sourceTypes = typeSystem.lookupSourceTypes(type);
 
-            CodeTreeBuilder builder = method.createBuilder();
-            boolean elseIf = false;
+            builder.startReturn();
+            String sep = "";
+            int mask = 1;
             for (TypeMirror sourceType : sourceTypes) {
-                elseIf = builder.startIf(elseIf);
-                if (useTypeHint) {
-                    builder.string("typeHint == ").typeLiteral(sourceType);
-                    builder.string(" && ");
+                builder.string(sep);
+                if (cachedVersion) {
+                    builder.string("((state & 0b").string(Integer.toBinaryString(mask)).string(") != 0 && ");
+                    builder.tree(check(typeSystem, sourceType, LOCAL_VALUE));
+                    builder.string(")");
+                } else {
+                    builder.tree(check(typeSystem, sourceType, LOCAL_VALUE));
                 }
-                builder.tree(check(typeSystem, sourceType, LOCAL_VALUE));
-
-                builder.end().startBlock();
-
-                builder.startReturn();
-                ImplicitCastData cast = typeSystem.lookupCast(sourceType, type);
-                if (cast != null) {
-                    builder.startCall(cast.getMethodName());
+                if (sourceTypes.lastIndexOf(sourceType) != sourceTypes.size() - 1) {
+                    builder.newLine();
                 }
-                builder.tree(cast(typeSystem, sourceType, LOCAL_VALUE)).end();
-                if (cast != null) {
-                    builder.end();
+                if (sep.equals("")) {
+                    builder.startIndention();
                 }
-                builder.end();
-                builder.end();
+                sep = " || ";
+                mask = mask << 1;
             }
-
-            builder.startElseBlock();
-            builder.startThrow().startNew(context.getType(UnexpectedResultException.class)).string(LOCAL_VALUE).end().end();
             builder.end();
-            return method;
-        }
-
-        private CodeExecutableElement createGetImplicitClass(TypeMirror type) {
-            CodeExecutableElement method = new CodeExecutableElement(modifiers(PUBLIC, STATIC), context.getType(Class.class), TypeSystemCodeGenerator.getImplicitClass(typeSystem, type));
-            method.addParameter(new CodeVariableElement(context.getType(Object.class), LOCAL_VALUE));
-
-            List<TypeMirror> sourceTypes = typeSystem.lookupSourceTypes(type);
-            CodeTreeBuilder builder = method.createBuilder();
-            boolean elseIf = false;
-            for (TypeMirror sourceType : sourceTypes) {
-                elseIf = builder.startIf(elseIf);
-                builder.tree(check(typeSystem, sourceType, LOCAL_VALUE)).end();
-                builder.end().startBlock();
-                builder.startReturn().typeLiteral(sourceType).end();
-                builder.end();
-            }
-
-            builder.startElseIf().string(LOCAL_VALUE).string(" == ").nullLiteral().end();
-            builder.startBlock();
-            builder.startReturn().typeLiteral(context.getType(Object.class)).end();
             builder.end();
-
-            builder.startElseBlock();
-            builder.tree(createTransferToInterpreterAndInvalidate());
-            builder.startThrow().startNew(context.getType(IllegalArgumentException.class)).doubleQuote("Illegal type ").end().end();
-            builder.end();
-
             return method;
         }
 

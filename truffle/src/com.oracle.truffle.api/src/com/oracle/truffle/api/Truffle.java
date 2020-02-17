@@ -1,33 +1,50 @@
 /*
- * Copyright (c) 2012, 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
- * This code is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.  Oracle designates this
- * particular file as subject to the "Classpath" exception as provided
- * by Oracle in the LICENSE file that accompanied this code.
+ * The Universal Permissive License (UPL), Version 1.0
  *
- * This code is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
- * version 2 for more details (a copy is included in the LICENSE file that
- * accompanied this code).
+ * Subject to the condition set forth below, permission is hereby granted to any
+ * person obtaining a copy of this software, associated documentation and/or
+ * data (collectively the "Software"), free of charge and under any and all
+ * copyright rights in the Software, and any and all patent rights owned or
+ * freely licensable by each licensor hereunder covering either (i) the
+ * unmodified Software as contributed to or provided by such licensor, or (ii)
+ * the Larger Works (as defined below), to deal in both
  *
- * You should have received a copy of the GNU General Public License version
- * 2 along with this work; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
+ * (a) the Software, and
  *
- * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
- * or visit www.oracle.com if you need additional information or have any
- * questions.
+ * (b) any piece of software and/or hardware listed in the lrgrwrks.txt file if
+ * one is included with the Software each a "Larger Work" to which the Software
+ * is contributed by such licensors),
+ *
+ * without restriction, including without limitation the rights to copy, create
+ * derivative works of, display, perform, and distribute the Software and make,
+ * use, sell, offer for sale, import, export, have made, and have sold the
+ * Software and the Larger Work(s), and to sublicense the foregoing rights on
+ * either these or other terms.
+ *
+ * This license is subject to the following condition:
+ *
+ * The above copyright notice and either this complete permission notice or at a
+ * minimum a reference to the UPL must be included in all copies or substantial
+ * portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
  */
 package com.oracle.truffle.api;
 
-import java.lang.reflect.Method;
 import java.security.AccessController;
 import java.security.PrivilegedAction;
-import java.util.ServiceLoader;
+import java.util.Iterator;
+import java.util.List;
+import java.util.ServiceConfigurationError;
 
 import com.oracle.truffle.api.impl.DefaultTruffleRuntime;
 
@@ -36,13 +53,9 @@ import com.oracle.truffle.api.impl.DefaultTruffleRuntime;
  *
  * @since 0.8 or earlier
  */
-public class Truffle {
-    /**
-     * @deprecated Accidentally public - don't use.
-     * @since 0.8 or earlier
-     */
-    @Deprecated
-    public Truffle() {
+public final class Truffle {
+
+    private Truffle() {
     }
 
     private static final TruffleRuntime RUNTIME = initRuntime();
@@ -56,79 +69,59 @@ public class Truffle {
         return RUNTIME;
     }
 
-    private static TruffleRuntimeAccess selectTruffleRuntimeAccess(Iterable<TruffleRuntimeAccess> serviceLoader) {
+    private static TruffleRuntimeAccess selectTruffleRuntimeAccess(List<Iterable<TruffleRuntimeAccess>> lookups) {
         TruffleRuntimeAccess selectedAccess = null;
-        for (TruffleRuntimeAccess access : serviceLoader) {
-            if (selectedAccess == null) {
-                selectedAccess = access;
-            } else {
-                if (selectedAccess.getPriority() == access.getPriority()) {
-                    throw new InternalError(String.format("Providers for %s with same priority %d: %s vs. %s",
-                                    TruffleRuntimeAccess.class.getName(), access.getPriority(),
-                                    selectedAccess.getClass().getName(), access.getClass().getName()));
-                }
-                if (selectedAccess.getPriority() < access.getPriority()) {
-                    selectedAccess = access;
+        for (Iterable<TruffleRuntimeAccess> lookup : lookups) {
+            if (lookup != null) {
+                Iterator<TruffleRuntimeAccess> it = lookup.iterator();
+                while (it.hasNext()) {
+                    TruffleRuntimeAccess access;
+                    try {
+                        access = it.next();
+                    } catch (ServiceConfigurationError err) {
+                        continue;
+                    }
+                    if (selectedAccess == null) {
+                        selectedAccess = access;
+                    } else {
+                        if (selectedAccess != access && selectedAccess.getClass() != access.getClass()) {
+                            if (selectedAccess.getPriority() == access.getPriority()) {
+                                throw new InternalError(String.format("Providers for %s with same priority %d: %s (loader: %s) vs. %s (loader: %s)",
+                                                TruffleRuntimeAccess.class.getName(), access.getPriority(),
+                                                selectedAccess, selectedAccess.getClass().getClassLoader(),
+                                                access, access.getClass().getClassLoader()));
+                            }
+                            if (selectedAccess.getPriority() < access.getPriority()) {
+                                selectedAccess = access;
+                            }
+                        }
+                    }
                 }
             }
         }
         return selectedAccess;
     }
 
-    @SuppressWarnings("unchecked")
-    private static Iterable<TruffleRuntimeAccess> reflectiveServiceLoaderLoad(Class<?> servicesClass) {
-        try {
-            Method m = servicesClass.getDeclaredMethod("load", Class.class);
-            return (Iterable<TruffleRuntimeAccess>) m.invoke(null, TruffleRuntimeAccess.class);
-        } catch (Throwable e) {
-            // Fail fast for other errors
-            throw (InternalError) new InternalError().initCause(e);
-        }
-    }
-
     private static TruffleRuntime initRuntime() {
         return AccessController.doPrivileged(new PrivilegedAction<TruffleRuntime>() {
             public TruffleRuntime run() {
                 String runtimeClassName = System.getProperty("truffle.TruffleRuntime");
-                if (runtimeClassName != null) {
+                if (runtimeClassName != null && runtimeClassName.length() > 0) {
                     try {
                         ClassLoader cl = Thread.currentThread().getContextClassLoader();
                         Class<?> runtimeClass = Class.forName(runtimeClassName, false, cl);
-                        return (TruffleRuntime) runtimeClass.newInstance();
+                        return (TruffleRuntime) runtimeClass.getDeclaredConstructor().newInstance();
                     } catch (Throwable e) {
                         // Fail fast for other errors
                         throw (InternalError) new InternalError().initCause(e);
                     }
                 }
 
-                TruffleRuntimeAccess access = null;
-                Class<?> servicesClass = null;
-
-                boolean jdk8OrEarlier = System.getProperty("java.specification.version").compareTo("1.9") < 0;
-                if (!jdk8OrEarlier) {
-                    // As of JDK9, the JVMCI Services class should only be used for service types
-                    // defined by JVMCI. Other services types should use ServiceLoader directly.
-                    access = selectTruffleRuntimeAccess(ServiceLoader.load(TruffleRuntimeAccess.class));
-                } else {
-                    String[] serviceClassNames = {"jdk.vm.ci.services.Services", "jdk.vm.ci.service.Services",
-                                    "jdk.internal.jvmci.service.Services", "com.oracle.jvmci.service.Services"};
-                    for (String serviceClassName : serviceClassNames) {
-                        try {
-                            servicesClass = Class.forName(serviceClassName);
-                            if (servicesClass != null) {
-                                access = selectTruffleRuntimeAccess(reflectiveServiceLoaderLoad(servicesClass));
-                                if (access != null) {
-                                    break;
-                                }
-                            }
-                        } catch (ClassNotFoundException e) {
-                            continue;
-                        }
-                    }
-                }
-                // TODO: try standard ServiceLoader?
+                List<Iterable<TruffleRuntimeAccess>> loaders = LanguageAccessor.jdkServicesAccessor().getTruffleRuntimeLoaders(TruffleRuntimeAccess.class);
+                TruffleRuntimeAccess access = selectTruffleRuntimeAccess(loaders);
 
                 if (access != null) {
+                    LanguageAccessor.jdkServicesAccessor().exportTo(access.getClass());
                     return access.getRuntime();
                 }
                 return new DefaultTruffleRuntime();

@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2014, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2014, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -40,6 +42,7 @@ import org.graalvm.compiler.lir.asm.CompilationResultBuilder;
 import org.graalvm.compiler.lir.gen.LIRGeneratorTool;
 import org.graalvm.compiler.nodeinfo.NodeInfo;
 import org.graalvm.compiler.nodes.FixedWithNextNode;
+import org.graalvm.compiler.nodes.NodeView;
 import org.graalvm.compiler.nodes.ValueNode;
 import org.graalvm.compiler.nodes.graphbuilderconf.GraphBuilderContext;
 import org.graalvm.compiler.nodes.graphbuilderconf.InvocationPlugin;
@@ -170,7 +173,7 @@ public class DataPatchInConstantsTest extends HotSpotGraalCompilerTest {
         @Input protected ValueNode input;
 
         protected LoadThroughPatchNode(ValueNode input) {
-            super(TYPE, input.stamp());
+            super(TYPE, input.stamp(NodeView.DEFAULT));
             this.input = input;
         }
 
@@ -179,9 +182,9 @@ public class DataPatchInConstantsTest extends HotSpotGraalCompilerTest {
             assert input.isConstant();
 
             LIRGeneratorTool gen = generator.getLIRGeneratorTool();
-            Variable ret = gen.newVariable(gen.getLIRKind(stamp()));
+            Variable ret = gen.newVariable(gen.getLIRKind(stamp(NodeView.DEFAULT)));
 
-            gen.append(new LoadThroughPatchOp(input.asConstant(), stamp() instanceof NarrowOopStamp, ret));
+            gen.append(new LoadThroughPatchOp(input.asConstant(), stamp(NodeView.DEFAULT) instanceof NarrowOopStamp, ret));
             generator.setResult(this, ret);
         }
     }

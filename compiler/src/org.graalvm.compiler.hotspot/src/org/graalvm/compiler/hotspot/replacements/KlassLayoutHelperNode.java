@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2014, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2014, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -38,6 +40,7 @@ import org.graalvm.compiler.graph.spi.CanonicalizerTool;
 import org.graalvm.compiler.hotspot.GraalHotSpotVMConfig;
 import org.graalvm.compiler.nodeinfo.NodeInfo;
 import org.graalvm.compiler.nodes.ConstantNode;
+import org.graalvm.compiler.nodes.NodeView;
 import org.graalvm.compiler.nodes.ValueNode;
 import org.graalvm.compiler.nodes.calc.FloatingNode;
 import org.graalvm.compiler.nodes.extended.LoadHubNode;
@@ -83,7 +86,7 @@ public final class KlassLayoutHelperNode extends FloatingNode implements Canonic
     public boolean inferStamp() {
         if (klass instanceof LoadHubNode) {
             LoadHubNode hub = (LoadHubNode) klass;
-            Stamp hubStamp = hub.getValue().stamp();
+            Stamp hubStamp = hub.getValue().stamp(NodeView.DEFAULT);
             if (hubStamp instanceof ObjectStamp) {
                 ObjectStamp objectStamp = (ObjectStamp) hubStamp;
                 ResolvedJavaType type = objectStamp.type();
@@ -108,7 +111,7 @@ public final class KlassLayoutHelperNode extends FloatingNode implements Canonic
         if (tool.allUsagesAvailable() && hasNoUsages()) {
             return null;
         } else {
-            return canonical(this, config, klass, stamp(), tool.getConstantReflection(), tool.getMetaAccess());
+            return canonical(this, config, klass, stamp(NodeView.DEFAULT), tool.getConstantReflection(), tool.getMetaAccess());
         }
     }
 
@@ -123,7 +126,7 @@ public final class KlassLayoutHelperNode extends FloatingNode implements Canonic
         }
         if (klass instanceof LoadHubNode) {
             LoadHubNode hub = (LoadHubNode) klass;
-            Stamp hubStamp = hub.getValue().stamp();
+            Stamp hubStamp = hub.getValue().stamp(NodeView.DEFAULT);
             if (hubStamp instanceof ObjectStamp) {
                 ObjectStamp ostamp = (ObjectStamp) hubStamp;
                 HotSpotResolvedObjectType type = (HotSpotResolvedObjectType) ostamp.type();

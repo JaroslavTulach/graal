@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2016, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -21,6 +23,8 @@
  * questions.
  */
 package org.graalvm.compiler.core.common.spi;
+
+import java.util.Arrays;
 
 import org.graalvm.compiler.debug.GraalError;
 import org.graalvm.compiler.options.Option;
@@ -44,9 +48,26 @@ public abstract class JavaConstantFieldProvider implements ConstantFieldProvider
 
     protected JavaConstantFieldProvider(MetaAccessProvider metaAccess) {
         try {
-            this.stringValueField = metaAccess.lookupJavaField(String.class.getDeclaredField("value"));
-            this.stringHashField = metaAccess.lookupJavaField(String.class.getDeclaredField("hash"));
-        } catch (NoSuchFieldException | SecurityException e) {
+            ResolvedJavaType stringType = metaAccess.lookupJavaType(String.class);
+            ResolvedJavaField[] stringFields = stringType.getInstanceFields(false);
+            ResolvedJavaField valueField = null;
+            ResolvedJavaField hashField = null;
+            for (ResolvedJavaField field : stringFields) {
+                if (field.getName().equals("value")) {
+                    valueField = field;
+                } else if (field.getName().equals("hash")) {
+                    hashField = field;
+                }
+            }
+            if (valueField == null) {
+                throw new GraalError("missing field value " + Arrays.toString(stringFields));
+            }
+            if (hashField == null) {
+                throw new GraalError("missing field hash " + Arrays.toString(stringFields));
+            }
+            stringValueField = valueField;
+            stringHashField = hashField;
+        } catch (SecurityException e) {
             throw new GraalError(e);
         }
     }

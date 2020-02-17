@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2015, 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -27,8 +29,8 @@ import org.graalvm.compiler.asm.amd64.AMD64Address.Scale;
 import org.graalvm.compiler.core.common.NumUtil;
 import org.graalvm.compiler.core.common.type.AbstractPointerStamp;
 import org.graalvm.compiler.core.common.type.IntegerStamp;
-import org.graalvm.compiler.core.common.type.PrimitiveStamp;
 import org.graalvm.compiler.debug.DebugContext;
+import org.graalvm.compiler.nodes.NodeView;
 import org.graalvm.compiler.nodes.StructuredGraph;
 import org.graalvm.compiler.nodes.ValueNode;
 import org.graalvm.compiler.nodes.calc.AddNode;
@@ -41,11 +43,6 @@ import jdk.vm.ci.meta.JavaConstant;
 
 public class AMD64AddressLowering extends AddressLowering {
     private static final int ADDRESS_BITS = 64;
-
-    @Override
-    public AddressNode lower(ValueNode address) {
-        return lower(address, null);
-    }
 
     @Override
     public AddressNode lower(ValueNode base, ValueNode offset) {
@@ -63,7 +60,7 @@ public class AMD64AddressLowering extends AddressLowering {
     }
 
     private static boolean checkAddressBitWidth(ValueNode value) {
-        return value == null || value.stamp() instanceof AbstractPointerStamp || IntegerStamp.getBits(value.stamp()) == ADDRESS_BITS;
+        return value == null || value.stamp(NodeView.DEFAULT) instanceof AbstractPointerStamp || IntegerStamp.getBits(value.stamp(NodeView.DEFAULT)) == ADDRESS_BITS;
     }
 
     /**
@@ -96,10 +93,9 @@ public class AMD64AddressLowering extends AddressLowering {
             LeftShiftNode shift = (LeftShiftNode) ret.getIndex();
             if (shift.getY().isConstant()) {
                 int amount = ret.getScale().log2 + shift.getY().asJavaConstant().asInt();
-                Scale scale = Scale.fromShift(amount);
-                if (scale != null) {
+                if (Scale.isScaleShiftSupported(amount)) {
                     ret.setIndex(shift.getX());
-                    ret.setScale(scale);
+                    ret.setScale(Scale.fromShift(amount));
                     return true;
                 }
             }
@@ -111,7 +107,9 @@ public class AMD64AddressLowering extends AddressLowering {
                 ret.setBase(add.getX());
                 ret.setIndex(considerNegation(graph, add.getY(), isBaseNegated));
                 return true;
-            } else if (ret.getBase() == null && ret.getIndex() instanceof AddNode) {
+            }
+
+            if (ret.getBase() == null && ret.getIndex() instanceof AddNode) {
                 AddNode add = (AddNode) ret.getIndex();
                 ret.setBase(considerNegation(graph, add.getX(), isIndexNegated));
                 ret.setIndex(add.getY());
@@ -157,7 +155,7 @@ public class AMD64AddressLowering extends AddressLowering {
                 if (base == ret.getBase()) {
                     ret.setBase(originalBase);
                 } else if (ret.getBase() != null) {
-                    ret.setBase(graph.maybeAddOrUnique(NegateNode.create(ret.getBase())));
+                    ret.setBase(graph.maybeAddOrUnique(NegateNode.create(ret.getBase(), NodeView.DEFAULT)));
                 }
             }
 
@@ -165,7 +163,7 @@ public class AMD64AddressLowering extends AddressLowering {
                 if (index == ret.getIndex()) {
                     ret.setIndex(originalIndex);
                 } else if (ret.getIndex() != null) {
-                    ret.setIndex(graph.maybeAddOrUnique(NegateNode.create(ret.getIndex())));
+                    ret.setIndex(graph.maybeAddOrUnique(NegateNode.create(ret.getIndex(), NodeView.DEFAULT)));
                 }
             }
             return improved;
@@ -177,7 +175,7 @@ public class AMD64AddressLowering extends AddressLowering {
 
     private static ValueNode considerNegation(StructuredGraph graph, ValueNode value, boolean negate) {
         if (negate && value != null) {
-            return graph.maybeAddOrUnique(NegateNode.create(value));
+            return graph.maybeAddOrUnique(NegateNode.create(value, NodeView.DEFAULT));
         }
         return value;
     }
@@ -191,18 +189,27 @@ public class AMD64AddressLowering extends AddressLowering {
         if (c != null) {
             return improveConstDisp(address, node, c, null, shift, negateExtractedDisplacement);
         } else {
-            if (node.stamp() instanceof IntegerStamp) {
+            if (node.stamp(NodeView.DEFAULT) instanceof IntegerStamp) {
+                assert IntegerStamp.getBits(node.stamp(NodeView.DEFAULT)) == ADDRESS_BITS;
+
                 /*
-                 * zero-extends cannot be swallowed easily. otherwise, we could encounter a scenario
-                 * such as the following: ZeroExtend(Add(negativeValue, positiveValue)).
+                 * we can't swallow zero-extends because of multiple reasons:
                  *
-                 * if we swallow the zero-extend in this case and optimize the add, we might end up
-                 * with a negative value that has less than 64 bits in base or index. such a value
-                 * would require sign extension instead of zero-extension but the backend only does
-                 * zero-extension.
+                 * a) we might encounter something like the following: ZeroExtend(Add(negativeValue,
+                 * positiveValue)). if we swallow the zero-extend in this case and subsequently
+                 * optimize the add, we might end up with a negative value that has less than 64
+                 * bits in base or index. such a value would require sign extension instead of
+                 * zero-extension but the backend can only do (implicit) zero-extension by using a
+                 * larger register (e.g., rax instead of eax).
+                 *
+                 * b) our backend does not guarantee that the upper half of a 64-bit register equals
+                 * 0 if a 32-bit value is stored in there.
+                 *
+                 * c) we also can't swallow zero-extends with less than 32 bits as most of these
+                 * values are immediately sign-extended to 32 bit by the backend (therefore, the
+                 * subsequent implicit zero-extension to 64 bit won't do what we expect).
                  */
 
-                assert PrimitiveStamp.getBits(node.stamp()) == ADDRESS_BITS;
                 if (node instanceof AddNode) {
                     AddNode add = (AddNode) node;
                     if (add.getX().isConstant()) {

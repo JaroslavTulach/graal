@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -32,7 +34,8 @@ import org.graalvm.compiler.nodes.graphbuilderconf.GraphBuilderContext;
 import org.graalvm.compiler.nodes.graphbuilderconf.InlineInvokePlugin;
 import org.graalvm.compiler.options.OptionValues;
 import org.graalvm.compiler.phases.common.AbstractInliningPhase;
-import org.graalvm.compiler.test.ExportingClassLoader;
+import org.graalvm.compiler.serviceprovider.JavaVersionUtil;
+import org.graalvm.compiler.api.test.ExportingClassLoader;
 import org.junit.Assert;
 import org.junit.Assume;
 import org.junit.Test;
@@ -81,7 +84,7 @@ public class DeoptimizeOnExceptionTest extends GraalCompilerTest {
             ClassLoader testCl = new MyClassLoader();
             @SuppressWarnings("unchecked")
             Class<Runnable> c = (Class<Runnable>) testCl.loadClass(name);
-            Runnable r = c.newInstance();
+            Runnable r = c.getDeclaredConstructor().newInstance();
             ct = Long.MAX_VALUE;
             // warmup
             for (int i = 0; i < 100; i++) {
@@ -101,7 +104,7 @@ public class DeoptimizeOnExceptionTest extends GraalCompilerTest {
 
     @Test
     public void test3() {
-        Assume.assumeTrue("Only works on jdk8 right now", Java8OrEarlier);
+        Assume.assumeTrue("Only works on jdk8 right now", JavaVersionUtil.JAVA_SPEC <= 8);
         ResolvedJavaMethod method = getResolvedJavaMethod("test3Snippet");
 
         for (int i = 0; i < 2; i++) {

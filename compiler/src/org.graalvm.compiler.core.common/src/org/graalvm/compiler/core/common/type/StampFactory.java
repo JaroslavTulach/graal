@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2011, 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -161,6 +163,10 @@ public class StampFactory {
         return IntegerStamp.create(bits, CodeUtil.minValue(bits), CodeUtil.maxValue(bits), 0, CodeUtil.mask(bits));
     }
 
+    public static IntegerStamp forUnsignedInteger(int bits) {
+        return forUnsignedInteger(bits, 0, NumUtil.maxValueUnsigned(bits), 0, CodeUtil.mask(bits));
+    }
+
     public static IntegerStamp forUnsignedInteger(int bits, long unsignedLowerBound, long unsignedUpperBound) {
         return forUnsignedInteger(bits, unsignedLowerBound, unsignedUpperBound, 0, CodeUtil.mask(bits));
     }
@@ -251,22 +257,34 @@ public class StampFactory {
     }
 
     public static Stamp[] createParameterStamps(Assumptions assumptions, ResolvedJavaMethod method) {
-        Signature sig = method.getSignature();
-        Stamp[] result = new Stamp[sig.getParameterCount(!method.isStatic())];
-        int index = 0;
+        return createParameterStamps(assumptions, method, false);
+    }
 
-        if (!method.isStatic()) {
-            result[index++] = StampFactory.objectNonNull(TypeReference.create(assumptions, method.getDeclaringClass()));
+    public static Stamp[] createParameterStamps(Assumptions assumptions, ResolvedJavaMethod method, boolean trustInterfaceTypes) {
+        Signature signature = method.getSignature();
+        Stamp[] result = new Stamp[signature.getParameterCount(method.hasReceiver())];
+
+        int index = 0;
+        ResolvedJavaType accessingClass = method.getDeclaringClass();
+        if (method.hasReceiver()) {
+            if (trustInterfaceTypes) {
+                result[index++] = StampFactory.objectNonNull(TypeReference.createTrusted(assumptions, accessingClass));
+            } else {
+                result[index++] = StampFactory.objectNonNull(TypeReference.create(assumptions, accessingClass));
+            }
         }
 
-        int max = sig.getParameterCount(false);
-        ResolvedJavaType accessingClass = method.getDeclaringClass();
-        for (int i = 0; i < max; i++) {
-            JavaType type = sig.getParameterType(i, accessingClass);
+        for (int i = 0; i < signature.getParameterCount(false); i++) {
+            JavaType type = signature.getParameterType(i, accessingClass);
             JavaKind kind = type.getJavaKind();
+
             Stamp stamp;
             if (kind == JavaKind.Object && type instanceof ResolvedJavaType) {
-                stamp = StampFactory.object(TypeReference.create(assumptions, (ResolvedJavaType) type));
+                if (trustInterfaceTypes) {
+                    stamp = StampFactory.object(TypeReference.createTrusted(assumptions, (ResolvedJavaType) type));
+                } else {
+                    stamp = StampFactory.object(TypeReference.create(assumptions, (ResolvedJavaType) type));
+                }
             } else {
                 stamp = StampFactory.forKind(kind);
             }
@@ -284,16 +302,28 @@ public class StampFactory {
         if (returnType.getJavaKind() == JavaKind.Object && returnType instanceof ResolvedJavaType) {
             ResolvedJavaType resolvedJavaType = (ResolvedJavaType) returnType;
             TypeReference reference = TypeReference.create(assumptions, resolvedJavaType);
-            if (resolvedJavaType.isInterface()) {
-                ResolvedJavaType implementor = resolvedJavaType.getSingleImplementor();
-                if (implementor != null && !resolvedJavaType.equals(implementor)) {
-                    TypeReference uncheckedType = TypeReference.createTrusted(assumptions, implementor);
-                    return StampPair.create(StampFactory.object(reference, nonNull), StampFactory.object(uncheckedType, nonNull));
+            ResolvedJavaType elementalType = resolvedJavaType.getElementalType();
+            if (elementalType.isInterface()) {
+                assert reference == null || !reference.getType().equals(resolvedJavaType);
+                TypeReference uncheckedType;
+                ResolvedJavaType elementalImplementor = elementalType.getSingleImplementor();
+                if (elementalImplementor != null && !elementalType.equals(elementalImplementor)) {
+                    ResolvedJavaType implementor = elementalImplementor;
+                    ResolvedJavaType t = resolvedJavaType;
+                    while (t.isArray()) {
+                        implementor = implementor.getArrayClass();
+                        t = t.getComponentType();
+                    }
+                    uncheckedType = TypeReference.createTrusted(assumptions, implementor);
+                } else {
+                    uncheckedType = TypeReference.createTrusted(assumptions, resolvedJavaType);
                 }
+                return StampPair.create(StampFactory.object(reference, nonNull), StampFactory.object(uncheckedType, nonNull));
             }
             return StampPair.createSingle(StampFactory.object(reference, nonNull));
         } else {
             return StampPair.createSingle(StampFactory.forKind(returnType.getJavaKind()));
         }
     }
+
 }

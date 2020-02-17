@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2016, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -24,6 +26,7 @@ package org.graalvm.compiler.core.test.inlining;
 
 import static org.graalvm.compiler.phases.common.DeadCodeEliminationPhase.Optionality.Optional;
 
+import org.graalvm.collections.EconomicSet;
 import org.graalvm.compiler.core.test.GraalCompilerTest;
 import org.graalvm.compiler.debug.DebugContext;
 import org.graalvm.compiler.debug.TTY;
@@ -32,6 +35,7 @@ import org.graalvm.compiler.nodes.Invoke;
 import org.graalvm.compiler.nodes.StructuredGraph;
 import org.graalvm.compiler.nodes.StructuredGraph.AllowAssumptions;
 import org.graalvm.compiler.nodes.java.MethodCallTargetNode;
+import org.graalvm.compiler.nodes.spi.CoreProviders;
 import org.graalvm.compiler.options.OptionValues;
 import org.graalvm.compiler.phases.BasePhase;
 import org.graalvm.compiler.phases.OptimisticOptimizations;
@@ -40,11 +44,11 @@ import org.graalvm.compiler.phases.common.CanonicalizerPhase;
 import org.graalvm.compiler.phases.common.DeadCodeEliminationPhase;
 import org.graalvm.compiler.phases.common.inlining.InliningUtil;
 import org.graalvm.compiler.phases.tiers.HighTierContext;
-import org.graalvm.compiler.phases.tiers.PhaseContext;
 import org.graalvm.compiler.virtual.phases.ea.EarlyReadEliminationPhase;
 import org.graalvm.compiler.virtual.phases.ea.PartialEscapePhase;
-import org.graalvm.util.EconomicSet;
+import org.junit.Rule;
 import org.junit.Test;
+import org.junit.rules.TestRule;
 
 import jdk.vm.ci.meta.ResolvedJavaMethod;
 import sun.misc.Unsafe;
@@ -55,7 +59,8 @@ public class NestedLoopEffectsPhaseComplexityTest extends GraalCompilerTest {
     public static int[] Memory = new int[]{0};
 
     public static void recursiveLoopMethodUnsafeLoad(int a) {
-        if (UNSAFE.getInt(Memory, (long) Unsafe.ARRAY_INT_BASE_OFFSET) == 0) {
+        long arrayIntBaseOffset = Unsafe.ARRAY_INT_BASE_OFFSET;
+        if (UNSAFE.getInt(Memory, arrayIntBaseOffset) == 0) {
             return;
         }
         for (int i = 0; i < a; i++) {
@@ -85,17 +90,19 @@ public class NestedLoopEffectsPhaseComplexityTest extends GraalCompilerTest {
     private static int InliningCountLowerBound = 1;
     private static int InliningCountUpperBound = 32;
 
-    @Test(timeout = 120_000)
+    @Rule public TestRule timeout = createTimeoutSeconds(120);
+
+    @Test
     public void inlineDirectRecursiveLoopCallUnsafeLoad() {
         testAndTime("recursiveLoopMethodUnsafeLoad");
     }
 
-    @Test(timeout = 120_000)
+    @Test
     public void inlineDirectRecursiveLoopCallFieldLoad() {
         testAndTime("recursiveLoopMethodFieldLoad");
     }
 
-    @Test(timeout = 120_000)
+    @Test
     public void inlineDirectRecursiveLoopCallNoReads() {
         testAndTime("recursiveLoopMethod");
     }
@@ -105,8 +112,8 @@ public class NestedLoopEffectsPhaseComplexityTest extends GraalCompilerTest {
             StructuredGraph g1 = prepareGraph(snippet, i);
             StructuredGraph g2 = (StructuredGraph) g1.copy(g1.getDebug());
             ResolvedJavaMethod method = g1.method();
-            long elapsedRE = runAndTimePhase(g1, new EarlyReadEliminationPhase(new CanonicalizerPhase()));
-            long elapsedPEA = runAndTimePhase(g2, new PartialEscapePhase(true, new CanonicalizerPhase(), g1.getOptions()));
+            long elapsedRE = runAndTimePhase(g1, new EarlyReadEliminationPhase(createCanonicalizerPhase()));
+            long elapsedPEA = runAndTimePhase(g2, new PartialEscapePhase(true, createCanonicalizerPhase(), g1.getOptions()));
             if (LOG_PHASE_TIMINGS) {
                 TTY.printf("Needed %dms to run early partial escape analysis on a graph with %d nested loops compiling method %s\n", elapsedPEA, i, method);
             }
@@ -116,7 +123,7 @@ public class NestedLoopEffectsPhaseComplexityTest extends GraalCompilerTest {
         }
     }
 
-    private long runAndTimePhase(StructuredGraph g, BasePhase<? super PhaseContext> phase) {
+    private long runAndTimePhase(StructuredGraph g, BasePhase<? super CoreProviders> phase) {
         HighTierContext context = getDefaultHighTierContext();
         long start = System.currentTimeMillis();
         phase.apply(g, context);
@@ -131,13 +138,14 @@ public class NestedLoopEffectsPhaseComplexityTest extends GraalCompilerTest {
         StructuredGraph callerGraph = parseEager(callerMethod, AllowAssumptions.YES);
         PhaseSuite<HighTierContext> graphBuilderSuite = getDefaultGraphBuilderSuite();
         HighTierContext context = new HighTierContext(getProviders(), graphBuilderSuite, OptimisticOptimizations.ALL);
-        CanonicalizerPhase canonicalizer = new CanonicalizerPhase();
+        CanonicalizerPhase canonicalizer = createCanonicalizerPhase();
         Invoke next = callerGraph.getNodes(MethodCallTargetNode.TYPE).first().invoke();
         StructuredGraph calleeGraph = parseBytecodes(next.callTarget().targetMethod(), context, canonicalizer);
         ResolvedJavaMethod calleeMethod = next.callTarget().targetMethod();
         for (int i = 0; i < inliningCount; i++) {
             next = callerGraph.getNodes(MethodCallTargetNode.TYPE).first().invoke();
-            EconomicSet<Node> canonicalizeNodes = InliningUtil.inlineForCanonicalization(next, calleeGraph, false, calleeMethod);
+            EconomicSet<Node> canonicalizeNodes = InliningUtil.inlineForCanonicalization(next, calleeGraph, false, calleeMethod, null,
+                            "Called explicitly from a unit test.", "Test case");
             canonicalizer.applyIncremental(callerGraph, context, canonicalizeNodes);
             callerGraph.getDebug().dump(DebugContext.DETAILED_LEVEL, callerGraph, "After inlining %s into %s iteration %d", calleeMethod, callerMethod, i);
         }

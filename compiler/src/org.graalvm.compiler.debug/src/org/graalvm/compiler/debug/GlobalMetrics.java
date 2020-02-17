@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2017, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -29,10 +31,10 @@ import java.nio.file.Paths;
 import java.util.Collections;
 import java.util.List;
 
+import org.graalvm.collections.EconomicMap;
+import org.graalvm.collections.MapCursor;
+import org.graalvm.collections.Pair;
 import org.graalvm.compiler.options.OptionValues;
-import org.graalvm.util.EconomicMap;
-import org.graalvm.util.MapCursor;
-import org.graalvm.util.Pair;
 
 /**
  * Metric values that can be {@linkplain #add(DebugContext) updated} by multiple threads.
@@ -84,7 +86,9 @@ public class GlobalMetrics {
             EconomicMap<MetricKey, Long> map = asKeyValueMap();
             String metricsFile = DebugOptions.AggregatedMetricsFile.getValue(options);
             boolean csv = metricsFile != null && (metricsFile.endsWith(".csv") || metricsFile.endsWith(".CSV"));
-            try (PrintStream p = metricsFile == null ? DebugContext.DEFAULT_LOG_STREAM : new PrintStream(Files.newOutputStream(Paths.get(metricsFile)))) {
+            PrintStream p = null;
+            try {
+                p = metricsFile == null ? DebugContext.DEFAULT_LOG_STREAM : new PrintStream(Files.newOutputStream(Paths.get(metricsFile)));
                 if (!csv) {
                     if (!map.isEmpty()) {
                         p.println("++ Aggregated Metrics ++");
@@ -108,6 +112,11 @@ public class GlobalMetrics {
                 }
             } catch (IOException e) {
                 e.printStackTrace();
+            } finally {
+                // Don't close DEFAULT_LOG_STREAM
+                if (metricsFile != null && p != null) {
+                    p.close();
+                }
             }
         }
 

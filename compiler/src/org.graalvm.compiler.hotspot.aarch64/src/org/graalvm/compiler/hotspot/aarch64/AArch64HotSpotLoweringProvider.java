@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2014, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2014, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -23,16 +25,17 @@
 
 package org.graalvm.compiler.hotspot.aarch64;
 
+import org.graalvm.compiler.core.aarch64.AArch64LoweringProviderMixin;
 import org.graalvm.compiler.core.common.spi.ForeignCallsProvider;
 import org.graalvm.compiler.debug.DebugHandlersFactory;
 import org.graalvm.compiler.graph.Node;
-import org.graalvm.compiler.hotspot.HotSpotGraalRuntimeProvider;
 import org.graalvm.compiler.hotspot.GraalHotSpotVMConfig;
+import org.graalvm.compiler.hotspot.HotSpotGraalRuntimeProvider;
 import org.graalvm.compiler.hotspot.meta.DefaultHotSpotLoweringProvider;
 import org.graalvm.compiler.hotspot.meta.HotSpotProviders;
 import org.graalvm.compiler.hotspot.meta.HotSpotRegistersProvider;
-import org.graalvm.compiler.nodes.calc.FixedBinaryNode;
 import org.graalvm.compiler.nodes.calc.FloatConvertNode;
+import org.graalvm.compiler.nodes.calc.IntegerDivRemNode;
 import org.graalvm.compiler.nodes.calc.RemNode;
 import org.graalvm.compiler.nodes.spi.LoweringTool;
 import org.graalvm.compiler.options.OptionValues;
@@ -43,7 +46,7 @@ import jdk.vm.ci.code.TargetDescription;
 import jdk.vm.ci.hotspot.HotSpotConstantReflectionProvider;
 import jdk.vm.ci.meta.MetaAccessProvider;
 
-public class AArch64HotSpotLoweringProvider extends DefaultHotSpotLoweringProvider {
+public class AArch64HotSpotLoweringProvider extends DefaultHotSpotLoweringProvider implements AArch64LoweringProviderMixin {
 
     private AArch64IntegerArithmeticSnippets integerArithmeticSnippets;
     private AArch64FloatArithmeticSnippets floatArithmeticSnippets;
@@ -62,8 +65,8 @@ public class AArch64HotSpotLoweringProvider extends DefaultHotSpotLoweringProvid
 
     @Override
     public void lower(Node n, LoweringTool tool) {
-        if (n instanceof FixedBinaryNode) {
-            integerArithmeticSnippets.lower((FixedBinaryNode) n, tool);
+        if (n instanceof IntegerDivRemNode) {
+            integerArithmeticSnippets.lower((IntegerDivRemNode) n, tool);
         } else if (n instanceof RemNode) {
             floatArithmeticSnippets.lower((RemNode) n, tool);
         } else if (n instanceof FloatConvertNode) {

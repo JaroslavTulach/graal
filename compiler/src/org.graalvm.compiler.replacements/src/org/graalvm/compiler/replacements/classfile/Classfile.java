@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2016, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -46,8 +48,8 @@ public class Classfile {
     private final ResolvedJavaType type;
     private final List<ClassfileBytecode> codeAttributes;
 
-    private static final int MAJOR_VERSION_JAVA7 = 51;
-    private static final int MAJOR_VERSION_JAVA9 = 53;
+    private static final int MAJOR_VERSION_JAVA_MIN = 51; // JDK7
+    private static final int MAJOR_VERSION_JAVA_MAX = 59; // JDK15
     private static final int MAGIC = 0xCAFEBABE;
 
     /**
@@ -65,7 +67,7 @@ public class Classfile {
 
         int minor = stream.readUnsignedShort();
         int major = stream.readUnsignedShort();
-        if (major < MAJOR_VERSION_JAVA7 || major > MAJOR_VERSION_JAVA9) {
+        if (major < MAJOR_VERSION_JAVA_MIN || major > MAJOR_VERSION_JAVA_MAX) {
             throw new UnsupportedClassVersionError("Unsupported class file version: " + major + "." + minor);
         }
 

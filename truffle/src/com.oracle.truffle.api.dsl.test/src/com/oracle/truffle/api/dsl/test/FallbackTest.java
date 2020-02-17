@@ -1,24 +1,42 @@
 /*
- * Copyright (c) 2012, 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
- * This code is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * The Universal Permissive License (UPL), Version 1.0
  *
- * This code is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
- * version 2 for more details (a copy is included in the LICENSE file that
- * accompanied this code).
+ * Subject to the condition set forth below, permission is hereby granted to any
+ * person obtaining a copy of this software, associated documentation and/or
+ * data (collectively the "Software"), free of charge and under any and all
+ * copyright rights in the Software, and any and all patent rights owned or
+ * freely licensable by each licensor hereunder covering either (i) the
+ * unmodified Software as contributed to or provided by such licensor, or (ii)
+ * the Larger Works (as defined below), to deal in both
  *
- * You should have received a copy of the GNU General Public License version
- * 2 along with this work; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
+ * (a) the Software, and
  *
- * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
- * or visit www.oracle.com if you need additional information or have any
- * questions.
+ * (b) any piece of software and/or hardware listed in the lrgrwrks.txt file if
+ * one is included with the Software each a "Larger Work" to which the Software
+ * is contributed by such licensors),
+ *
+ * without restriction, including without limitation the rights to copy, create
+ * derivative works of, display, perform, and distribute the Software and make,
+ * use, sell, offer for sale, import, export, have made, and have sold the
+ * Software and the Larger Work(s), and to sublicense the foregoing rights on
+ * either these or other terms.
+ *
+ * This license is subject to the following condition:
+ *
+ * The above copyright notice and either this complete permission notice or at a
+ * minimum a reference to the UPL must be included in all copies or substantial
+ * portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
  */
 package com.oracle.truffle.api.dsl.test;
 
@@ -35,13 +53,13 @@ import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 import com.oracle.truffle.api.Truffle;
 import com.oracle.truffle.api.dsl.Cached;
 import com.oracle.truffle.api.dsl.Fallback;
+import com.oracle.truffle.api.dsl.ImplicitCast;
 import com.oracle.truffle.api.dsl.Introspectable;
-import com.oracle.truffle.api.dsl.Introspection;
 import com.oracle.truffle.api.dsl.NodeChild;
 import com.oracle.truffle.api.dsl.Specialization;
+import com.oracle.truffle.api.dsl.TypeSystem;
 import com.oracle.truffle.api.dsl.TypeSystemReference;
 import com.oracle.truffle.api.dsl.UnsupportedSpecializationException;
-import com.oracle.truffle.api.dsl.test.FallbackTestFactory.Fallback10NodeGen;
 import com.oracle.truffle.api.dsl.test.FallbackTestFactory.Fallback1Factory;
 import com.oracle.truffle.api.dsl.test.FallbackTestFactory.Fallback2Factory;
 import com.oracle.truffle.api.dsl.test.FallbackTestFactory.Fallback3Factory;
@@ -52,6 +70,7 @@ import com.oracle.truffle.api.dsl.test.FallbackTestFactory.Fallback8NodeGen;
 import com.oracle.truffle.api.dsl.test.FallbackTestFactory.Fallback9NodeGen;
 import com.oracle.truffle.api.dsl.test.FallbackTestFactory.FallbackWithAssumptionArrayNodeGen;
 import com.oracle.truffle.api.dsl.test.FallbackTestFactory.FallbackWithAssumptionNodeGen;
+import com.oracle.truffle.api.dsl.test.FallbackTestFactory.ImplicitCastInFallbackNodeGen;
 import com.oracle.truffle.api.dsl.test.TypeSystemTest.TestRootNode;
 import com.oracle.truffle.api.dsl.test.TypeSystemTest.ValueNode;
 import com.oracle.truffle.api.dsl.test.examples.ExampleTypes;
@@ -409,36 +428,6 @@ public class FallbackTest {
 
     }
 
-    @Test
-    public void testFallback10() {
-        Fallback10 node = Fallback10NodeGen.create();
-
-        Assert.assertFalse(Introspection.getSpecialization(node, "s0").isActive());
-        Assert.assertFalse(Introspection.getSpecialization(node, "f0").isActive());
-        Assert.assertEquals("s0", node.execute(1, 1));
-        Assert.assertEquals(1, Introspection.getSpecialization(node, "s0").getInstances());
-        Assert.assertEquals(1, Introspection.getSpecialization(node, "s0").getCachedData(0).get(0));
-        Assert.assertEquals(1, Introspection.getSpecialization(node, "s0").getCachedData(0).get(1));
-        Assert.assertFalse(Introspection.getSpecialization(node, "f0").isActive());
-
-        Assert.assertEquals("f0", node.execute(1, ""));
-        Assert.assertEquals(1, Introspection.getSpecialization(node, "s0").getInstances());
-        Assert.assertEquals(1, Introspection.getSpecialization(node, "s0").getCachedData(0).get(0));
-        Assert.assertEquals(1, Introspection.getSpecialization(node, "s0").getCachedData(0).get(1));
-        Assert.assertTrue(Introspection.getSpecialization(node, "f0").isActive());
-
-        /*
-         * Without a generic specialization that covers (int, int), once fallback is triggered it
-         * will always trigger instead of adding new cache entries.
-         */
-        Assert.assertEquals("f0", node.execute(1, 2));
-        Assert.assertEquals(1, Introspection.getSpecialization(node, "s0").getInstances());
-        Assert.assertEquals(1, Introspection.getSpecialization(node, "s0").getCachedData(0).get(0));
-        Assert.assertEquals(1, Introspection.getSpecialization(node, "s0").getCachedData(0).get(1));
-        Assert.assertTrue(Introspection.getSpecialization(node, "f0").isActive());
-
-    }
-
     /*
      * Tests that fallback behavior with cached guards that do not have a generic case.
      */
@@ -450,7 +439,7 @@ public class FallbackTest {
         public abstract String execute(Object left, Object right);
 
         @Specialization(limit = "2", guards = {"left == cachedLeft", "right == cachedRight"})
-        protected String s0(
+        protected String s1(
                         int left,
                         int right,
                         @Cached("left") int cachedLeft,
@@ -459,6 +448,7 @@ public class FallbackTest {
         }
 
         @Fallback
+        @ExpectError(CachedReachableFallbackTest.CACHED_GUARD_FALLBACK_ERROR)
         @TruffleBoundary
         protected String f0(Object left, Object right) {
             return "f0";
@@ -481,15 +471,12 @@ public class FallbackTest {
         FallbackWithAssumption node3 = FallbackWithAssumptionNodeGen.create();
         Assert.assertEquals("f0", node3.execute(3.14));
         Assert.assertEquals("f0", node3.execute(3.14));
-        // This will stay in fallback if we assume a null assumption is "invalid"
-        Assert.assertEquals("f0", node3.execute(0));
+        Assert.assertEquals("s0", node3.execute(0));
 
         FallbackWithAssumption node4 = FallbackWithAssumptionNodeGen.create();
         Assert.assertEquals("f0", node4.execute(3.14));
         Assert.assertEquals("f0", node4.execute(3.14));
         node4.assumption.invalidate();
-        // These go to executeAndSpecialize() and deopt every time
-        // if we assume a null assumption is "valid"
         Assert.assertEquals("f0", node4.execute(0));
         Assert.assertEquals("f0", node4.execute(0));
     }
@@ -534,15 +521,11 @@ public class FallbackTest {
         FallbackWithAssumptionArray node3 = FallbackWithAssumptionArrayNodeGen.create();
         Assert.assertEquals("f0", node3.execute(3.14));
         Assert.assertEquals("f0", node3.execute(3.14));
-        // This will stay in fallback if we assume a null assumptions array is "invalid"
-        Assert.assertEquals("f0", node3.execute(0));
 
         FallbackWithAssumptionArray node4 = FallbackWithAssumptionArrayNodeGen.create();
         Assert.assertEquals("f0", node4.execute(3.14));
         Assert.assertEquals("f0", node4.execute(3.14));
         node4.assumptions[0].invalidate();
-        // These go to executeAndSpecialize() and deopt every time
-        // if we assume a null assumptions array is "valid"
         Assert.assertEquals("f0", node4.execute(0));
         Assert.assertEquals("f0", node4.execute(0));
     }
@@ -568,6 +551,86 @@ public class FallbackTest {
 
         protected Assumption[] getAssumptions() {
             return assumptions;
+        }
+
+    }
+
+    @TypeSystemReference(ExampleTypes.class)
+    @SuppressWarnings("unused")
+    public abstract static class FallbackFrame extends Node {
+
+        public abstract String execute(VirtualFrame frame, Object n);
+
+        @Specialization(guards = "n == cachedN", limit = "3")
+        protected String s0(VirtualFrame frame, int n, @Cached("n") int cachedN) {
+            return "s0";
+        }
+
+        @Specialization
+        protected String s1(VirtualFrame frame, int n) {
+            return "s1";
+        }
+
+        @Fallback
+        protected String f0(Object n) {
+            return "f0";
+        }
+
+    }
+
+    @TypeSystem
+    public static class ImplicitCastInFallbackTypeSystem {
+
+        @ImplicitCast
+        public static ImplicitValue implicitCast(int value) {
+            return new ImplicitValue(value);
+        }
+
+    }
+
+    @Test
+    public void testImplicitCastInFallback() {
+        ImplicitCastInFallbackNode node;
+
+        // test s0 first
+        node = ImplicitCastInFallbackNodeGen.create();
+        Assert.assertEquals("s0", node.execute(42));
+        Assert.assertEquals("s0", node.execute(new ImplicitValue(42)));
+        Assert.assertEquals("fallback", node.execute("42"));
+
+        // test fallback first
+        node = ImplicitCastInFallbackNodeGen.create();
+        Assert.assertEquals("fallback", node.execute("42"));
+        Assert.assertEquals("s0", node.execute(42));
+        Assert.assertEquals("s0", node.execute(new ImplicitValue(42)));
+
+    }
+
+    static class ImplicitValue {
+
+        public final int value;
+
+        ImplicitValue(int value) {
+            this.value = value;
+        }
+
+    }
+
+    @TypeSystemReference(ImplicitCastInFallbackTypeSystem.class)
+    @SuppressWarnings("unused")
+    public abstract static class ImplicitCastInFallbackNode extends Node {
+
+        public abstract String execute(Object n);
+
+        // if the implicitly casted value is used
+        @Specialization(guards = "type.value == 42")
+        protected String s0(ImplicitValue type) {
+            return "s0";
+        }
+
+        @Fallback
+        protected String f0(Object n) {
+            return "fallback";
         }
 
     }

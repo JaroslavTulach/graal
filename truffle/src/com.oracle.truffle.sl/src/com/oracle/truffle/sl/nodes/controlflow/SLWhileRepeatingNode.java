@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * The Universal Permissive License (UPL), Version 1.0
@@ -47,10 +47,9 @@ import com.oracle.truffle.api.nodes.Node;
 import com.oracle.truffle.api.nodes.RepeatingNode;
 import com.oracle.truffle.api.nodes.UnexpectedResultException;
 import com.oracle.truffle.api.profiles.BranchProfile;
-import com.oracle.truffle.api.source.SourceSection;
 import com.oracle.truffle.sl.nodes.SLExpressionNode;
 import com.oracle.truffle.sl.nodes.SLStatementNode;
-import com.oracle.truffle.sl.nodes.expression.SLUnboxNodeGen;
+import com.oracle.truffle.sl.nodes.util.SLUnboxNodeGen;
 
 /**
  * The loop body of a {@link SLWhileNode while loop}. A Truffle framework {@link LoopNode} between
@@ -77,25 +76,9 @@ public final class SLWhileRepeatingNode extends Node implements RepeatingNode {
     private final BranchProfile continueTaken = BranchProfile.create();
     private final BranchProfile breakTaken = BranchProfile.create();
 
-    /**
-     * This node does not extend {@link SLStatementNode}, so we need to maintain source information
-     * manually.
-     */
-    private SourceSection sourceSection;
-
     public SLWhileRepeatingNode(SLExpressionNode conditionNode, SLStatementNode bodyNode) {
         this.conditionNode = SLUnboxNodeGen.create(conditionNode);
         this.bodyNode = bodyNode;
-    }
-
-    @Override
-    public SourceSection getSourceSection() {
-        return sourceSection;
-    }
-
-    public void setSourceSection(SourceSection section) {
-        assert this.sourceSection == null : "overwriting existing SourceSection";
-        this.sourceSection = section;
     }
 
     @Override

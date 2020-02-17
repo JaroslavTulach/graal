@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2011, 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -34,6 +36,7 @@ import org.graalvm.compiler.graph.spi.Canonicalizable;
 import org.graalvm.compiler.graph.spi.CanonicalizerTool;
 import org.graalvm.compiler.nodeinfo.NodeInfo;
 import org.graalvm.compiler.nodes.ConstantNode;
+import org.graalvm.compiler.nodes.NodeView;
 import org.graalvm.compiler.nodes.ValueNode;
 import org.graalvm.compiler.nodes.calc.ReinterpretNode;
 import org.graalvm.compiler.nodes.java.LoadFieldNode;
@@ -42,6 +45,7 @@ import org.graalvm.compiler.nodes.spi.LoweringTool;
 import org.graalvm.compiler.nodes.spi.Virtualizable;
 import org.graalvm.compiler.nodes.spi.VirtualizerTool;
 import org.graalvm.compiler.nodes.type.StampTool;
+import org.graalvm.compiler.nodes.virtual.VirtualArrayNode;
 import org.graalvm.compiler.nodes.virtual.VirtualObjectNode;
 import org.graalvm.word.LocationIdentity;
 
@@ -96,21 +100,26 @@ public class RawLoadNode extends UnsafeAccessNode implements Lowerable, Virtuali
             ValueNode offsetValue = tool.getAlias(offset());
             if (offsetValue.isConstant()) {
                 long off = offsetValue.asJavaConstant().asLong();
-                int entryIndex = virtual.entryIndexForOffset(off, accessKind());
+                int entryIndex = virtual.entryIndexForOffset(tool.getMetaAccess(), off, accessKind());
 
                 if (entryIndex != -1) {
                     ValueNode entry = tool.getEntry(virtual, entryIndex);
                     JavaKind entryKind = virtual.entryKind(entryIndex);
-                    if (entry.getStackKind() == getStackKind() || entryKind == accessKind()) {
 
-                        if (!(entry.stamp().isCompatible(stamp()))) {
-                            if (entry.stamp() instanceof PrimitiveStamp && stamp instanceof PrimitiveStamp) {
+                    if (virtual.isVirtualByteArrayAccess(accessKind())) {
+                        if (virtual.canVirtualizeLargeByteArrayUnsafeRead(entry, entryIndex, accessKind(), tool)) {
+                            tool.replaceWith(VirtualArrayNode.virtualizeByteArrayRead(entry, accessKind(), stamp));
+                        }
+                    } else if (entry.getStackKind() == getStackKind() || entryKind == accessKind()) {
+
+                        if (!(entry.stamp(NodeView.DEFAULT).isCompatible(stamp(NodeView.DEFAULT)))) {
+                            if (entry.stamp(NodeView.DEFAULT) instanceof PrimitiveStamp && stamp instanceof PrimitiveStamp) {
                                 PrimitiveStamp p1 = (PrimitiveStamp) stamp;
-                                PrimitiveStamp p2 = (PrimitiveStamp) entry.stamp();
+                                PrimitiveStamp p2 = (PrimitiveStamp) entry.stamp(NodeView.DEFAULT);
                                 int width1 = p1.getBits();
                                 int width2 = p2.getBits();
                                 if (width1 == width2) {
-                                    Node replacement = new ReinterpretNode(p2, entry);
+                                    Node replacement = ReinterpretNode.create(p2, entry, NodeView.DEFAULT);
                                     tool.replaceWith((ValueNode) replacement);
                                     return;
                                 } else {
@@ -141,11 +150,12 @@ public class RawLoadNode extends UnsafeAccessNode implements Lowerable, Virtuali
                     if (arrayConstant != null) {
                         int stableDimension = objectConstant.getStableDimension();
                         if (stableDimension > 0) {
+                            NodeView view = NodeView.from(tool);
                             long constantOffset = offset().asJavaConstant().asLong();
-                            Constant constant = stamp().readConstant(tool.getConstantReflection().getMemoryAccessProvider(), arrayConstant, constantOffset);
+                            Constant constant = stamp(view).readConstant(tool.getConstantReflection().getMemoryAccessProvider(), arrayConstant, constantOffset);
                             boolean isDefaultStable = objectConstant.isDefaultStable();
                             if (constant != null && (isDefaultStable || !constant.isDefaultForKind())) {
-                                return ConstantNode.forConstant(stamp(), constant, stableDimension - 1, isDefaultStable, tool.getMetaAccess());
+                                return ConstantNode.forConstant(stamp(view), constant, stableDimension - 1, isDefaultStable, tool.getMetaAccess());
                             }
                         }
                     }
@@ -156,8 +166,8 @@ public class RawLoadNode extends UnsafeAccessNode implements Lowerable, Virtuali
     }
 
     @Override
-    protected ValueNode cloneAsFieldAccess(Assumptions assumptions, ResolvedJavaField field) {
-        return LoadFieldNode.create(assumptions, object(), field);
+    protected ValueNode cloneAsFieldAccess(Assumptions assumptions, ResolvedJavaField field, boolean volatileAccess) {
+        return LoadFieldNode.create(assumptions, field.isStatic() ? null : object(), field, volatileAccess);
     }
 
     @Override

@@ -1,37 +1,53 @@
 /*
- * Copyright (c) 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
- * This code is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.  Oracle designates this
- * particular file as subject to the "Classpath" exception as provided
- * by Oracle in the LICENSE file that accompanied this code.
+ * The Universal Permissive License (UPL), Version 1.0
  *
- * This code is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
- * version 2 for more details (a copy is included in the LICENSE file that
- * accompanied this code).
+ * Subject to the condition set forth below, permission is hereby granted to any
+ * person obtaining a copy of this software, associated documentation and/or
+ * data (collectively the "Software"), free of charge and under any and all
+ * copyright rights in the Software, and any and all patent rights owned or
+ * freely licensable by each licensor hereunder covering either (i) the
+ * unmodified Software as contributed to or provided by such licensor, or (ii)
+ * the Larger Works (as defined below), to deal in both
  *
- * You should have received a copy of the GNU General Public License version
- * 2 along with this work; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
+ * (a) the Software, and
  *
- * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
- * or visit www.oracle.com if you need additional information or have any
- * questions.
+ * (b) any piece of software and/or hardware listed in the lrgrwrks.txt file if
+ * one is included with the Software each a "Larger Work" to which the Software
+ * is contributed by such licensors),
+ *
+ * without restriction, including without limitation the rights to copy, create
+ * derivative works of, display, perform, and distribute the Software and make,
+ * use, sell, offer for sale, import, export, have made, and have sold the
+ * Software and the Larger Work(s), and to sublicense the foregoing rights on
+ * either these or other terms.
+ *
+ * This license is subject to the following condition:
+ *
+ * The above copyright notice and either this complete permission notice or at a
+ * minimum a reference to the UPL must be included in all copies or substantial
+ * portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
  */
 package com.oracle.truffle.api.dsl;
-
-import com.oracle.truffle.api.CompilerAsserts;
-import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
-import com.oracle.truffle.api.nodes.Node;
 
 import java.lang.annotation.ElementType;
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
+
+import com.oracle.truffle.api.CompilerAsserts;
+import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
+import com.oracle.truffle.api.nodes.Node;
 
 // Workaround for Eclipse formatter behaving different when running on JDK 9.
 // @formatter:off
@@ -55,11 +71,12 @@ import java.lang.annotation.Target;
  * </p>
  * <p>
  * The initializer expression of a cached parameter is defined using a subset of Java. This subset
- * includes field/parameter accesses, function calls, type exact infix comparisons (==, !=,
- * <, <=, >, >=) and integer literals. The return type of the initializer expression must be
- * assignable to the parameter type. If the annotated parameter type is derived from {@link Node}
- * then the {@link Node} instance is allowed to use the {@link Node#replace(Node)} method to replace
- * itself. Bound elements without receivers are resolved using the following order:
+ * includes field/parameter accesses, function calls, type exact infix comparisons (==, !=, <, <=,
+ * >, >=), logical negation (!), logical disjunction (||), null, true, false, and integer literals.
+ * The return type of the initializer expression must be assignable to the parameter type. If the
+ * annotated parameter type is derived from {@link Node} then the {@link Node} instance is allowed
+ * to use the {@link Node#replace(Node)} method to replace itself. Bound elements without receivers
+ * are resolved using the following order:
  * <ol>
  * <li>Dynamic and cached parameters of the enclosing specialization.</li>
  * <li>Fields defined using {@link NodeField} for the enclosing node.</li>
@@ -140,7 +157,7 @@ import java.lang.annotation.Target;
  * instantiated. Alternatively if the <code>replaces</code> relation is omitted then all
  * <code>doCached</code> instances remain but no new instances are created.
  *
- * <code>
+ * <pre>
  * &#064;Specialization(guards = &quot;operand == cachedOperand&quot;)
  * void doCached(int operand, {@code @Cached}(&quot;operand&quot;) int cachedOperand) {
  *    CompilerAsserts.compilationConstant(cachedOperand);
@@ -166,7 +183,7 @@ import java.lang.annotation.Target;
  * execute(3) => doNormal(3)    // new instantiation of doNormal due to limit overflow
  * execute(1) => doCached(1, 1)
  *
- * </code>
+ * </pre>
  *
  * </li>
  * <li>This next example shows how methods from the enclosing node can be used to initialize cached
@@ -221,10 +238,12 @@ import java.lang.annotation.Target;
  * @see Specialization#replaces()
  * @see Specialization#limit()
  * @see ImportStatic
+ * @see CachedContext @CachedContext to access the current context.
+ * @see CachedLanguage @CachedLanguage to access the current Truffle language.
  * @since 0.8 or earlier
  */
 // @formatter:on
-@Retention(RetentionPolicy.RUNTIME)
+@Retention(RetentionPolicy.CLASS)
 @Target({ElementType.PARAMETER})
 public @interface Cached {
 
@@ -234,7 +253,16 @@ public @interface Cached {
      * @see Cached
      * @since 0.8 or earlier
      */
-    String value();
+    String value() default "create($parameters)";
+
+    /**
+     * Defines the initializer that is used for {@link GenerateUncached uncached} nodes or uncached
+     * versions of exported library messages.
+     *
+     * @see GenerateUncached
+     * @since 19.0
+     */
+    String uncached() default "getUncached($parameters)";
 
     /**
      * Specifies the number of array dimensions to be marked as {@link CompilationFinal compilation
@@ -253,5 +281,56 @@ public @interface Cached {
      * @see CompilationFinal#dimensions()
      */
     int dimensions() default -1;
+
+    /**
+     * Allows the {@link #value()} to be used for {@link #uncached()}. This is useful if the
+     * expression is the same for {@link #value()} and {@link #uncached()}. By setting
+     * {@link #allowUncached()} to <code>true</code> it is not necessary to repeat the
+     * {@link #value()} expression in the {@link #uncached()} expression. This flag cannot be set in
+     * combination with {@link #uncached()}.
+     *
+     * @since 19.0
+     */
+    boolean allowUncached() default false;
+
+    /**
+     * Specifies the bindings used for the $parameters variable in cached or uncached initializers.
+     *
+     * @since 19.0
+     */
+    String[] parameters() default {};
+
+    /**
+     * Allows sharing between multiple Cached parameters between multiple specializations or
+     * exported library messages. If no sharing is desired then the {@link Cached cached} parameter
+     * can be annotated with {@link Exclusive exclusive}. The DSL will indicate sharing
+     * opportunities to the user by showing a warning.
+     *
+     * @see Exclusive
+     * @since 19.0
+     */
+    @Retention(RetentionPolicy.CLASS)
+    @Target({ElementType.PARAMETER})
+    public @interface Shared {
+
+        /**
+         * Specifies the sharing group of the shared cached element.
+         *
+         * @since 19.0
+         */
+        String value();
+
+    }
+
+    /**
+     * Disallows any sharing with other cached parameters. The DSL will indicate sharing
+     * opportunities to the user by showing a warning.
+     *
+     * @since 19.0
+     */
+    @Retention(RetentionPolicy.CLASS)
+    @Target({ElementType.PARAMETER, ElementType.METHOD, ElementType.TYPE})
+    public @interface Exclusive {
+    }
 
 }

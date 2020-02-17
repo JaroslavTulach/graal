@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2016, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -26,6 +28,8 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 
+import org.graalvm.compiler.nodes.NodeView;
+import org.graalvm.compiler.nodes.ValueNode;
 import org.junit.Assert;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -68,10 +72,10 @@ public class ReinterpretStampLongToDoubleTest extends ReinterpretStampTest {
     @Test
     public void run() {
         ParameterNode param = new ParameterNode(0, StampPair.createSingle(inputStamp));
-        ReinterpretNode reinterpret = new ReinterpretNode(JavaKind.Double, param);
+        ValueNode reinterpret = ReinterpretNode.create(JavaKind.Double, param, NodeView.DEFAULT);
         reinterpret.inferStamp();
 
-        FloatStamp resultStamp = (FloatStamp) reinterpret.stamp();
+        FloatStamp resultStamp = (FloatStamp) reinterpret.stamp(NodeView.DEFAULT);
         Assert.assertEquals(Double.SIZE, resultStamp.getBits());
 
         for (long input : interestingLongs) {

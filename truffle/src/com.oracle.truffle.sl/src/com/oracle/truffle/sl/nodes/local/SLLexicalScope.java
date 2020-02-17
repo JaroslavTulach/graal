@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2017, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * The Universal Permissive License (UPL), Version 1.0
@@ -40,32 +40,30 @@
  */
 package com.oracle.truffle.sl.nodes.local;
 
-import java.math.BigInteger;
-import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Set;
 
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 import com.oracle.truffle.api.frame.Frame;
 import com.oracle.truffle.api.frame.FrameSlot;
-import com.oracle.truffle.api.interop.ForeignAccess;
-import com.oracle.truffle.api.interop.Message;
-import com.oracle.truffle.api.interop.MessageResolution;
-import com.oracle.truffle.api.interop.Resolve;
+import com.oracle.truffle.api.interop.InteropLibrary;
+import com.oracle.truffle.api.interop.InvalidArrayIndexException;
 import com.oracle.truffle.api.interop.TruffleObject;
 import com.oracle.truffle.api.interop.UnknownIdentifierException;
 import com.oracle.truffle.api.interop.UnsupportedMessageException;
+import com.oracle.truffle.api.library.ExportLibrary;
+import com.oracle.truffle.api.library.ExportMessage;
 import com.oracle.truffle.api.nodes.Node;
 import com.oracle.truffle.api.nodes.NodeUtil;
 import com.oracle.truffle.api.nodes.NodeVisitor;
 import com.oracle.truffle.api.nodes.RootNode;
+import com.oracle.truffle.sl.nodes.SLEvalRootNode;
+import com.oracle.truffle.sl.nodes.SLRootNode;
 import com.oracle.truffle.sl.nodes.SLStatementNode;
 import com.oracle.truffle.sl.nodes.controlflow.SLBlockNode;
-import com.oracle.truffle.sl.runtime.SLBigNumber;
+import com.oracle.truffle.sl.runtime.SLNull;
 
 /**
  * Simple language lexical scope. There can be a block scope, or function scope.
@@ -81,7 +79,7 @@ public final class SLLexicalScope {
 
     /**
      * Create a new block SL lexical scope.
-     * 
+     *
      * @param current the current node
      * @param block a nearest block enclosing the current node
      * @param parentBlock a next parent block
@@ -95,7 +93,7 @@ public final class SLLexicalScope {
 
     /**
      * Create a new functional SL lexical scope.
-     * 
+     *
      * @param current the current node, or <code>null</code> when it would be above the block
      * @param block a nearest block enclosing the current node
      * @param root a functional root node for top-most block
@@ -115,7 +113,8 @@ public final class SLLexicalScope {
             block = findChildrenBlock(node);
             if (block == null) {
                 // Corrupted SL AST, no block was found
-                assert false : "Corrupted SL AST under " + node;
+                RootNode root = node.getRootNode();
+                assert root instanceof SLEvalRootNode || root instanceof SLRootNode : "Corrupted SL AST under " + node;
                 return new SLLexicalScope(null, null, (SLBlockNode) null);
             }
             node = null; // node is above the block
@@ -177,23 +176,6 @@ public final class SLLexicalScope {
             }
         }
         return parent;
-    }
-
-    private static Object getInteropValue(Object value) {
-        if (value instanceof BigInteger) {
-            return new SLBigNumber((BigInteger) value);
-        } else {
-            return value;
-        }
-    }
-
-    private static Object getRawValue(Object interopValue, Object oldValue) {
-        if (interopValue instanceof SLBigNumber) {
-            if (oldValue instanceof BigInteger) {
-                return ((SLBigNumber) interopValue).getValue();
-            }
-        }
-        return interopValue;
     }
 
     /**
@@ -270,7 +252,7 @@ public final class SLLexicalScope {
         // Variables are slot-based.
         // To collect declared variables, traverse the block's AST and find slots associated
         // with SLWriteLocalVariableNode. The traversal stops when we hit the current node.
-        Map<String, FrameSlot> slots = new LinkedHashMap<>(1 << 2);
+        Map<String, FrameSlot> slots = new LinkedHashMap<>(4);
         NodeUtil.forEachChild(varsBlock, new NodeVisitor() {
             @Override
             public boolean visit(Node node) {
@@ -302,7 +284,7 @@ public final class SLLexicalScope {
         // Arguments are pushed to frame slots at the beginning of the function block.
         // To collect argument slots, search for SLReadArgumentNode inside of
         // SLWriteLocalVariableNode.
-        Map<String, FrameSlot> args = new LinkedHashMap<>(1 << 2);
+        Map<String, FrameSlot> args = new LinkedHashMap<>(4);
         NodeUtil.forEachChild(block, new NodeVisitor() {
 
             private SLWriteLocalVariableNode wn; // The current write node containing a slot
@@ -332,6 +314,7 @@ public final class SLLexicalScope {
         return args;
     }
 
+    @ExportLibrary(InteropLibrary.class)
     static final class VariablesMapObject implements TruffleObject {
 
         final Map<String, ? extends FrameSlot> slots;
@@ -344,128 +327,111 @@ public final class SLLexicalScope {
             this.frame = frame;
         }
 
-        @Override
-        public ForeignAccess getForeignAccess() {
-            return VariablesMapMessageResolutionForeign.ACCESS;
+        @SuppressWarnings("static-method")
+        @ExportMessage
+        boolean hasMembers() {
+            return true;
         }
 
-        public static boolean isInstance(TruffleObject obj) {
-            return obj instanceof VariablesMapObject;
+        @ExportMessage
+        @TruffleBoundary
+        Object getMembers(@SuppressWarnings("unused") boolean includeInternal) {
+            return new KeysArray(slots.keySet().toArray(new String[0]));
         }
 
-        @MessageResolution(receiverType = VariablesMapObject.class)
-        static final class VariablesMapMessageResolution {
-
-            @Resolve(message = "KEYS")
-            abstract static class VarsMapKeysNode extends Node {
-
-                @TruffleBoundary
-                public Object access(VariablesMapObject varMap) {
-                    return new VariableNamesObject(varMap.slots.keySet());
+        @ExportMessage
+        @TruffleBoundary
+        void writeMember(String member, Object value) throws UnsupportedMessageException, UnknownIdentifierException {
+            if (frame == null) {
+                throw UnsupportedMessageException.create();
+            }
+            FrameSlot slot = slots.get(member);
+            if (slot == null) {
+                throw UnknownIdentifierException.create(member);
+            } else {
+                Object info = slot.getInfo();
+                if (args != null && info != null) {
+                    args[(Integer) info] = value;
+                } else {
+                    frame.setObject(slot, value);
                 }
             }
-
-            @Resolve(message = "READ")
-            abstract static class VarsMapReadNode extends Node {
-
-                @TruffleBoundary
-                public Object access(VariablesMapObject varMap, String name) {
-                    if (varMap.frame == null) {
-                        throw UnsupportedMessageException.raise(Message.READ);
-                    }
-                    FrameSlot slot = varMap.slots.get(name);
-                    if (slot == null) {
-                        throw UnknownIdentifierException.raise(name);
-                    } else {
-                        Object value;
-                        if (varMap.args != null && varMap.args.length > slot.getIndex()) {
-                            value = varMap.args[slot.getIndex()];
-                        } else {
-                            value = varMap.frame.getValue(slot);
-                        }
-                        return getInteropValue(value);
-                    }
-                }
-            }
-
-            @Resolve(message = "WRITE")
-            abstract static class VarsMapWriteNode extends Node {
-
-                @TruffleBoundary
-                public Object access(VariablesMapObject varMap, String name, Object value) {
-                    if (varMap.frame == null) {
-                        throw UnsupportedMessageException.raise(Message.WRITE);
-                    }
-                    FrameSlot slot = varMap.slots.get(name);
-                    if (slot == null) {
-                        throw UnknownIdentifierException.raise(name);
-                    } else {
-                        if (varMap.args != null && varMap.args.length > slot.getIndex()) {
-                            Object valueOld = varMap.args[slot.getIndex()];
-                            varMap.args[slot.getIndex()] = getRawValue(value, valueOld);
-                        } else {
-                            Object valueOld = varMap.frame.getValue(slot);
-                            varMap.frame.setObject(slot, getRawValue(value, valueOld));
-                        }
-                        return value;
-                    }
-                }
-            }
-
         }
+
+        @ExportMessage
+        @TruffleBoundary
+        Object readMember(String member) throws UnknownIdentifierException {
+            if (frame == null) {
+                return SLNull.SINGLETON;
+            }
+            FrameSlot slot = slots.get(member);
+            if (slot == null) {
+                throw UnknownIdentifierException.create(member);
+            } else {
+                Object value;
+                Object info = slot.getInfo();
+                if (args != null && info != null) {
+                    value = args[(Integer) info];
+                } else {
+                    value = frame.getValue(slot);
+                }
+                return value;
+            }
+        }
+
+        @SuppressWarnings("static-method")
+        @ExportMessage
+        boolean isMemberInsertable(@SuppressWarnings("unused") String member) {
+            return false;
+        }
+
+        @ExportMessage
+        @TruffleBoundary
+        boolean isMemberModifiable(String member) {
+            return slots.containsKey(member);
+        }
+
+        @ExportMessage
+        @TruffleBoundary
+        boolean isMemberReadable(String member) {
+            return frame == null || slots.containsKey(member);
+        }
+
     }
 
-    static final class VariableNamesObject implements TruffleObject {
+    @ExportLibrary(InteropLibrary.class)
+    static final class KeysArray implements TruffleObject {
 
-        final List<String> names;
+        private final String[] keys;
 
-        private VariableNamesObject(Set<String> names) {
-            this.names = new ArrayList<>(names);
+        KeysArray(String[] keys) {
+            this.keys = keys;
         }
 
-        @Override
-        public ForeignAccess getForeignAccess() {
-            return VariableNamesMessageResolutionForeign.ACCESS;
+        @SuppressWarnings("static-method")
+        @ExportMessage
+        boolean hasArrayElements() {
+            return true;
         }
 
-        public static boolean isInstance(TruffleObject obj) {
-            return obj instanceof VariableNamesObject;
+        @ExportMessage
+        boolean isArrayElementReadable(long index) {
+            return index >= 0 && index < keys.length;
         }
 
-        @MessageResolution(receiverType = VariableNamesObject.class)
-        static final class VariableNamesMessageResolution {
+        @ExportMessage
+        long getArraySize() {
+            return keys.length;
+        }
 
-            @Resolve(message = "HAS_SIZE")
-            abstract static class VarNamesHasSizeNode extends Node {
-
-                @SuppressWarnings("unused")
-                public Object access(VariableNamesObject varNames) {
-                    return true;
-                }
+        @ExportMessage
+        Object readArrayElement(long index) throws InvalidArrayIndexException {
+            if (!isArrayElementReadable(index)) {
+                throw InvalidArrayIndexException.create(index);
             }
-
-            @Resolve(message = "GET_SIZE")
-            abstract static class VarNamesGetSizeNode extends Node {
-
-                public Object access(VariableNamesObject varNames) {
-                    return varNames.names.size();
-                }
-            }
-
-            @Resolve(message = "READ")
-            abstract static class VarNamesReadNode extends Node {
-
-                @TruffleBoundary
-                public Object access(VariableNamesObject varNames, int index) {
-                    try {
-                        return varNames.names.get(index);
-                    } catch (IndexOutOfBoundsException ioob) {
-                        throw UnknownIdentifierException.raise(Integer.toString(index));
-                    }
-                }
-            }
-
+            return keys[(int) index];
         }
+
     }
 
 }

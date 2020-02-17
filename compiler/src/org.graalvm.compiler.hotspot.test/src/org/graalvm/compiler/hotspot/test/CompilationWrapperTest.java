@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2013, 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2013, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -27,6 +29,7 @@ import static org.graalvm.compiler.test.SubprocessUtil.withoutDebuggerArguments;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -52,11 +55,14 @@ public class CompilationWrapperTest extends GraalCompilerTest {
      */
     @Test
     public void testVMCompilation1() throws IOException, InterruptedException {
-        testHelper(Collections.emptyList(), Arrays.asList("-XX:+BootstrapJVMCI",
+        assumeManagementLibraryIsLoadable();
+        testHelper(Collections.emptyList(), Arrays.asList("-XX:-TieredCompilation",
                         "-XX:+UseJVMCICompiler",
                         "-Dgraal.CompilationFailureAction=ExitVM",
-                        "-Dgraal.CrashAt=Object.*,String.*",
-                        "-version"));
+                        "-Dgraal.CrashAt=TestProgram.*",
+                        "-Xcomp",
+                        "-XX:CompileCommand=compileonly,*/TestProgram.print*",
+                        TestProgram.class.getName()));
     }
 
     /**
@@ -65,11 +71,14 @@ public class CompilationWrapperTest extends GraalCompilerTest {
      */
     @Test
     public void testVMCompilation2() throws IOException, InterruptedException {
-        testHelper(Collections.emptyList(), Arrays.asList("-XX:+BootstrapJVMCI",
+        assumeManagementLibraryIsLoadable();
+        testHelper(Collections.emptyList(), Arrays.asList("-XX:-TieredCompilation",
                         "-XX:+UseJVMCICompiler",
                         "-Dgraal.ExitVMOnException=true",
-                        "-Dgraal.CrashAt=Object.*,String.*",
-                        "-version"));
+                        "-Dgraal.CrashAt=TestProgram.*",
+                        "-Xcomp",
+                        "-XX:CompileCommand=compileonly,*/TestProgram.print*",
+                        TestProgram.class.getName()));
     }
 
     static class Probe {
@@ -103,19 +112,44 @@ public class CompilationWrapperTest extends GraalCompilerTest {
      */
     @Test
     public void testVMCompilation3() throws IOException, InterruptedException {
-        final int maxProblems = 4;
-        Probe[] probes = {
-                        new Probe("To capture more information for diagnosing or reporting a compilation", maxProblems),
-                        new Probe("Retrying compilation of", maxProblems),
-                        new Probe("adjusting CompilationFailureAction from Diagnose to Print", 1),
-                        new Probe("adjusting CompilationFailureAction from Print to Silent", 1),
+        assumeManagementLibraryIsLoadable();
+        final int maxProblems = 2;
+        Probe failurePatternProbe = new Probe("[[[Graal compilation failure]]]", maxProblems) {
+            @Override
+            String test() {
+                return actualOccurrences > 0 && actualOccurrences <= maxProblems ? null : String.format("expected occurrences to be in [1 .. %d]", maxProblems);
+            }
         };
-        testHelper(Arrays.asList(probes), Arrays.asList("-XX:+BootstrapJVMCI",
+        Probe retryingProbe = new Probe("Retrying compilation of", maxProblems) {
+            @Override
+            String test() {
+                return actualOccurrences > 0 && actualOccurrences <= maxProblems ? null : String.format("expected occurrences to be in [1 .. %d]", maxProblems);
+            }
+        };
+        Probe adjustmentProbe = new Probe("adjusting CompilationFailureAction from Diagnose to Print", 1) {
+            @Override
+            String test() {
+                if (retryingProbe.actualOccurrences >= maxProblems) {
+                    if (actualOccurrences == 0) {
+                        return "expected at least one occurrence";
+                    }
+                }
+                return null;
+            }
+        };
+        Probe[] probes = {
+                        failurePatternProbe,
+                        retryingProbe,
+                        adjustmentProbe
+        };
+        testHelper(Arrays.asList(probes), Arrays.asList("-XX:-TieredCompilation",
                         "-XX:+UseJVMCICompiler",
                         "-Dgraal.CompilationFailureAction=Diagnose",
                         "-Dgraal.MaxCompilationProblemsPerAction=" + maxProblems,
-                        "-Dgraal.CrashAt=Object.*,String.*",
-                        "-version"));
+                        "-Dgraal.CrashAt=TestProgram.*",
+                        "-Xcomp",
+                        "-XX:CompileCommand=compileonly,*/TestProgram.print*",
+                        TestProgram.class.getName()));
     }
 
     /**
@@ -123,9 +157,12 @@ public class CompilationWrapperTest extends GraalCompilerTest {
      */
     @Test
     public void testTruffleCompilation1() throws IOException, InterruptedException {
+        assumeManagementLibraryIsLoadable();
         testHelper(Collections.emptyList(),
                         Arrays.asList(
+                                        SubprocessUtil.PACKAGE_OPENING_OPTIONS,
                                         "-Dgraal.CompilationFailureAction=ExitVM",
+                                        "-Dgraal.TrufflePerformanceWarningsAreFatal=true",
                                         "-Dgraal.CrashAt=root test1"),
                         "org.graalvm.compiler.truffle.test.SLTruffleGraalTestSuite", "test");
     }
@@ -140,9 +177,28 @@ public class CompilationWrapperTest extends GraalCompilerTest {
         };
         testHelper(Arrays.asList(probes),
                         Arrays.asList(
+                                        SubprocessUtil.PACKAGE_OPENING_OPTIONS,
                                         "-Dgraal.CompilationFailureAction=Silent",
                                         "-Dgraal.TruffleCompilationExceptionsAreFatal=true",
                                         "-Dgraal.CrashAt=root test1"),
+                        "org.graalvm.compiler.truffle.test.SLTruffleGraalTestSuite", "test");
+    }
+
+    /**
+     * Tests that TrufflePerformanceWarningsAreFatal generates diagnostic output.
+     */
+    @Test
+    public void testTruffleCompilation3() throws IOException, InterruptedException {
+        assumeManagementLibraryIsLoadable();
+        Probe[] probes = {
+                        new Probe("Exiting VM due to TrufflePerformanceWarningsAreFatal=true", 1),
+        };
+        testHelper(Arrays.asList(probes),
+                        Arrays.asList(
+                                        SubprocessUtil.PACKAGE_OPENING_OPTIONS,
+                                        "-Dgraal.CompilationFailureAction=Silent",
+                                        "-Dgraal.TrufflePerformanceWarningsAreFatal=true",
+                                        "-Dgraal.CrashAt=root test1:PermanentBailout"),
                         "org.graalvm.compiler.truffle.test.SLTruffleGraalTestSuite", "test");
     }
 
@@ -164,10 +220,9 @@ public class CompilationWrapperTest extends GraalCompilerTest {
             System.out.println(proc);
         }
 
-        List<Probe> probes = new ArrayList<>(initialProbes);
-        Probe diagnosticProbe = null;
-        if (!extraVmArgs.contains("-Dgraal.TruffleCompilationExceptionsAreFatal=true")) {
-            diagnosticProbe = new Probe("Graal diagnostic output saved in ", 1);
+        try {
+            List<Probe> probes = new ArrayList<>(initialProbes);
+            Probe diagnosticProbe = new Probe("Graal diagnostic output saved in ", 1);
             probes.add(diagnosticProbe);
             probes.add(new Probe("Forced crash after compiling", Integer.MAX_VALUE) {
                 @Override
@@ -175,22 +230,20 @@ public class CompilationWrapperTest extends GraalCompilerTest {
                     return actualOccurrences > 0 ? null : "expected at least 1 occurrence";
                 }
             });
-        }
 
-        for (String line : proc.output) {
-            for (Probe probe : probes) {
-                if (probe.matches(line)) {
-                    break;
+            for (String line : proc.output) {
+                for (Probe probe : probes) {
+                    if (probe.matches(line)) {
+                        break;
+                    }
                 }
             }
-        }
-        for (Probe probe : probes) {
-            String error = probe.test();
-            if (error != null) {
-                Assert.fail(String.format("Did not find expected occurences of '%s' in output of command: %s%n%s", probe.substring, error, proc));
+            for (Probe probe : probes) {
+                String error = probe.test();
+                if (error != null) {
+                    Assert.fail(String.format("Did not find expected occurrences of '%s' in output of command: %s%n%s", probe.substring, error, proc));
+                }
             }
-        }
-        if (diagnosticProbe != null) {
             String line = diagnosticProbe.lastMatchingLine;
             int substringStart = line.indexOf(diagnosticProbe.substring);
             int substringLength = diagnosticProbe.substring.length();
@@ -202,30 +255,61 @@ public class CompilationWrapperTest extends GraalCompilerTest {
             Assert.assertTrue(zip.toString(), zip.exists());
             Assert.assertTrue(zip + " not in " + dumpPathEntries, dumpPathEntries.contains(zip.getName()));
             try {
-                int bgv = 0;
-                int cfg = 0;
+                int bgvOrCfgFiles = 0;
                 ZipFile dd = new ZipFile(diagnosticOutputZip);
                 List<String> entries = new ArrayList<>();
                 for (Enumeration<? extends ZipEntry> e = dd.entries(); e.hasMoreElements();) {
                     ZipEntry ze = e.nextElement();
                     String name = ze.getName();
                     entries.add(name);
-                    if (name.endsWith(".bgv")) {
-                        bgv++;
-                    } else if (name.endsWith(".cfg")) {
-                        cfg++;
+                    if (name.endsWith(".bgv") || name.endsWith(".cfg")) {
+                        bgvOrCfgFiles++;
                     }
                 }
-                if (bgv == 0) {
-                    Assert.fail(String.format("Expected at least one .bgv file in %s: %s%n%s", diagnosticOutputZip, entries, proc));
-                }
-                if (cfg == 0) {
-                    Assert.fail(String.format("Expected at least one .cfg file in %s: %s", diagnosticOutputZip, entries));
+                if (bgvOrCfgFiles == 0) {
+                    Assert.fail(String.format("Expected at least one .bgv or .cfg file in %s: %s%n%s", diagnosticOutputZip, entries, proc));
                 }
             } finally {
                 zip.delete();
-                dumpPath.delete();
             }
+        } finally {
+            Path directory = dumpPath.toPath();
+            removeDirectory(directory);
         }
+    }
+}
+
+class TestProgram {
+    public static void main(String[] args) {
+        printHello1();
+        printWorld1();
+        printHello2();
+        printWorld2();
+        printHello3();
+        printWorld3();
+    }
+
+    private static void printHello1() {
+        System.out.println("Hello1");
+    }
+
+    private static void printWorld1() {
+        System.out.println("World1");
+    }
+
+    private static void printHello2() {
+        System.out.println("Hello2");
+    }
+
+    private static void printWorld2() {
+        System.out.println("World2");
+    }
+
+    private static void printHello3() {
+        System.out.println("Hello3");
+    }
+
+    private static void printWorld3() {
+        System.out.println("World3");
     }
 }

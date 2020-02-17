@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -22,16 +24,25 @@
  */
 package org.graalvm.compiler.core.test.ea;
 
-import org.junit.Test;
-
 import org.graalvm.compiler.api.directives.GraalDirectives;
 import org.graalvm.compiler.code.SourceStackTraceBailoutException;
 import org.graalvm.compiler.core.test.GraalCompilerTest;
+import org.graalvm.compiler.phases.OptimisticOptimizations;
+import org.junit.Test;
 
 public class PEAAssertionsTest extends GraalCompilerTest {
 
+    /**
+     * These tests assume all code paths are reachable so disable profile based dead code removal.
+     */
+    @Override
+    protected OptimisticOptimizations getOptimisticOptimizations() {
+        return OptimisticOptimizations.ALL.remove(OptimisticOptimizations.Optimization.RemoveNeverExecutedCode);
+    }
+
     public static Object field;
 
+    @SuppressWarnings({"deprecation", "unused"})
     public static void snippet1(int i) {
         Integer object = new Integer(i);
         GraalDirectives.ensureVirtualized(object);
@@ -42,6 +53,7 @@ public class PEAAssertionsTest extends GraalCompilerTest {
         test("snippet1", 1);
     }
 
+    @SuppressWarnings({"deprecation", "unused"})
     public static void snippet2(int i) {
         Integer object = new Integer(i);
         GraalDirectives.ensureVirtualized(object);
@@ -53,6 +65,7 @@ public class PEAAssertionsTest extends GraalCompilerTest {
         test("snippet2", 1);
     }
 
+    @SuppressWarnings({"deprecation", "unused"})
     public static void snippet3(int i) {
         Integer object = new Integer(i);
         field = object;
@@ -64,6 +77,7 @@ public class PEAAssertionsTest extends GraalCompilerTest {
         test("snippet3", 1);
     }
 
+    @SuppressWarnings({"deprecation", "unused"})
     public static void snippetHere1(int i) {
         Integer object = new Integer(i);
         GraalDirectives.ensureVirtualizedHere(object);
@@ -74,6 +88,7 @@ public class PEAAssertionsTest extends GraalCompilerTest {
         test("snippetHere1", 1);
     }
 
+    @SuppressWarnings({"deprecation", "unused"})
     public static void snippetHere2(int i) {
         Integer object = new Integer(i);
         GraalDirectives.ensureVirtualizedHere(object);
@@ -85,6 +100,7 @@ public class PEAAssertionsTest extends GraalCompilerTest {
         test("snippetHere2", 1);
     }
 
+    @SuppressWarnings({"deprecation", "unused"})
     public static void snippetHere3(int i) {
         Integer object = new Integer(i);
         field = object;
@@ -117,6 +133,7 @@ public class PEAAssertionsTest extends GraalCompilerTest {
         test("snippetBoxing2", 1);
     }
 
+    @SuppressWarnings({"deprecation", "unused"})
     public static void snippetControlFlow1(boolean b, int i) {
         Integer object = new Integer(i);
         if (b) {
@@ -131,6 +148,7 @@ public class PEAAssertionsTest extends GraalCompilerTest {
         test("snippetControlFlow1", true, 1);
     }
 
+    @SuppressWarnings({"deprecation", "unused"})
     public static void snippetControlFlow2(boolean b, int i) {
         Integer object = new Integer(i);
         if (b) {
@@ -147,6 +165,7 @@ public class PEAAssertionsTest extends GraalCompilerTest {
         test("snippetControlFlow2", true, 1);
     }
 
+    @SuppressWarnings({"deprecation", "unused"})
     public static void snippetControlFlow3(boolean b, int i) {
         Integer object = new Integer(i);
         GraalDirectives.ensureVirtualized(object);
@@ -164,6 +183,7 @@ public class PEAAssertionsTest extends GraalCompilerTest {
         test("snippetControlFlow3", true, 1);
     }
 
+    @SuppressWarnings({"deprecation", "unused"})
     public static void snippetControlFlow4(boolean b, int i) {
         Integer object = new Integer(i);
         if (b) {
@@ -179,6 +199,7 @@ public class PEAAssertionsTest extends GraalCompilerTest {
         test("snippetControlFlow4", true, 1);
     }
 
+    @SuppressWarnings({"deprecation", "unused"})
     public static void snippetControlFlow5(boolean b, int i) {
         Integer object = new Integer(i);
         if (b) {
@@ -199,6 +220,7 @@ public class PEAAssertionsTest extends GraalCompilerTest {
         Object b;
     }
 
+    @SuppressWarnings({"deprecation", "unused"})
     public static void snippetIndirect1(boolean b, int i) {
         Integer object = new Integer(i);
         TestClass t = new TestClass();
@@ -217,6 +239,7 @@ public class PEAAssertionsTest extends GraalCompilerTest {
         test("snippetIndirect1", true, 1);
     }
 
+    @SuppressWarnings({"deprecation", "unused"})
     public static void snippetIndirect2(boolean b, int i) {
         Integer object = new Integer(i);
         TestClass t = new TestClass();

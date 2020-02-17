@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * The Universal Permissive License (UPL), Version 1.0
@@ -42,8 +42,10 @@ package com.oracle.truffle.sl.builtins;
 
 import com.oracle.truffle.api.dsl.GenerateNodeFactory;
 import com.oracle.truffle.api.dsl.NodeChild;
-import com.oracle.truffle.api.dsl.NodeField;
-import com.oracle.truffle.sl.SLLanguage;
+import com.oracle.truffle.api.dsl.UnsupportedSpecializationException;
+import com.oracle.truffle.api.frame.VirtualFrame;
+import com.oracle.truffle.api.nodes.UnexpectedResultException;
+import com.oracle.truffle.sl.SLException;
 import com.oracle.truffle.sl.nodes.SLExpressionNode;
 import com.oracle.truffle.sl.runtime.SLContext;
 import com.oracle.truffle.sl.runtime.SLFunctionRegistry;
@@ -51,10 +53,6 @@ import com.oracle.truffle.sl.runtime.SLFunctionRegistry;
 /**
  * Base class for all builtin functions. It contains the Truffle DSL annotation {@link NodeChild}
  * that defines the function arguments.<br>
- * Builtin functions need access to the {@link SLContext}. Instead of defining a Java field manually
- * and setting it in a constructor, we use the Truffle DSL annotation {@link NodeField} that
- * generates the field and constructor automatically.
- * <p>
  * The builtin functions are registered in {@link SLContext#installBuiltins}. Every builtin node
  * subclass is instantiated there, wrapped into a function, and added to the
  * {@link SLFunctionRegistry}. This ensures that builtin functions can be called like user-defined
@@ -64,11 +62,29 @@ import com.oracle.truffle.sl.runtime.SLFunctionRegistry;
 @GenerateNodeFactory
 public abstract class SLBuiltinNode extends SLExpressionNode {
 
-    /**
-     * Accessor for the {@link SLContext}. The implementation of this method is generated
-     * automatically based on the {@link NodeField} annotation on the class.
-     */
-    public final SLContext getContext() {
-        return getRootNode().getLanguage(SLLanguage.class).getContextReference().get();
+    @Override
+    public final Object executeGeneric(VirtualFrame frame) {
+        try {
+            return execute(frame);
+        } catch (UnsupportedSpecializationException e) {
+            throw SLException.typeError(e.getNode(), e.getSuppliedValues());
+        }
     }
+
+    @Override
+    public final boolean executeBoolean(VirtualFrame frame) throws UnexpectedResultException {
+        return super.executeBoolean(frame);
+    }
+
+    @Override
+    public final long executeLong(VirtualFrame frame) throws UnexpectedResultException {
+        return super.executeLong(frame);
+    }
+
+    @Override
+    public final void executeVoid(VirtualFrame frame) {
+        super.executeVoid(frame);
+    }
+
+    protected abstract Object execute(VirtualFrame frame);
 }

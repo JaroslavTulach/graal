@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * The Universal Permissive License (UPL), Version 1.0
@@ -42,7 +42,10 @@ package com.oracle.truffle.sl.nodes;
 
 import com.oracle.truffle.api.dsl.TypeSystemReference;
 import com.oracle.truffle.api.frame.VirtualFrame;
-import com.oracle.truffle.api.instrumentation.Instrumentable;
+import com.oracle.truffle.api.instrumentation.GenerateWrapper;
+import com.oracle.truffle.api.instrumentation.ProbeNode;
+import com.oracle.truffle.api.instrumentation.StandardTags;
+import com.oracle.truffle.api.instrumentation.Tag;
 import com.oracle.truffle.api.nodes.NodeInfo;
 import com.oracle.truffle.api.nodes.UnexpectedResultException;
 
@@ -53,8 +56,10 @@ import com.oracle.truffle.api.nodes.UnexpectedResultException;
  */
 @TypeSystemReference(SLTypes.class)
 @NodeInfo(description = "The abstract base node for all expressions")
-@Instrumentable(factory = SLExpressionNodeWrapper.class)
+@GenerateWrapper
 public abstract class SLExpressionNode extends SLStatementNode {
+
+    private boolean hasExpressionTag;
 
     /**
      * The execute method when no specialization is possible. This is the most general case,
@@ -69,6 +74,26 @@ public abstract class SLExpressionNode extends SLStatementNode {
     @Override
     public void executeVoid(VirtualFrame frame) {
         executeGeneric(frame);
+    }
+
+    @Override
+    public WrapperNode createWrapper(ProbeNode probe) {
+        return new SLExpressionNodeWrapper(this, probe);
+    }
+
+    @Override
+    public boolean hasTag(Class<? extends Tag> tag) {
+        if (tag == StandardTags.ExpressionTag.class) {
+            return hasExpressionTag;
+        }
+        return super.hasTag(tag);
+    }
+
+    /**
+     * Marks this node as being a {@link StandardTags.ExpressionTag} for instrumentation purposes.
+     */
+    public final void addExpressionTag() {
+        hasExpressionTag = true;
     }
 
     /*

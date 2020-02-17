@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2017, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * The Universal Permissive License (UPL), Version 1.0
@@ -40,11 +40,9 @@
  */
 package com.oracle.truffle.sl.test;
 
-import java.io.IOException;
 import org.graalvm.polyglot.Context;
 import org.graalvm.polyglot.Source;
 import org.graalvm.polyglot.Value;
-import org.graalvm.polyglot.proxy.ProxyPrimitive;
 import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
@@ -64,19 +62,17 @@ public class SLInteropControlFlowTest {
     }
 
     @Test
-    public void testWhile() throws IOException {
-        final Source src = Source.newBuilder("sl", "function testWhile(a) {while(a) {break;}} function main() {return testWhile;}", "testWhile.sl").build();
+    public void testWhile() {
+        final Source src = Source.newBuilder("sl", "function testWhile(a) {while(a) {break;}} function main() {return testWhile;}", "testWhile.sl").buildLiteral();
         final Value fnc = context.eval(src);
         Assert.assertTrue(fnc.canExecute());
-        ProxyPrimitive boolProxy = () -> false;
-        fnc.execute(boolProxy);
+        fnc.execute(false);
     }
 
     @Test
-    public void testIf() throws IOException {
-        final Source src = Source.newBuilder("sl", "function testIf(a) {if(a) {return 1;} else {return 0;}} function main() {return testIf;}", "testIf.sl").build();
+    public void testIf() {
+        final Source src = Source.newBuilder("sl", "function testIf(a) {if(a) {return 1;} else {return 0;}} function main() {return testIf;}", "testIf.sl").buildLiteral();
         final Value fnc = context.eval(src);
-        ProxyPrimitive boolProxy = () -> false;
-        fnc.execute(boolProxy);
+        fnc.execute(false);
     }
 }

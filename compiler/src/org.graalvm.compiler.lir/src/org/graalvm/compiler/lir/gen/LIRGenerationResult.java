@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2014, 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2014, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -22,24 +24,26 @@
  */
 package org.graalvm.compiler.lir.gen;
 
-import jdk.vm.ci.code.RegisterConfig;
+import org.graalvm.collections.EconomicMap;
+import org.graalvm.collections.Equivalence;
 import org.graalvm.compiler.core.common.CompilationIdentifier;
 import org.graalvm.compiler.core.common.CompilationIdentifier.Verbosity;
+import org.graalvm.compiler.core.common.alloc.RegisterAllocationConfig;
 import org.graalvm.compiler.debug.DebugContext;
 import org.graalvm.compiler.lir.LIR;
 import org.graalvm.compiler.lir.LIRInstruction;
 import org.graalvm.compiler.lir.framemap.FrameMap;
 import org.graalvm.compiler.lir.framemap.FrameMapBuilder;
-import org.graalvm.util.EconomicMap;
-import org.graalvm.util.Equivalence;
 
 import jdk.vm.ci.code.CallingConvention;
+import jdk.vm.ci.code.RegisterConfig;
 
 public class LIRGenerationResult {
 
     private final LIR lir;
     private final FrameMapBuilder frameMapBuilder;
     private FrameMap frameMap;
+    private final RegisterAllocationConfig registerAllocationConfig;
     private final CallingConvention callingConvention;
     /**
      * Records whether the code being generated makes at least one foreign call.
@@ -55,11 +59,16 @@ public class LIRGenerationResult {
      */
     private EconomicMap<LIRInstruction, String> comments;
 
-    public LIRGenerationResult(CompilationIdentifier compilationId, LIR lir, FrameMapBuilder frameMapBuilder, CallingConvention callingConvention) {
+    public LIRGenerationResult(CompilationIdentifier compilationId, LIR lir, FrameMapBuilder frameMapBuilder, RegisterAllocationConfig registerAllocationConfig, CallingConvention callingConvention) {
         this.lir = lir;
         this.frameMapBuilder = frameMapBuilder;
+        this.registerAllocationConfig = registerAllocationConfig;
         this.callingConvention = callingConvention;
         this.compilationId = compilationId;
+    }
+
+    public RegisterAllocationConfig getRegisterAllocationConfig() {
+        return registerAllocationConfig;
     }
 
     /**

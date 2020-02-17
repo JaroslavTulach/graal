@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2013, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2013, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -104,7 +106,7 @@ public class DynamicNewArrayNode extends AbstractNewArrayNode implements Canonic
                 return this;
             }
             ResolvedJavaType type = tool.getConstantReflection().asJavaType(elementType.asConstant());
-            if (type != null && !throwsIllegalArgumentException(type)) {
+            if (type != null && type.getArrayClass() != null && !throwsIllegalArgumentException(type)) {
                 return createNewArrayNode(type);
             }
         }
@@ -122,6 +124,13 @@ public class DynamicNewArrayNode extends AbstractNewArrayNode implements Canonic
 
     public static boolean throwsIllegalArgumentException(ResolvedJavaType elementType) {
         return elementType.getJavaKind() == JavaKind.Void;
+    }
+
+    @NodeIntrinsic
+    private static native Object newArray(Class<?> componentType, int length, @ConstantNodeParameter boolean fillContents);
+
+    public static Object newArray(Class<?> componentType, int length) {
+        return newArray(componentType, length, true);
     }
 
     @NodeIntrinsic

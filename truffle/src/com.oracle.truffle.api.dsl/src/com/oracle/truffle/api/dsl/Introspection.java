@@ -1,35 +1,52 @@
 /*
- * Copyright (c) 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2016, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
- * This code is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.  Oracle designates this
- * particular file as subject to the "Classpath" exception as provided
- * by Oracle in the LICENSE file that accompanied this code.
+ * The Universal Permissive License (UPL), Version 1.0
  *
- * This code is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
- * version 2 for more details (a copy is included in the LICENSE file that
- * accompanied this code).
+ * Subject to the condition set forth below, permission is hereby granted to any
+ * person obtaining a copy of this software, associated documentation and/or
+ * data (collectively the "Software"), free of charge and under any and all
+ * copyright rights in the Software, and any and all patent rights owned or
+ * freely licensable by each licensor hereunder covering either (i) the
+ * unmodified Software as contributed to or provided by such licensor, or (ii)
+ * the Larger Works (as defined below), to deal in both
  *
- * You should have received a copy of the GNU General Public License version
- * 2 along with this work; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
+ * (a) the Software, and
  *
- * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
- * or visit www.oracle.com if you need additional information or have any
- * questions.
+ * (b) any piece of software and/or hardware listed in the lrgrwrks.txt file if
+ * one is included with the Software each a "Larger Work" to which the Software
+ * is contributed by such licensors),
+ *
+ * without restriction, including without limitation the rights to copy, create
+ * derivative works of, display, perform, and distribute the Software and make,
+ * use, sell, offer for sale, import, export, have made, and have sold the
+ * Software and the Larger Work(s), and to sublicense the foregoing rights on
+ * either these or other terms.
+ *
+ * This license is subject to the following condition:
+ *
+ * The above copyright notice and either this complete permission notice or at a
+ * minimum a reference to the UPL must be included in all copies or substantial
+ * portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
  */
 package com.oracle.truffle.api.dsl;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
+import com.oracle.truffle.api.dsl.Introspection.SpecializationInfo;
 import com.oracle.truffle.api.nodes.Node;
-import java.util.Arrays;
 
 /**
  * Contains introspection utilities for Truffle DSL. The contained utilities are only usable if the
@@ -40,7 +57,7 @@ import java.util.Arrays;
  * <p>
  * Example for using introspection in unit testing:
  *
- * {@codesnippet com.oracle.truffle.api.dsl.test.IntrospectionTest}
+ * {@codesnippet com.oracle.truffle.api.dsl.IntrospectionSnippets.NegateNode}
  *
  * @since 0.22
  * @see Introspectable
@@ -241,8 +258,8 @@ public final class Introspection {
 
     private void checkVersion() {
         int version = -1;
-        Object objectVersion = data[0];
-        if (data.length > 0 && objectVersion instanceof Integer) {
+        if (data.length > 0 && data[0] instanceof Integer) {
+            Object objectVersion = data[0];
             version = (int) objectVersion;
         }
         if (version != 0) {
@@ -282,4 +299,48 @@ public final class Introspection {
         return new SpecializationInfo(id, state, cachedData);
     }
 
+}
+
+@SuppressWarnings({"null", "unused"})
+@SuppressFBWarnings("")
+class IntrospectionSnippets {
+
+    // BEGIN: com.oracle.truffle.api.dsl.IntrospectionSnippets.NegateNode
+    @Introspectable
+    abstract static class NegateNode extends Node {
+
+        abstract Object execute(Object o);
+
+        @Specialization(guards = "cachedvalue == value", limit = "1")
+        protected static int doInt(int value,
+                        @Cached("value") int cachedvalue) {
+            return -cachedvalue;
+        }
+
+        @Specialization(replaces = "doInt")
+        protected static int doGeneric(int value) {
+            return -value;
+        }
+    }
+
+    public void testUsingIntrospection() {
+        NegateNode node = null; // NegateNodeGen.create();
+        SpecializationInfo info;
+
+        node.execute(1);
+        info = Introspection.getSpecialization(node, "doInt");
+        assert info.getInstances() == 1;
+
+        node.execute(1);
+        info = Introspection.getSpecialization(node, "doInt");
+        assert info.getInstances() == 1;
+
+        node.execute(2);
+        info = Introspection.getSpecialization(node, "doInt");
+        assert info.getInstances() == 0;
+
+        info = Introspection.getSpecialization(node, "doGeneric");
+        assert info.getInstances() == 1;
+    }
+    // END: com.oracle.truffle.api.dsl.IntrospectionSnippets.NegateNode
 }

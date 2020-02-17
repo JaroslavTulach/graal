@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2016, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -24,40 +26,14 @@ package org.graalvm.compiler.replacements.test;
 
 import org.junit.Test;
 
-import org.graalvm.compiler.nodes.graphbuilderconf.GraphBuilderContext;
-import org.graalvm.compiler.nodes.graphbuilderconf.InvocationPlugin;
-import org.graalvm.compiler.nodes.graphbuilderconf.InvocationPlugins;
-
-import jdk.vm.ci.meta.ResolvedJavaMethod;
-
 public class NullBytecodeExceptionTest extends BytecodeExceptionTest {
 
-    private static class Exceptions {
-
-        private static Object obj = null;
-
-        public static void throwNull() {
-            obj.toString();
-        }
-    }
-
-    @Override
-    protected void registerInvocationPlugins(InvocationPlugins invocationPlugins) {
-        invocationPlugins.register(new InvocationPlugin() {
-            @Override
-            public boolean apply(GraphBuilderContext b, ResolvedJavaMethod targetMethod, Receiver receiver) {
-                return throwBytecodeException(b, NullPointerException.class);
-            }
-        }, Exceptions.class, "throwNull");
-        super.registerInvocationPlugins(invocationPlugins);
-    }
-
-    public static void nullSnippet() {
-        Exceptions.throwNull();
+    public static void nullSnippet(Object obj) {
+        obj.toString();
     }
 
     @Test
     public void testNullPointerException() {
-        test("nullSnippet");
+        test("nullSnippet", (Object) null);
     }
 }

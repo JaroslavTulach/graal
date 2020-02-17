@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2011, 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -32,7 +34,7 @@ import org.graalvm.compiler.nodes.memory.address.AddressNode;
 import org.graalvm.word.LocationIdentity;
 
 @NodeInfo
-public abstract class FloatingAccessNode extends FloatingGuardedNode implements Access, MemoryAccess {
+public abstract class FloatingAccessNode extends FloatingGuardedNode implements AddressableMemoryAccess, GuardedMemoryAccess, OnHeapMemoryAccess {
     public static final NodeClass<FloatingAccessNode> TYPE = NodeClass.create(FloatingAccessNode.class);
 
     @Input(InputType.Association) AddressNode address;
@@ -56,6 +58,12 @@ public abstract class FloatingAccessNode extends FloatingGuardedNode implements 
     @Override
     public AddressNode getAddress() {
         return address;
+    }
+
+    @Override
+    public void setAddress(AddressNode address) {
+        updateUsages(this.address, address);
+        this.address = address;
     }
 
     @Override

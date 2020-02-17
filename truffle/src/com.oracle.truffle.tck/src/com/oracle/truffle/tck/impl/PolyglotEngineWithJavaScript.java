@@ -1,26 +1,42 @@
 /*
- * Copyright (c) 2015, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
- * This code is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.  Oracle designates this
- * particular file as subject to the "Classpath" exception as provided
- * by Oracle in the LICENSE file that accompanied this code.
+ * The Universal Permissive License (UPL), Version 1.0
  *
- * This code is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
- * version 2 for more details (a copy is included in the LICENSE file that
- * accompanied this code).
+ * Subject to the condition set forth below, permission is hereby granted to any
+ * person obtaining a copy of this software, associated documentation and/or
+ * data (collectively the "Software"), free of charge and under any and all
+ * copyright rights in the Software, and any and all patent rights owned or
+ * freely licensable by each licensor hereunder covering either (i) the
+ * unmodified Software as contributed to or provided by such licensor, or (ii)
+ * the Larger Works (as defined below), to deal in both
  *
- * You should have received a copy of the GNU General Public License version
- * 2 along with this work; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
+ * (a) the Software, and
  *
- * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
- * or visit www.oracle.com if you need additional information or have any
- * questions.
+ * (b) any piece of software and/or hardware listed in the lrgrwrks.txt file if
+ * one is included with the Software each a "Larger Work" to which the Software
+ * is contributed by such licensors),
+ *
+ * without restriction, including without limitation the rights to copy, create
+ * derivative works of, display, perform, and distribute the Software and make,
+ * use, sell, offer for sale, import, export, have made, and have sold the
+ * Software and the Larger Work(s), and to sublicense the foregoing rights on
+ * either these or other terms.
+ *
+ * This license is subject to the following condition:
+ *
+ * The above copyright notice and either this complete permission notice or at a
+ * minimum a reference to the UPL must be included in all copies or substantial
+ * portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
  */
 package com.oracle.truffle.tck.impl;
 
@@ -31,33 +47,34 @@ import static org.junit.Assert.assertTrue;
 
 import java.util.List;
 
+import org.graalvm.polyglot.Context;
+import org.graalvm.polyglot.HostAccess;
+import org.graalvm.polyglot.Source;
+import org.graalvm.polyglot.Value;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
-import com.oracle.truffle.api.source.Source;
-import com.oracle.truffle.api.vm.PolyglotEngine;
-import com.oracle.truffle.api.vm.PolyglotEngine.Value;
 import com.oracle.truffle.tck.impl.TruffleLanguageRunner.JavaScriptRunner;
 
 /**
- * Tests with code snippets referencing JavaScript. They are used from {@link PolyglotEngine} & co.
- * classes, but executed only when implementation of JavaScript is around.
+ * Tests with code snippets referencing JavaScript (executed only when an implementation of
+ * JavaScript is around).
  */
 @RunWith(JavaScriptRunner.class)
 public class PolyglotEngineWithJavaScript {
 
-    private PolyglotEngine engine;
+    private Context context;
 
     @Before
     public void initEngine() {
-        engine = PolyglotEngine.newBuilder().build();
+        context = Context.newBuilder().allowHostAccess(HostAccess.ALL).build();
     }
 
     @After
     public void disposeEngine() {
-        engine.dispose();
+        context.close();
     }
 
 // @formatter:off
@@ -74,13 +91,14 @@ public class PolyglotEngineWithJavaScript {
     }
 
     public void callJavaScriptFunctionFromJava() {
-        Source src = Source.newBuilder(
+        Source src = Source.newBuilder("js",
             "(function (a, b) {\n" +
-            "  return a * b;" +
-            "})").mimeType("text/javascript").name("mul.js").build();
+            "  return a * b;\n" +
+            "})\n",
+            "mul.js").buildLiteral();
 
         // Evaluate JavaScript function definition
-        Value jsFunction = engine.eval(src);
+        Value jsFunction = context.eval(src);
 
         // Create Java access to JavaScript function
         Multiplier mul = jsFunction.as(Multiplier.class);
@@ -103,26 +121,26 @@ public class PolyglotEngineWithJavaScript {
     }
 
     public void callJavaScriptFunctionsWithSharedStateFromJava() {
-        Source src = Source.newBuilder("\n"
-            + "(function() {\n"
-            + "  var seconds = 0;\n"
-            + "  function addTime(h, m, s) {\n"
-            + "    seconds += 3600 * h;\n"
-            + "    seconds += 60 * m;\n"
-            + "    seconds += s;\n"
-            + "  }\n"
-            + "  function time() {\n"
-            + "    return seconds;\n"
-            + "  }\n"
-            + "  return {\n"
-            + "    'addTime': addTime,\n"
-            + "    'timeInSeconds': time\n"
-            + "  }\n"
-            + "})\n"
-        ).name("CountSeconds.js").mimeType("text/javascript").build();
+        Source src = Source.newBuilder("js", "" +
+             "(function() {\n" +
+             "  var seconds = 0;\n" +
+             "  function addTime(h, m, s) {\n" +
+             "    seconds += 3600 * h;\n" +
+             "    seconds += 60 * m;\n" +
+             "    seconds += s;\n" +
+             "  }\n" +
+             "  function time() {\n" +
+             "    return seconds;\n" +
+             "  }\n" +
+             "  return {\n" +
+             "    'addTime': addTime,\n" +
+             "    'timeInSeconds': time\n" +
+             "  }\n" +
+             "})\n",
+            "CountSeconds.js").buildLiteral();
 
         // Evaluate JavaScript function definition
-        Value jsFunction = engine.eval(src);
+        Value jsFunction = context.eval(src);
 
         // Execute the JavaScript function
         Value jsObject = jsFunction.execute();
@@ -163,16 +181,16 @@ public class PolyglotEngineWithJavaScript {
     }
 
     public void accessFieldsOfJavaObject() {
-        Source src = Source.newBuilder("\n"
-            + "(function(t) {\n"
-            + "  return 3600 * t.hours + 60 * t.minutes + t.seconds;\n"
-            + "})\n"
-        ).name("MomentToSeconds.js").mimeType("text/javascript").build();
+        Source src = Source.newBuilder("js", "" +
+            "(function(t) {\n" +
+            "  return 3600 * t.hours + 60 * t.minutes + t.seconds;\n" +
+            "})\n",
+            "MomentToSeconds.js").buildLiteral();
 
         final Moment javaMoment = new Moment(6, 30, 10);
 
         // Evaluate the JavaScript function definition
-        Value jsFunction = engine.eval(src);
+        Value jsFunction = context.eval(src);
 
         // Execute the JavaScript function, passing a Java object argument
         Value jsSeconds = jsFunction.execute(javaMoment);
@@ -192,16 +210,16 @@ public class PolyglotEngineWithJavaScript {
     }
 
     public void accessFieldsOfJavaObjectWithConverter() {
-        Source src = Source.newBuilder("\n"
-            + "(function(t) {\n"
-            + "  return 3600 * t.hours + 60 * t.minutes + t.seconds;\n"
-            + "})\n"
-        ).name("MomentToSeconds.js").mimeType("text/javascript").build();
+        Source src = Source.newBuilder("js", "" +
+            "(function(t) {\n" +
+            "  return 3600 * t.hours + 60 * t.minutes + t.seconds;\n" +
+            "})\n",
+            "MomentToSeconds.js").buildLiteral();
 
         final Moment javaMoment = new Moment(6, 30, 10);
 
         // Evaluate the JavaScript function definition
-        final Value jsFunction = engine.eval(src);
+        final Value jsFunction = context.eval(src);
 
         // Convert the function to desired Java type
         MomentConverter converter = jsFunction.as(MomentConverter.class);
@@ -220,21 +238,22 @@ public class PolyglotEngineWithJavaScript {
 
     // BEGIN: com.oracle.truffle.tck.impl.PolyglotEngineWithJavaScript#createJavaScriptFactoryForJavaClass
 
+    @FunctionalInterface
     interface MomentFactory {
         Moment create(int h, int m, int s);
     }
 
     public void createJavaScriptFactoryForJavaClass() {
-        Source src = Source.newBuilder("\n"
-            + "(function(Moment) {\n"
-            + "  return function(h, m, s) {\n"
-            + "     return new Moment(h, m, s);\n"
-            + "  };\n"
-            + "})\n"
-        ).name("ConstructMoment.js").mimeType("text/javascript").build();
+        Source src = Source.newBuilder("js", "" +
+            "(function(Moment) {\n" +
+            "  return function(h, m, s) {\n" +
+            "     return new Moment(h, m, s);\n" +
+            "  };\n" +
+            "})\n",
+            "ConstructMoment.js").buildLiteral();
 
         // Evaluate the JavaScript function definition
-        final Value jsFunction = engine.eval(src);
+        final Value jsFunction = context.eval(src);
 
         // Create a JavaScript factory for the provided Java class
         final Value jsFactory = jsFunction.execute(Moment.class);
@@ -263,27 +282,27 @@ public class PolyglotEngineWithJavaScript {
     }
 
     public void callJavaScriptClassFactoryFromJava() {
-        Source src = Source.newBuilder("\n"
-            + "(function() {\n"
-            + "  class JSIncrementor {\n"
-            + "     constructor(init) {\n"
-            + "       this.value = init;\n"
-            + "     }\n"
-            + "     inc() {\n"
-            + "       return ++this.value;\n"
-            + "     }\n"
-            + "     dec() {\n"
-            + "       return --this.value;\n"
-            + "     }\n"
-            + "  }\n"
-            + "  return function(init) {\n"
-            + "    return new JSIncrementor(init);\n"
-            + "  }\n"
-            + "})\n"
-        ).name("Incrementor.js").mimeType("text/javascript").build();
+        Source src = Source.newBuilder("js", "" +
+            "(function() {\n" +
+            "  class JSIncrementor {\n" +
+            "     constructor(init) {\n" +
+            "       this.value = init;\n" +
+            "     }\n" +
+            "     inc() {\n" +
+            "       return ++this.value;\n" +
+            "     }\n" +
+            "     dec() {\n" +
+            "       return --this.value;\n" +
+            "     }\n" +
+            "  }\n" +
+            "  return function(init) {\n" +
+            "    return new JSIncrementor(init);\n" +
+            "  }\n" +
+            "})\n",
+            "Incrementor.js").buildLiteral();
 
         // Evaluate JavaScript function definition
-        Value jsFunction = engine.eval(src);
+        Value jsFunction = context.eval(src);
 
         // Execute the JavaScript function
         Value jsFactory = jsFunction.execute();
@@ -322,20 +341,20 @@ public class PolyglotEngineWithJavaScript {
     }
 
     public void accessJavaScriptArrayWithTypedElementsFromJava() {
-        Source src = Source.newBuilder("\n"
-            + "(function() {\n"
-            + "  class Point {\n"
-            + "     constructor(x, y) {\n"
-            + "       this.x = x;\n"
-            + "       this.y = y;\n"
-            + "     }\n"
-            + "  }\n"
-            + "  return [ new Point(30, 15), new Point(5, 7) ];\n"
-            + "})\n"
-        ).name("ArrayOfPoints.js").mimeType("text/javascript").build();
+        Source src = Source.newBuilder("js", "" +
+            "(function() {\n" +
+            "  class Point {\n" +
+            "     constructor(x, y) {\n" +
+            "       this.x = x;\n" +
+            "       this.y = y;\n" +
+            "     }\n" +
+            "  }\n" +
+            "  return [ new Point(30, 15), new Point(5, 7) ];\n" +
+            "})\n",
+            "ArrayOfPoints.js").buildLiteral();
 
         // Evaluate the JavaScript function definition
-        Value jsFunction = engine.eval(src);
+        Value jsFunction = context.eval(src);
 
         // Create Java-typed access to the JavaScript function
         PointProvider pointProvider = jsFunction.as(PointProvider.class);
@@ -384,7 +403,7 @@ public class PolyglotEngineWithJavaScript {
     }
 
     public void accessJavaScriptJSONObjectFromJava() {
-        Source src = Source.newBuilder(
+        Source src = Source.newBuilder("js",
             "(function () { \n" +
             "  return function() {\n" +
             "    return [\n" +
@@ -405,11 +424,11 @@ public class PolyglotEngineWithJavaScript {
             "      }\n" +
             "    ]\n" +
             "  };\n" +
-            "})\n"
-        ).name("github-api-value.js").mimeType("text/javascript").build();
+            "})\n",
+            "github-api-value.js").buildLiteral();
 
         // Evaluate the JavaScript function definition
-        Value jsFunction = engine.eval(src);
+        Value jsFunction = context.eval(src);
 
         // Execute the JavaScript function to create the "mock parser"
         Value jsMockParser = jsFunction.execute();
@@ -434,12 +453,6 @@ public class PolyglotEngineWithJavaScript {
     }
 
     // END: com.oracle.truffle.tck.impl.PolyglotEngineWithJavaScript#accessJavaScriptJSONObjectFromJava
-
-
-    @Test
-    public void testHelloWorld() {
-        com.oracle.truffle.tutorial.HelloWorld.runTests();
-    }
 
     // Checkstyle: resume
 }

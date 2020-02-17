@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2015, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -28,16 +30,14 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import jdk.vm.ci.meta.ResolvedJavaMethod;
-
-import org.junit.Test;
-
 import org.graalvm.compiler.nodes.EncodedGraph;
 import org.graalvm.compiler.nodes.GraphEncoder;
 import org.graalvm.compiler.nodes.StructuredGraph;
 import org.graalvm.compiler.nodes.StructuredGraph.AllowAssumptions;
-import org.graalvm.compiler.phases.common.CanonicalizerPhase;
-import org.graalvm.compiler.phases.tiers.PhaseContext;
+import org.graalvm.compiler.nodes.spi.CoreProviders;
+import org.junit.Test;
+
+import jdk.vm.ci.meta.ResolvedJavaMethod;
 
 public class GraphEncoderTest extends GraalCompilerTest {
 
@@ -59,8 +59,8 @@ public class GraphEncoderTest extends GraalCompilerTest {
             if (javaMethod.hasBytecodes()) {
                 StructuredGraph originalGraph = parseEager(javaMethod, AllowAssumptions.YES);
                 if (canonicalize) {
-                    PhaseContext context = new PhaseContext(getProviders());
-                    new CanonicalizerPhase().apply(originalGraph, context);
+                    CoreProviders context = getProviders();
+                    createCanonicalizerPhase().apply(originalGraph, context);
                 }
                 originalGraphs.add(originalGraph);
             }
@@ -77,9 +77,8 @@ public class GraphEncoderTest extends GraalCompilerTest {
         }
 
         for (StructuredGraph originalGraph : originalGraphs) {
-            EncodedGraph encodedGraph = new EncodedGraph(encoder.getEncoding(), startOffsets.get(originalGraph), encoder.getObjects(), encoder.getNodeClasses(), originalGraph.getAssumptions(),
-                            originalGraph.getMethods());
-            GraphEncoder.verifyEncoding(originalGraph, encodedGraph, getTarget().arch);
+            EncodedGraph encodedGraph = new EncodedGraph(encoder.getEncoding(), startOffsets.get(originalGraph), encoder.getObjects(), encoder.getNodeClasses(), originalGraph);
+            encoder.verifyEncoding(originalGraph, encodedGraph);
         }
     }
 }

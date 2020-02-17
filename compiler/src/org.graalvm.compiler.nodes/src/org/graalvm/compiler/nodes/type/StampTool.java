@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2012, 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -30,6 +32,7 @@ import org.graalvm.compiler.core.common.type.IntegerStamp;
 import org.graalvm.compiler.core.common.type.Stamp;
 import org.graalvm.compiler.core.common.type.StampFactory;
 import org.graalvm.compiler.core.common.type.TypeReference;
+import org.graalvm.compiler.nodes.NodeView;
 import org.graalvm.compiler.nodes.ValueNode;
 
 import jdk.vm.ci.code.CodeUtil;
@@ -61,9 +64,9 @@ public class StampTool {
             ValueNode nextValue = iterator.next();
             if (nextValue != selfValue) {
                 if (stamp == null) {
-                    stamp = nextValue.stamp();
+                    stamp = nextValue.stamp(NodeView.DEFAULT);
                 } else {
-                    stamp = stamp.meet(nextValue.stamp());
+                    stamp = stamp.meet(nextValue.stamp(NodeView.DEFAULT));
                 }
             }
         }
@@ -118,9 +121,10 @@ public class StampTool {
     }
 
     public static Stamp stampForTrailingZeros(IntegerStamp valueStamp) {
-        long mask = CodeUtil.mask(valueStamp.getBits());
-        int min = Long.numberOfTrailingZeros(valueStamp.upMask() & mask);
-        int max = Long.numberOfTrailingZeros(valueStamp.downMask() & mask);
+        int bits = valueStamp.getBits();
+        long mask = CodeUtil.mask(bits);
+        int min = Math.min(Long.numberOfTrailingZeros(valueStamp.upMask() & mask), bits);
+        int max = Math.min(Long.numberOfTrailingZeros(valueStamp.downMask() & mask), bits);
         return StampFactory.forInteger(JavaKind.Int, min, max);
     }
 
@@ -132,7 +136,7 @@ public class StampTool {
      * @return true if this node represents a legal object value which is known to be always null
      */
     public static boolean isPointerAlwaysNull(ValueNode node) {
-        return isPointerAlwaysNull(node.stamp());
+        return isPointerAlwaysNull(node.stamp(NodeView.DEFAULT));
     }
 
     /**
@@ -158,7 +162,7 @@ public class StampTool {
      * @return true if this node represents a legal object value which is known to never be null
      */
     public static boolean isPointerNonNull(ValueNode node) {
-        return isPointerNonNull(node.stamp());
+        return isPointerNonNull(node.stamp(NodeView.DEFAULT));
     }
 
     /**
@@ -184,11 +188,11 @@ public class StampTool {
      * @return the Java type this value has if it is a legal Object type, null otherwise
      */
     public static TypeReference typeReferenceOrNull(ValueNode node) {
-        return typeReferenceOrNull(node.stamp());
+        return typeReferenceOrNull(node.stamp(NodeView.DEFAULT));
     }
 
     public static ResolvedJavaType typeOrNull(ValueNode node) {
-        return typeOrNull(node.stamp());
+        return typeOrNull(node.stamp(NodeView.DEFAULT));
     }
 
     public static ResolvedJavaType typeOrNull(Stamp stamp) {
@@ -210,7 +214,7 @@ public class StampTool {
     }
 
     public static ResolvedJavaType typeOrNull(ValueNode node, MetaAccessProvider metaAccess) {
-        return typeOrNull(node.stamp(), metaAccess);
+        return typeOrNull(node.stamp(NodeView.DEFAULT), metaAccess);
     }
 
     /**
@@ -242,7 +246,7 @@ public class StampTool {
      * @return true if this node represents a legal object value whose Java type is known exactly
      */
     public static boolean isExactType(ValueNode node) {
-        return isExactType(node.stamp());
+        return isExactType(node.stamp(NodeView.DEFAULT));
     }
 
     /**

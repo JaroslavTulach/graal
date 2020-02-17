@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2017, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -22,14 +24,14 @@
  */
 package org.graalvm.compiler.core.test;
 
+import org.graalvm.collections.EconomicMap;
 import org.graalvm.compiler.debug.DebugContext;
-import org.graalvm.compiler.debug.DebugOptions;
 import org.graalvm.compiler.debug.DebugContext.Scope;
+import org.graalvm.compiler.debug.DebugOptions;
 import org.graalvm.compiler.nodes.StructuredGraph;
 import org.graalvm.compiler.nodes.StructuredGraph.AllowAssumptions;
 import org.graalvm.compiler.options.OptionKey;
 import org.graalvm.compiler.options.OptionValues;
-import org.graalvm.util.EconomicMap;
 import org.junit.Assert;
 import org.junit.Test;
 
@@ -41,6 +43,7 @@ public class GraphResetDebugTest extends GraalCompilerTest {
     @SuppressWarnings("try")
     @Test
     public void test1() {
+        assumeManagementLibraryIsLoadable();
         EconomicMap<OptionKey<?>, Object> map = EconomicMap.create();
         // Configure with an option that enables scopes
         map.put(DebugOptions.DumpOnError, true);
@@ -48,7 +51,7 @@ public class GraphResetDebugTest extends GraalCompilerTest {
         StructuredGraph graph = parseEager("testSnippet", AllowAssumptions.YES, debug);
         boolean resetSucceeded = false;
         try (Scope scope = debug.scope("some scope")) {
-            graph.resetDebug(DebugContext.DISABLED);
+            graph.resetDebug(DebugContext.disabled(getInitialOptions()));
             resetSucceeded = true;
         } catch (AssertionError expected) {
         }

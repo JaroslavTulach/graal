@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * The Universal Permissive License (UPL), Version 1.0
@@ -48,16 +48,16 @@ import com.oracle.truffle.api.dsl.TypeCast;
 import com.oracle.truffle.api.dsl.TypeCheck;
 import com.oracle.truffle.api.dsl.TypeSystem;
 import com.oracle.truffle.sl.SLLanguage;
-import com.oracle.truffle.sl.runtime.SLFunction;
+import com.oracle.truffle.sl.runtime.SLBigNumber;
 import com.oracle.truffle.sl.runtime.SLNull;
 
 /**
  * The type system of SL, as explained in {@link SLLanguage}. Based on the {@link TypeSystem}
  * annotation, the Truffle DSL generates the subclass {@link SLTypesGen} with type test and type
- * conversion methods for all types. In this class, we only cover types where the automatically
+ * conversion methods for some types. In this class, we only cover types where the automatically
  * generated ones would not be sufficient.
  */
-@TypeSystem({long.class, BigInteger.class, boolean.class, String.class, SLFunction.class, SLNull.class})
+@TypeSystem({long.class, boolean.class})
 public abstract class SLTypes {
 
     /**
@@ -84,14 +84,14 @@ public abstract class SLTypes {
 
     /**
      * Informs the Truffle DSL that a primitive {@code long} value can be used in all
-     * specializations where a {@link BigInteger} is expected. This models the semantic of SL: It
-     * only has an arbitrary precision Number type (implemented as {@link BigInteger}, and
+     * specializations where a {@link SLBigNumber} is expected. This models the semantic of SL: It
+     * only has an arbitrary precision Number type (implemented as {@link SLBigNumber}, and
      * {@code long} is only used as a performance optimization to avoid the costly
-     * {@link BigInteger} arithmetic for values that fit into a 64-bit primitive value.
+     * {@link SLBigNumber} arithmetic for values that fit into a 64-bit primitive value.
      */
     @ImplicitCast
     @TruffleBoundary
-    public static BigInteger castBigInteger(long value) {
-        return BigInteger.valueOf(value);
+    public static SLBigNumber castBigNumber(long value) {
+        return new SLBigNumber(BigInteger.valueOf(value));
     }
 }

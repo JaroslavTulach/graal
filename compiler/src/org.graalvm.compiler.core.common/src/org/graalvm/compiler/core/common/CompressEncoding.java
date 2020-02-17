@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2016, 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2016, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -34,14 +36,6 @@ public final class CompressEncoding {
         this.shift = shift;
     }
 
-    public int compress(long ptr) {
-        if (ptr == 0L) {
-            return 0;
-        } else {
-            return (int) ((ptr - base) >>> shift);
-        }
-    }
-
     public boolean hasBase() {
         return base != 0;
     }
@@ -56,14 +50,6 @@ public final class CompressEncoding {
 
     public int getShift() {
         return shift;
-    }
-
-    public long uncompress(int ptr) {
-        if (ptr == 0) {
-            return 0L;
-        } else {
-            return ((ptr & 0xFFFFFFFFL) << shift) + base;
-        }
     }
 
     @Override
@@ -85,8 +71,7 @@ public final class CompressEncoding {
         if (obj instanceof CompressEncoding) {
             CompressEncoding other = (CompressEncoding) obj;
             return base == other.base && shift == other.shift;
-        } else {
-            return false;
         }
+        return false;
     }
 }

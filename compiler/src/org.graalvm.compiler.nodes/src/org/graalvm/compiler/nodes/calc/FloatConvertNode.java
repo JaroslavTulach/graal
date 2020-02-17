@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2014, 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2014, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -23,16 +25,17 @@
 package org.graalvm.compiler.nodes.calc;
 
 import static org.graalvm.compiler.nodeinfo.NodeCycles.CYCLES_8;
-
-import java.util.EnumMap;
+import static org.graalvm.compiler.nodes.calc.BinaryArithmeticNode.getArithmeticOpTable;
 
 import org.graalvm.compiler.core.common.calc.FloatConvert;
 import org.graalvm.compiler.core.common.type.ArithmeticOpTable;
 import org.graalvm.compiler.core.common.type.ArithmeticOpTable.FloatConvertOp;
+import org.graalvm.compiler.core.common.type.ArithmeticOpTable.UnaryOp;
 import org.graalvm.compiler.graph.NodeClass;
 import org.graalvm.compiler.graph.spi.CanonicalizerTool;
 import org.graalvm.compiler.lir.gen.ArithmeticLIRGeneratorTool;
 import org.graalvm.compiler.nodeinfo.NodeInfo;
+import org.graalvm.compiler.nodes.NodeView;
 import org.graalvm.compiler.nodes.ValueNode;
 import org.graalvm.compiler.nodes.spi.ArithmeticLIRLowerable;
 import org.graalvm.compiler.nodes.spi.Lowerable;
@@ -52,25 +55,22 @@ public final class FloatConvertNode extends UnaryArithmeticNode<FloatConvertOp> 
 
     protected final FloatConvert op;
 
-    private static final EnumMap<FloatConvert, SerializableUnaryFunction<FloatConvertOp>> getOps;
-    static {
-        getOps = new EnumMap<>(FloatConvert.class);
-        for (FloatConvert op : FloatConvert.values()) {
-            getOps.put(op, table -> table.getFloatConvert(op));
-        }
-    }
-
     public FloatConvertNode(FloatConvert op, ValueNode input) {
-        super(TYPE, getOps.get(op), input);
+        super(TYPE, getArithmeticOpTable(input).getFloatConvert(op), input);
         this.op = op;
     }
 
-    public static ValueNode create(FloatConvert op, ValueNode input) {
-        ValueNode synonym = findSynonym(input, ArithmeticOpTable.forStamp(input.stamp()).getFloatConvert(op));
+    public static ValueNode create(FloatConvert op, ValueNode input, NodeView view) {
+        ValueNode synonym = findSynonym(input, ArithmeticOpTable.forStamp(input.stamp(view)).getFloatConvert(op));
         if (synonym != null) {
             return synonym;
         }
         return new FloatConvertNode(op, input);
+    }
+
+    @Override
+    protected UnaryOp<FloatConvertOp> getOp(ArithmeticOpTable table) {
+        return table.getFloatConvert(op);
     }
 
     public FloatConvert getFloatConvert() {
@@ -84,7 +84,7 @@ public final class FloatConvertNode extends UnaryArithmeticNode<FloatConvertOp> 
 
     @Override
     public Constant reverse(Constant c, ConstantReflectionProvider constantReflection) {
-        FloatConvertOp reverse = ArithmeticOpTable.forStamp(stamp()).getFloatConvert(op.reverse());
+        FloatConvertOp reverse = ArithmeticOpTable.forStamp(stamp(NodeView.DEFAULT)).getFloatConvert(op.reverse());
         return reverse.foldConstant(c);
     }
 

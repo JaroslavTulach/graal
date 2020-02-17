@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2009, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2009, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -37,6 +39,7 @@ import org.graalvm.compiler.nodeinfo.NodeInfo;
 import org.graalvm.compiler.nodes.AbstractBeginNode;
 import org.graalvm.compiler.nodes.ConstantNode;
 import org.graalvm.compiler.nodes.FixedWithNextNode;
+import org.graalvm.compiler.nodes.NodeView;
 import org.graalvm.compiler.nodes.ValueNode;
 import org.graalvm.compiler.nodes.extended.LoadHubNode;
 import org.graalvm.compiler.nodes.extended.SwitchNode;
@@ -64,7 +67,7 @@ public final class TypeSwitchNode extends SwitchNode implements LIRLowerable, Si
         assert successors.length <= keys.length + 1;
         assert keySuccessors.length == keyProbabilities.length;
         this.keys = keys;
-        assert value.stamp() instanceof AbstractPointerStamp;
+        assert value.stamp(NodeView.DEFAULT) instanceof AbstractPointerStamp;
         assert assertKeys();
 
         hubs = new Constant[keys.length];
@@ -123,6 +126,7 @@ public final class TypeSwitchNode extends SwitchNode implements LIRLowerable, Si
 
     @Override
     public void simplify(SimplifierTool tool) {
+        NodeView view = NodeView.from(tool);
         if (value() instanceof ConstantNode) {
             Constant constant = value().asConstant();
 
@@ -139,8 +143,8 @@ public final class TypeSwitchNode extends SwitchNode implements LIRLowerable, Si
             }
             killOtherSuccessors(tool, survivingEdge);
         }
-        if (value() instanceof LoadHubNode && ((LoadHubNode) value()).getValue().stamp() instanceof ObjectStamp) {
-            ObjectStamp objectStamp = (ObjectStamp) ((LoadHubNode) value()).getValue().stamp();
+        if (value() instanceof LoadHubNode && ((LoadHubNode) value()).getValue().stamp(view) instanceof ObjectStamp) {
+            ObjectStamp objectStamp = (ObjectStamp) ((LoadHubNode) value()).getValue().stamp(view);
             if (objectStamp.type() != null) {
                 int validKeys = 0;
                 for (int i = 0; i < keyCount(); i++) {
@@ -184,11 +188,10 @@ public final class TypeSwitchNode extends SwitchNode implements LIRLowerable, Si
                         }
                     }
 
+                    ArrayList<AbstractBeginNode> oldSuccessors = new ArrayList<>();
                     for (int i = 0; i < blockSuccessorCount(); i++) {
                         AbstractBeginNode successor = blockSuccessor(i);
-                        if (!newSuccessors.contains(successor)) {
-                            tool.deleteBranch(successor);
-                        }
+                        oldSuccessors.add(successor);
                         setBlockSuccessor(i, null);
                     }
 
@@ -196,6 +199,13 @@ public final class TypeSwitchNode extends SwitchNode implements LIRLowerable, Si
                     TypeSwitchNode newSwitch = graph().add(new TypeSwitchNode(value(), successorsArray, newKeys, newKeyProbabilities, newKeySuccessors, tool.getConstantReflection()));
                     ((FixedWithNextNode) predecessor()).setNext(newSwitch);
                     GraphUtil.killWithUnusedFloatingInputs(this);
+
+                    for (int i = 0; i < oldSuccessors.size(); i++) {
+                        AbstractBeginNode successor = oldSuccessors.get(i);
+                        if (!newSuccessors.contains(successor)) {
+                            GraphUtil.killCFG(successor);
+                        }
+                    }
                 }
             }
         }

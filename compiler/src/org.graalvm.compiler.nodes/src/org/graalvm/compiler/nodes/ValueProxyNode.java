@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2012, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -33,7 +35,7 @@ import org.graalvm.compiler.nodes.spi.Virtualizable;
 import org.graalvm.compiler.nodes.spi.VirtualizerTool;
 import org.graalvm.compiler.nodes.virtual.VirtualObjectNode;
 
-@NodeInfo(nameTemplate = "Proxy({i#value})")
+@NodeInfo(nameTemplate = "ValueProxy({i#value})")
 public final class ValueProxyNode extends ProxyNode implements Canonicalizable, Virtualizable, ValueProxy {
 
     public static final NodeClass<ValueProxyNode> TYPE = NodeClass.create(ValueProxyNode.class);
@@ -41,7 +43,7 @@ public final class ValueProxyNode extends ProxyNode implements Canonicalizable, 
     private final boolean loopPhiProxy;
 
     public ValueProxyNode(ValueNode value, LoopExitNode loopExit) {
-        super(TYPE, value.stamp(), loopExit);
+        super(TYPE, value.stamp(NodeView.DEFAULT), loopExit);
         this.value = value;
         loopPhiProxy = loopExit.loopBegin().isPhiAtMerge(value);
     }
@@ -52,14 +54,24 @@ public final class ValueProxyNode extends ProxyNode implements Canonicalizable, 
     }
 
     @Override
+    public PhiNode createPhi(AbstractMergeNode merge) {
+        return graph().addWithoutUnique(new ValuePhiNode(stamp(NodeView.DEFAULT), merge));
+    }
+
+    @Override
     public boolean inferStamp() {
-        return updateStamp(value.stamp());
+        return updateStamp(value.stamp(NodeView.DEFAULT));
     }
 
     @Override
     public Node canonical(CanonicalizerTool tool) {
+        Node result = super.canonical(tool);
+        if (result != this) {
+            return result;
+        }
+
         ValueNode curValue = value;
-        if (curValue.isConstant()) {
+        if (curValue.getNodeClass().isLeafNode()) {
             return curValue;
         }
         if (loopPhiProxy && !loopExit.loopBegin().isPhiAtMerge(curValue)) {

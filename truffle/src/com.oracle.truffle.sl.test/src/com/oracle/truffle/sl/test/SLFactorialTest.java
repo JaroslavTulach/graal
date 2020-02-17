@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * The Universal Permissive License (UPL), Version 1.0
@@ -40,42 +40,39 @@
  */
 package com.oracle.truffle.sl.test;
 
-import com.oracle.truffle.api.source.Source;
-import com.oracle.truffle.api.vm.PolyglotEngine;
-import org.junit.After;
 import static org.junit.Assert.assertEquals;
+
+import org.graalvm.polyglot.Context;
+import org.graalvm.polyglot.Value;
+import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 
 public class SLFactorialTest {
 
-    private PolyglotEngine engine;
-    private PolyglotEngine.Value factorial;
+    private Context context;
+    private Value factorial;
 
     @Before
     public void initEngine() throws Exception {
-        engine = PolyglotEngine.newBuilder().build();
+        context = Context.create();
         // @formatter:off
-        engine.eval(
-            Source.newBuilder("\n" +
+        context.eval("sl", "\n" +
                 "function fac(n) {\n" +
                 "  if (n <= 1) {\n" +
                 "    return 1;\n" +
                 "  }\n" +
                 "  prev = fac(n - 1);\n" +
                 "  return prev * n;\n" +
-                "}\n").
-            name("factorial.sl").
-            mimeType("application/x-sl").
-            build()
+                "}\n"
         );
         // @formatter:on
-        factorial = engine.findGlobalSymbol("fac");
+        factorial = context.getBindings("sl").getMember("fac");
     }
 
     @After
     public void dispose() {
-        engine.dispose();
+        context.close();
     }
 
     @Test

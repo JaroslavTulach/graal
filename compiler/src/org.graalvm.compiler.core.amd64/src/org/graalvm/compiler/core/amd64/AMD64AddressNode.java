@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2015, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -25,6 +27,7 @@ package org.graalvm.compiler.core.amd64;
 
 import org.graalvm.compiler.asm.amd64.AMD64Address.Scale;
 import org.graalvm.compiler.core.common.LIRKind;
+import org.graalvm.compiler.core.common.type.IntegerStamp;
 import org.graalvm.compiler.graph.NodeClass;
 import org.graalvm.compiler.graph.spi.Simplifiable;
 import org.graalvm.compiler.graph.spi.SimplifierTool;
@@ -33,6 +36,7 @@ import org.graalvm.compiler.lir.gen.LIRGeneratorTool;
 import org.graalvm.compiler.nodeinfo.NodeInfo;
 import org.graalvm.compiler.nodes.ConstantNode;
 import org.graalvm.compiler.nodes.LoopBeginNode;
+import org.graalvm.compiler.nodes.NodeView;
 import org.graalvm.compiler.nodes.PhiNode;
 import org.graalvm.compiler.nodes.ValueNode;
 import org.graalvm.compiler.nodes.calc.AddNode;
@@ -59,6 +63,14 @@ public class AMD64AddressNode extends AddressNode implements Simplifiable, LIRLo
 
     private int displacement;
 
+    /*
+     * If this address has been improved by folding an uncompress operation into it, this is set by
+     * the address lowering to the uncompression scale used by the encoding strategy. It is null
+     * otherwise. This might be different from scale if we lowered an uncompression followed by
+     * further improvements that modify the scale.
+     */
+    private Scale uncompressionScale;
+
     public AMD64AddressNode(ValueNode base) {
         this(base, null);
     }
@@ -68,10 +80,11 @@ public class AMD64AddressNode extends AddressNode implements Simplifiable, LIRLo
         this.base = base;
         this.index = index;
         this.scale = Scale.Times1;
+        this.uncompressionScale = null;
     }
 
     public void canonicalizeIndex(SimplifierTool tool) {
-        if (index instanceof AddNode) {
+        if (index instanceof AddNode && ((IntegerStamp) index.stamp(NodeView.DEFAULT)).getBits() == 64) {
             AddNode add = (AddNode) index;
             ValueNode valX = add.getX();
             if (valX instanceof PhiNode) {
@@ -99,11 +112,13 @@ public class AMD64AddressNode extends AddressNode implements Simplifiable, LIRLo
         AllocatableValue baseValue = base == null ? Value.ILLEGAL : tool.asAllocatable(gen.operand(base));
         AllocatableValue indexValue = index == null ? Value.ILLEGAL : tool.asAllocatable(gen.operand(index));
 
-        AllocatableValue baseReference = LIRKind.derivedBaseFromValue(baseValue);
+        AllocatableValue baseReference = base == null ? null : LIRKind.derivedBaseFromValue(baseValue);
         AllocatableValue indexReference;
         if (index == null) {
             indexReference = null;
         } else if (scale.equals(Scale.Times1)) {
+            indexReference = LIRKind.derivedBaseFromValue(indexValue);
+        } else if (scale.equals(uncompressionScale) && LIRKind.isScalarCompressedReference(indexValue.getValueKind())) {
             indexReference = LIRKind.derivedBaseFromValue(indexValue);
         } else {
             if (LIRKind.isValue(indexValue)) {
@@ -113,7 +128,7 @@ public class AMD64AddressNode extends AddressNode implements Simplifiable, LIRLo
             }
         }
 
-        LIRKind kind = LIRKind.combineDerived(tool.getLIRKind(stamp()), baseReference, indexReference);
+        LIRKind kind = LIRKind.combineDerived(tool.getLIRKind(stamp(NodeView.DEFAULT)), baseReference, indexReference);
         gen.setResult(this, new AMD64AddressValue(kind, baseValue, indexValue, scale, displacement));
     }
 
@@ -157,6 +172,10 @@ public class AMD64AddressNode extends AddressNode implements Simplifiable, LIRLo
 
     public void setDisplacement(int displacement) {
         this.displacement = displacement;
+    }
+
+    public void setUncompressionScale(Scale scale) {
+        this.uncompressionScale = scale;
     }
 
     @Override

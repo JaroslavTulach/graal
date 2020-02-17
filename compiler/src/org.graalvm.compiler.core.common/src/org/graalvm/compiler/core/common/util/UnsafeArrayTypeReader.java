@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2015, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -22,7 +24,8 @@
  */
 package org.graalvm.compiler.core.common.util;
 
-import static org.graalvm.compiler.core.common.util.UnsafeAccess.UNSAFE;
+import static org.graalvm.compiler.serviceprovider.GraalUnsafeAccess.getUnsafe;
+
 import sun.misc.Unsafe;
 
 /**
@@ -37,7 +40,9 @@ import sun.misc.Unsafe;
  * architectures that support unaligned memory accesses; the value {@code false} is the safe
  * fallback that works on every hardware.
  */
-public abstract class UnsafeArrayTypeReader implements TypeReader {
+public abstract class UnsafeArrayTypeReader extends AbstractTypeReader {
+
+    private static final Unsafe UNSAFE = getUnsafe();
 
     public static int getS1(byte[] data, long byteIndex) {
         return UNSAFE.getByte(data, readOffset(data, byteIndex, Byte.BYTES));
@@ -140,6 +145,8 @@ public abstract class UnsafeArrayTypeReader implements TypeReader {
 }
 
 final class UnalignedUnsafeArrayTypeReader extends UnsafeArrayTypeReader {
+    private static final Unsafe UNSAFE = getUnsafe();
+
     protected static int getS2(byte[] data, long byteIndex) {
         return UNSAFE.getShort(data, readOffset(data, byteIndex, Short.BYTES));
     }
@@ -179,6 +186,8 @@ final class UnalignedUnsafeArrayTypeReader extends UnsafeArrayTypeReader {
 }
 
 class AlignedUnsafeArrayTypeReader extends UnsafeArrayTypeReader {
+    private static final Unsafe UNSAFE = getUnsafe();
+
     protected static int getS2(byte[] data, long byteIndex) {
         long offset = readOffset(data, byteIndex, Short.BYTES);
         return ((UNSAFE.getByte(data, offset + 0) & 0xFF) << 0) | //

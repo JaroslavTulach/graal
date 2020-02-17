@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -22,7 +24,14 @@
  */
 package org.graalvm.compiler.nodes.graphbuilderconf;
 
+import java.util.function.Supplier;
+
+import org.graalvm.compiler.graph.Node.ValueNumberable;
+import org.graalvm.compiler.nodes.FixedWithNextNode;
+import org.graalvm.compiler.nodes.FrameState;
+import org.graalvm.compiler.nodes.StructuredGraph;
 import org.graalvm.compiler.nodes.ValueNode;
+import org.graalvm.compiler.nodes.extended.GuardingNode;
 
 import jdk.vm.ci.meta.JavaKind;
 import jdk.vm.ci.meta.JavaTypeProfile;
@@ -106,10 +115,12 @@ public interface NodePlugin extends GraphBuilderPlugin {
      * @param b the context
      * @param array the accessed array
      * @param index the index for the array access
+     * @param boundsCheck the explicit bounds check already emitted, or null if no bounds check was
+     *            emitted yet
      * @param elementKind the element kind of the accessed array
      * @return true if the plugin handles the array access, false otherwise.
      */
-    default boolean handleLoadIndexed(GraphBuilderContext b, ValueNode array, ValueNode index, JavaKind elementKind) {
+    default boolean handleLoadIndexed(GraphBuilderContext b, ValueNode array, ValueNode index, GuardingNode boundsCheck, JavaKind elementKind) {
         return false;
     }
 
@@ -119,11 +130,15 @@ public interface NodePlugin extends GraphBuilderPlugin {
      * @param b the context
      * @param array the accessed array
      * @param index the index for the array access
+     * @param boundsCheck the explicit array bounds check already emitted, or null if no array
+     *            bounds check was emitted yet
+     * @param storeCheck the explicit array store check already emitted, or null if no array store
+     *            check was emitted yet
      * @param elementKind the element kind of the accessed array
      * @param value the value to be stored into the array
      * @return true if the plugin handles the array access, false otherwise.
      */
-    default boolean handleStoreIndexed(GraphBuilderContext b, ValueNode array, ValueNode index, JavaKind elementKind, ValueNode value) {
+    default boolean handleStoreIndexed(GraphBuilderContext b, ValueNode array, ValueNode index, GuardingNode boundsCheck, GuardingNode storeCheck, JavaKind elementKind, ValueNode value) {
         return false;
     }
 
@@ -198,6 +213,27 @@ public interface NodePlugin extends GraphBuilderPlugin {
      */
     default boolean handleNewMultiArray(GraphBuilderContext b, ResolvedJavaType type, ValueNode[] dimensions) {
         return false;
+    }
+
+    /**
+     * Allows this plugin to add nodes after the exception object has been loaded in the dispatch
+     * sequence. Note that a {@link StructuredGraph} is provided to this call instead of a
+     * {@link GraphBuilderContext} so that the caller has a guarantee that its current control flow
+     * insertion point is not changed by this call. This means nodes must be added to the graph with
+     * the appropriate method (e.g., {@link StructuredGraph#unique} for {@link ValueNumberable}
+     * nodes) and fixed nodes must be manually {@linkplain FixedWithNextNode#setNext added} as
+     * successors of {@code afterExceptionLoaded}.
+     *
+     * The reason for this constraint is that when this plugin runs, it's inserting instructions
+     * into a different block than the one currently being parsed.
+     *
+     * @param graph the graph being parsed
+     * @param afterExceptionLoaded the last fixed node after loading the exception
+     * @param frameStateFunction a helper that produces a FrameState suitable for deopt
+     * @return the last fixed node after instrumentation
+     */
+    default FixedWithNextNode instrumentExceptionDispatch(StructuredGraph graph, FixedWithNextNode afterExceptionLoaded, Supplier<FrameState> frameStateFunction) {
+        return afterExceptionLoaded;
     }
 
     /**

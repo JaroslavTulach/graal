@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2012, 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -22,15 +24,15 @@
  */
 package org.graalvm.compiler.hotspot;
 
-import static org.graalvm.compiler.hotspot.HotSpotForeignCallLinkage.RegisterEffect.DESTROYS_REGISTERS;
 import static jdk.vm.ci.hotspot.HotSpotJVMCIRuntime.runtime;
+import static org.graalvm.compiler.hotspot.HotSpotForeignCallLinkage.RegisterEffect.DESTROYS_ALL_CALLER_SAVE_REGISTERS;
 
+import org.graalvm.collections.EconomicSet;
 import org.graalvm.compiler.core.common.spi.ForeignCallDescriptor;
 import org.graalvm.compiler.core.target.Backend;
 import org.graalvm.compiler.hotspot.meta.HotSpotForeignCallsProvider;
 import org.graalvm.compiler.hotspot.stubs.Stub;
 import org.graalvm.compiler.word.WordTypes;
-import org.graalvm.util.EconomicSet;
 import org.graalvm.word.LocationIdentity;
 
 import jdk.vm.ci.code.CallingConvention;
@@ -88,7 +90,7 @@ public class HotSpotForeignCallLinkageImpl extends HotSpotForeignCallTarget impl
      */
     private final LocationIdentity[] killedLocations;
 
-    private final boolean reexecutable;
+    private final Reexecutability reexecutability;
 
     /**
      * Creates a {@link HotSpotForeignCallLinkage}.
@@ -100,17 +102,18 @@ public class HotSpotForeignCallLinkageImpl extends HotSpotForeignCallTarget impl
      * @param outgoingCcType outgoing (caller) calling convention type
      * @param incomingCcType incoming (callee) calling convention type (can be null)
      * @param transition specifies if this is a {@linkplain #needsDebugInfo() leaf} call
-     * @param reexecutable specifies if the call can be re-executed without (meaningful) side
+     * @param reexecutability specifies if the call can be re-executed without (meaningful) side
      *            effects. Deoptimization will not return to a point before a call that cannot be
      *            re-executed.
      * @param killedLocations the memory locations killed by the call
      */
     public static HotSpotForeignCallLinkage create(MetaAccessProvider metaAccess, CodeCacheProvider codeCache, WordTypes wordTypes, HotSpotForeignCallsProvider foreignCalls,
-                    ForeignCallDescriptor descriptor, long address, RegisterEffect effect, Type outgoingCcType, Type incomingCcType, Transition transition, boolean reexecutable,
+                    ForeignCallDescriptor descriptor, long address, RegisterEffect effect, Type outgoingCcType, Type incomingCcType, Transition transition, Reexecutability reexecutability,
                     LocationIdentity... killedLocations) {
         CallingConvention outgoingCc = createCallingConvention(metaAccess, codeCache, wordTypes, foreignCalls, descriptor, outgoingCcType);
         CallingConvention incomingCc = incomingCcType == null ? null : createCallingConvention(metaAccess, codeCache, wordTypes, foreignCalls, descriptor, incomingCcType);
-        HotSpotForeignCallLinkageImpl linkage = new HotSpotForeignCallLinkageImpl(descriptor, address, effect, transition, outgoingCc, incomingCc, reexecutable, killedLocations);
+        HotSpotForeignCallLinkageImpl linkage = new HotSpotForeignCallLinkageImpl(descriptor, address, effect, transition, reexecutability, outgoingCc, incomingCc,
+                        killedLocations);
         if (outgoingCcType == HotSpotCallingConventionType.NativeCall) {
             linkage.temporaries = foreignCalls.getNativeABICallerSaveRegisters();
         }
@@ -141,17 +144,17 @@ public class HotSpotForeignCallLinkageImpl extends HotSpotForeignCallTarget impl
         return javaType;
     }
 
-    public HotSpotForeignCallLinkageImpl(ForeignCallDescriptor descriptor, long address, RegisterEffect effect, Transition transition, CallingConvention outgoingCallingConvention,
-                    CallingConvention incomingCallingConvention, boolean reexecutable, LocationIdentity... killedLocations) {
+    public HotSpotForeignCallLinkageImpl(ForeignCallDescriptor descriptor, long address, RegisterEffect effect, Transition transition, Reexecutability reexecutability,
+                    CallingConvention outgoingCallingConvention, CallingConvention incomingCallingConvention, LocationIdentity... killedLocations) {
         super(address);
         this.descriptor = descriptor;
         this.address = address;
         this.effect = effect;
         this.transition = transition;
+        this.reexecutability = reexecutability;
         assert outgoingCallingConvention != null : "only incomingCallingConvention can be null";
         this.outgoingCallingConvention = outgoingCallingConvention;
         this.incomingCallingConvention = incomingCallingConvention != null ? incomingCallingConvention : outgoingCallingConvention;
-        this.reexecutable = reexecutable;
         this.killedLocations = killedLocations;
     }
 
@@ -172,12 +175,17 @@ public class HotSpotForeignCallLinkageImpl extends HotSpotForeignCallTarget impl
 
     @Override
     public boolean isReexecutable() {
-        return reexecutable;
+        return reexecutability == Reexecutability.REEXECUTABLE;
     }
 
     @Override
     public boolean isGuaranteedSafepoint() {
         return transition == Transition.SAFEPOINT;
+    }
+
+    @Override
+    public RegisterEffect getEffect() {
+        return effect;
     }
 
     @Override
@@ -265,7 +273,7 @@ public class HotSpotForeignCallLinkageImpl extends HotSpotForeignCallTarget impl
 
     @Override
     public boolean destroysRegisters() {
-        return effect == DESTROYS_REGISTERS;
+        return effect == DESTROYS_ALL_CALLER_SAVE_REGISTERS;
     }
 
     @Override
@@ -275,7 +283,7 @@ public class HotSpotForeignCallLinkageImpl extends HotSpotForeignCallTarget impl
 
     @Override
     public boolean mayContainFP() {
-        return transition != Transition.LEAF_NOFP;
+        return transition != Transition.LEAF_NO_VZERO;
     }
 
     @Override
@@ -295,5 +303,10 @@ public class HotSpotForeignCallLinkageImpl extends HotSpotForeignCallTarget impl
     @Override
     public String getSymbol() {
         return stub == null ? null : stub.toString();
+    }
+
+    @Override
+    public boolean needsClearUpperVectorRegisters() {
+        return isCompiledStub() && mayContainFP();
     }
 }

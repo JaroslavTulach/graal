@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2008, 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2008, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -23,7 +25,6 @@
 package org.graalvm.compiler.jtt.jdk;
 
 import org.graalvm.compiler.jtt.JTTTest;
-import org.junit.Assume;
 import org.junit.Test;
 
 public class Unsafe_compareAndSwapNullCheck extends JTTTest {
@@ -48,8 +49,6 @@ public class Unsafe_compareAndSwapNullCheck extends JTTTest {
 
     @Test
     public void run0() throws Throwable {
-        // GR-2921: Unsafe_compareAndSwapNullCheck test crashes on jdk9
-        Assume.assumeTrue(Java8OrEarlier);
         runTest(getInitialOptions(), EMPTY, false, true, "test", null, 1L, 2L);
     }
 }

@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2015, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -70,15 +72,25 @@ public class AArch64Unary {
 
         @Override
         public void emitCode(CompilationResultBuilder crb, AArch64MacroAssembler masm) {
-            if (state != null) {
-                crb.recordImplicitException(masm.position(), state);
-            }
+            int prePosition = masm.position();
             AArch64Address address = input.toAddress();
             Register dst = asRegister(result);
             if (isSigned) {
                 masm.ldrs(targetSize, srcSize, dst, address);
             } else {
                 masm.ldr(srcSize, dst, address);
+            }
+
+            if (state != null) {
+                int implicitExceptionPosition = prePosition;
+                // Adjust implicit exception position if this ldr/str has been merged to ldp/stp.
+                if (prePosition == masm.position() && masm.isImmLoadStoreMerged()) {
+                    implicitExceptionPosition = prePosition - 4;
+                    if (crb.isImplicitExceptionExist(implicitExceptionPosition)) {
+                        return;
+                    }
+                }
+                crb.recordImplicitException(implicitExceptionPosition, state);
             }
         }
 

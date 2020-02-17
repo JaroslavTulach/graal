@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2012, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -21,6 +23,8 @@
  * questions.
  */
 package org.graalvm.compiler.word;
+
+import static jdk.vm.ci.services.Services.IS_BUILDING_NATIVE_IMAGE;
 
 import org.graalvm.compiler.core.common.type.Stamp;
 import org.graalvm.compiler.core.common.type.StampFactory;
@@ -76,7 +80,9 @@ public class WordTypes {
         this.objectAccessType = metaAccess.lookupJavaType(ObjectAccess.class);
         this.barrieredAccessType = metaAccess.lookupJavaType(BarrieredAccess.class);
 
-        Word.ensureInitialized();
+        if (!IS_BUILDING_NATIVE_IMAGE) {
+            Word.ensureInitialized();
+        }
         this.wordImplType.initialize();
     }
 
@@ -86,7 +92,7 @@ public class WordTypes {
     public boolean isWordOperation(ResolvedJavaMethod targetMethod) {
         final boolean isWordFactory = wordFactoryType.equals(targetMethod.getDeclaringClass());
         if (isWordFactory) {
-            return true;
+            return !targetMethod.isConstructor();
         }
         final boolean isObjectAccess = objectAccessType.equals(targetMethod.getDeclaringClass());
         final boolean isBarrieredAccess = barrieredAccessType.equals(targetMethod.getDeclaringClass());

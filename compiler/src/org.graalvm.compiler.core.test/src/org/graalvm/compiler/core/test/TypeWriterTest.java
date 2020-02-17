@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2015, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -139,13 +141,13 @@ public class TypeWriterTest extends GraalCompilerTest {
         test01(false);
     }
 
-    private static void checkSignedSize(TypeWriter writer, long value, int expectedSize) {
+    private static void checkSignedSize(TypeWriter writer, long value, long expectedSize) {
         long sizeBefore = writer.getBytesWritten();
         writer.putSV(value);
         Assert.assertEquals(expectedSize, writer.getBytesWritten() - sizeBefore);
     }
 
-    private static void checkUnsignedSize(TypeWriter writer, long value, int expectedSize) {
+    private static void checkUnsignedSize(TypeWriter writer, long value, long expectedSize) {
         long sizeBefore = writer.getBytesWritten();
         writer.putUV(value);
         Assert.assertEquals(expectedSize, writer.getBytesWritten() - sizeBefore);
@@ -153,23 +155,24 @@ public class TypeWriterTest extends GraalCompilerTest {
 
     private static void checkSizes(TypeWriter writer) {
         checkSignedSize(writer, 0, 1);
-        checkSignedSize(writer, 63, 1);
-        checkSignedSize(writer, -64, 1);
-        checkSignedSize(writer, 64, 2);
-        checkSignedSize(writer, -65, 2);
-        checkSignedSize(writer, 8191, 2);
-        checkSignedSize(writer, -8192, 2);
+        checkSignedSize(writer, 95, 1);
+        checkSignedSize(writer, -96, 1);
+        checkSignedSize(writer, 96, 2);
+        checkSignedSize(writer, -97, 2);
+        checkSignedSize(writer, 6239, 2);
+        checkSignedSize(writer, -6240, 2);
         checkSignedSize(writer, 8192, 3);
         checkSignedSize(writer, -8193, 3);
-        checkSignedSize(writer, Long.MAX_VALUE, 10);
-        checkSignedSize(writer, Long.MIN_VALUE, 10);
+        checkSignedSize(writer, Long.MAX_VALUE, UnsafeArrayTypeWriter.MAX_BYTES);
+        checkSignedSize(writer, Long.MIN_VALUE, UnsafeArrayTypeWriter.MAX_BYTES);
 
         checkUnsignedSize(writer, 0, 1);
-        checkUnsignedSize(writer, 127, 1);
-        checkUnsignedSize(writer, 128, 2);
-        checkUnsignedSize(writer, 16383, 2);
-        checkUnsignedSize(writer, 16384, 3);
-        checkUnsignedSize(writer, Long.MAX_VALUE, 9);
+        checkUnsignedSize(writer, 191, 1);
+        checkUnsignedSize(writer, 192, 2);
+        checkUnsignedSize(writer, 12479, 2);
+        checkUnsignedSize(writer, 12480, 3);
+        checkUnsignedSize(writer, Long.MAX_VALUE, UnsafeArrayTypeWriter.MAX_BYTES);
+        checkUnsignedSize(writer, Long.MIN_VALUE, UnsafeArrayTypeWriter.MAX_BYTES);
     }
 
     @Test

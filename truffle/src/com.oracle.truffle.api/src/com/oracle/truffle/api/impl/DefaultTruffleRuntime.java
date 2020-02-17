@@ -1,29 +1,48 @@
 /*
- * Copyright (c) 2012, 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
- * This code is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.  Oracle designates this
- * particular file as subject to the "Classpath" exception as provided
- * by Oracle in the LICENSE file that accompanied this code.
+ * The Universal Permissive License (UPL), Version 1.0
  *
- * This code is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
- * version 2 for more details (a copy is included in the LICENSE file that
- * accompanied this code).
+ * Subject to the condition set forth below, permission is hereby granted to any
+ * person obtaining a copy of this software, associated documentation and/or
+ * data (collectively the "Software"), free of charge and under any and all
+ * copyright rights in the Software, and any and all patent rights owned or
+ * freely licensable by each licensor hereunder covering either (i) the
+ * unmodified Software as contributed to or provided by such licensor, or (ii)
+ * the Larger Works (as defined below), to deal in both
  *
- * You should have received a copy of the GNU General Public License version
- * 2 along with this work; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
+ * (a) the Software, and
  *
- * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
- * or visit www.oracle.com if you need additional information or have any
- * questions.
+ * (b) any piece of software and/or hardware listed in the lrgrwrks.txt file if
+ * one is included with the Software each a "Larger Work" to which the Software
+ * is contributed by such licensors),
+ *
+ * without restriction, including without limitation the rights to copy, create
+ * derivative works of, display, perform, and distribute the Software and make,
+ * use, sell, offer for sale, import, export, have made, and have sold the
+ * Software and the Larger Work(s), and to sublicense the foregoing rights on
+ * either these or other terms.
+ *
+ * This license is subject to the following condition:
+ *
+ * The above copyright notice and either this complete permission notice or at a
+ * minimum a reference to the UPL must be included in all copies or substantial
+ * portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
  */
 package com.oracle.truffle.api.impl;
 
+import java.io.Closeable;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
 import java.util.Iterator;
 import java.util.Objects;
 import java.util.ServiceConfigurationError;
@@ -60,20 +79,32 @@ public final class DefaultTruffleRuntime implements TruffleRuntime {
     private final ThreadLocal<DefaultFrameInstance> stackTraces = new ThreadLocal<>();
     private final DefaultTVMCI tvmci = new DefaultTVMCI();
 
-    private final TVMCI.Test<CallTarget> testTvmci = new TVMCI.Test<CallTarget>() {
+    private final TVMCI.Test<Closeable, CallTarget> testTvmci = new TVMCI.Test<Closeable, CallTarget>() {
 
         @Override
-        public CallTarget createTestCallTarget(RootNode testNode) {
+        protected Closeable createTestContext(String testName) {
+            return null;
+        }
+
+        @Override
+        public CallTarget createTestCallTarget(Closeable testContext, RootNode testNode) {
             return createCallTarget(testNode);
         }
 
         @Override
-        public void finishWarmup(CallTarget callTarget, String testName) {
+        public void finishWarmup(Closeable testContext, CallTarget callTarget) {
             // do nothing if we have no compiler
         }
     };
 
     public DefaultTruffleRuntime() {
+    }
+
+    /**
+     * Utility method that casts the singleton {@link TruffleRuntime}.
+     */
+    static DefaultTruffleRuntime getRuntime() {
+        return (DefaultTruffleRuntime) Truffle.getRuntime();
     }
 
     public DefaultTVMCI getTvmci() {
@@ -82,14 +113,13 @@ public final class DefaultTruffleRuntime implements TruffleRuntime {
 
     @Override
     public String getName() {
-        return "Default Truffle Runtime";
+        return "Interpreted";
     }
 
     @SuppressWarnings("deprecation")
     @Override
     public RootCallTarget createCallTarget(RootNode rootNode) {
         DefaultCallTarget target = new DefaultCallTarget(rootNode);
-        rootNode.setCallTarget(target);
         getTvmci().onLoad(target);
         return target;
     }
@@ -195,6 +225,7 @@ public final class DefaultTruffleRuntime implements TruffleRuntime {
         }
     }
 
+    @Override
     public <T> T getCapability(Class<T> capability) {
         if (capability == TVMCI.Test.class) {
             return capability.cast(testTvmci);
@@ -202,11 +233,57 @@ public final class DefaultTruffleRuntime implements TruffleRuntime {
             return capability.cast(tvmci);
         }
 
-        final Iterator<T> it = ServiceLoader.load(capability).iterator();
+        final Iterator<T> it = Loader.load(capability).iterator();
         try {
             return it.hasNext() ? it.next() : null;
         } catch (ServiceConfigurationError e) {
             return null;
+        }
+    }
+
+    private static final class Loader {
+        private static final Method LOAD_METHOD;
+        static {
+            Method loadMethod = null;
+            try {
+                Class<?> servicesClass = Class.forName("jdk.vm.ci.services.Services");
+                loadMethod = servicesClass.getMethod("load", Class.class);
+            } catch (ClassNotFoundException | NoSuchMethodException e) {
+                // Services.load is not available
+            }
+            if (loadMethod != null) {
+                try {
+                    try {
+                        loadMethod.invoke(null, (Object) null);
+                    } catch (InvocationTargetException e) {
+                        throw e.getTargetException();
+                    }
+                } catch (NullPointerException npe) {
+                    // Services.load is accessible
+                } catch (IllegalAccessException iae) {
+                    // Services.load is not accessible. This happens on JDK 9+ when EnableJVMCI is
+                    // true (either explicitly or by default) which causes the jdk.internal.vm.ci
+                    // module to be resolved.
+                    loadMethod = null;
+                } catch (Throwable e) {
+                    throw new InternalError(e);
+                }
+            }
+            LOAD_METHOD = loadMethod;
+        }
+
+        @SuppressWarnings("unchecked")
+        static <S> Iterable<S> load(Class<S> service) {
+            TruffleJDKServices.addUses(service);
+            if (LOAD_METHOD != null) {
+                try {
+                    return (Iterable<S>) LOAD_METHOD.invoke(null, service);
+                } catch (Exception e) {
+                    throw new InternalError(e);
+                }
+            } else {
+                return ServiceLoader.load(service);
+            }
         }
     }
 
@@ -240,16 +317,11 @@ public final class DefaultTruffleRuntime implements TruffleRuntime {
 
         @SuppressWarnings("deprecation")
         public final Frame getFrame(FrameAccess access) {
-            if (access == FrameAccess.NONE) {
-                return null;
-            }
             Frame localFrame = this.frame;
             switch (access) {
-                case READ_ONLY: {
-                    // assert that it is really used read only
-                    assert (localFrame = new ReadOnlyFrame(localFrame)) != null;
-                    return localFrame;
-                }
+                case READ_ONLY:
+                    /* Verify that it is really used read only. */
+                    return new ReadOnlyFrame(localFrame);
                 case READ_WRITE:
                     return localFrame;
                 case MATERIALIZE:

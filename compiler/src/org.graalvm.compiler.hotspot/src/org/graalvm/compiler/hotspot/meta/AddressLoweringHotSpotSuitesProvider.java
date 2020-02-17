@@ -1,11 +1,13 @@
 /*
- * Copyright (c) 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2017, 2019, Oracle and/or its affiliates. All rights reserved.
  * Copyright (c) 2017, Red Hat Inc. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -29,9 +31,9 @@ import org.graalvm.compiler.hotspot.GraalHotSpotVMConfig;
 import org.graalvm.compiler.hotspot.HotSpotGraalRuntimeProvider;
 import org.graalvm.compiler.options.OptionValues;
 import org.graalvm.compiler.phases.BasePhase;
-import org.graalvm.compiler.phases.common.AddressLoweringPhase;
-import org.graalvm.compiler.phases.common.ExpandLogicPhase;
-import org.graalvm.compiler.phases.common.FixReadsPhase;
+import org.graalvm.compiler.phases.Phase;
+import org.graalvm.compiler.phases.common.UseTrappingNullChecksPhase;
+import org.graalvm.compiler.phases.schedule.SchedulePhase;
 import org.graalvm.compiler.phases.tiers.LowTierContext;
 import org.graalvm.compiler.phases.tiers.Suites;
 import org.graalvm.compiler.phases.tiers.SuitesCreator;
@@ -41,10 +43,10 @@ import org.graalvm.compiler.phases.tiers.SuitesCreator;
  */
 public class AddressLoweringHotSpotSuitesProvider extends HotSpotSuitesProvider {
 
-    private final AddressLoweringPhase.AddressLowering addressLowering;
+    private final Phase addressLowering;
 
     public AddressLoweringHotSpotSuitesProvider(SuitesCreator defaultSuitesCreator, GraalHotSpotVMConfig config, HotSpotGraalRuntimeProvider runtime,
-                    AddressLoweringPhase.AddressLowering addressLowering) {
+                    Phase addressLowering) {
         super(defaultSuitesCreator, config, runtime);
         this.addressLowering = addressLowering;
     }
@@ -53,11 +55,12 @@ public class AddressLoweringHotSpotSuitesProvider extends HotSpotSuitesProvider 
     public Suites createSuites(OptionValues options) {
         Suites suites = super.createSuites(options);
 
-        ListIterator<BasePhase<? super LowTierContext>> findPhase = suites.getLowTier().findPhase(FixReadsPhase.class);
+        ListIterator<BasePhase<? super LowTierContext>> findPhase = suites.getLowTier().findPhase(UseTrappingNullChecksPhase.class);
         if (findPhase == null) {
-            findPhase = suites.getLowTier().findPhase(ExpandLogicPhase.class);
+            findPhase = suites.getLowTier().findPhase(SchedulePhase.class);
         }
-        findPhase.add(new AddressLoweringPhase(addressLowering));
+        findPhase.previous();
+        findPhase.add(addressLowering);
 
         return suites;
     }

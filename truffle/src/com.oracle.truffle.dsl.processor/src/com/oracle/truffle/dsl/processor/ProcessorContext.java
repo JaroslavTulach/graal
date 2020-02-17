@@ -1,24 +1,42 @@
 /*
- * Copyright (c) 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
- * This code is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * The Universal Permissive License (UPL), Version 1.0
  *
- * This code is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
- * version 2 for more details (a copy is included in the LICENSE file that
- * accompanied this code).
+ * Subject to the condition set forth below, permission is hereby granted to any
+ * person obtaining a copy of this software, associated documentation and/or
+ * data (collectively the "Software"), free of charge and under any and all
+ * copyright rights in the Software, and any and all patent rights owned or
+ * freely licensable by each licensor hereunder covering either (i) the
+ * unmodified Software as contributed to or provided by such licensor, or (ii)
+ * the Larger Works (as defined below), to deal in both
  *
- * You should have received a copy of the GNU General Public License version
- * 2 along with this work; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
+ * (a) the Software, and
  *
- * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
- * or visit www.oracle.com if you need additional information or have any
- * questions.
+ * (b) any piece of software and/or hardware listed in the lrgrwrks.txt file if
+ * one is included with the Software each a "Larger Work" to which the Software
+ * is contributed by such licensors),
+ *
+ * without restriction, including without limitation the rights to copy, create
+ * derivative works of, display, perform, and distribute the Software and make,
+ * use, sell, offer for sale, import, export, have made, and have sold the
+ * Software and the Larger Work(s), and to sublicense the foregoing rights on
+ * either these or other terms.
+ *
+ * This license is subject to the following condition:
+ *
+ * The above copyright notice and either this complete permission notice or at a
+ * minimum a reference to the UPL must be included in all copies or substantial
+ * portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
  */
 package com.oracle.truffle.dsl.processor;
 
@@ -35,9 +53,6 @@ import javax.lang.model.type.TypeMirror;
 import javax.lang.model.type.WildcardType;
 import javax.lang.model.util.Types;
 
-import com.oracle.truffle.api.frame.Frame;
-import com.oracle.truffle.api.frame.MaterializedFrame;
-import com.oracle.truffle.api.frame.VirtualFrame;
 import com.oracle.truffle.dsl.processor.java.ElementUtils;
 import com.oracle.truffle.dsl.processor.java.model.CodeTypeMirror;
 import com.oracle.truffle.dsl.processor.model.Template;
@@ -53,17 +68,17 @@ public class ProcessorContext {
 
     private final ProcessCallback callback;
     private final Log log;
-    private final TruffleTypes truffleTypes;
+    private TruffleTypes types;
 
-    ProcessorContext(ProcessingEnvironment env, ProcessCallback callback) {
+    public ProcessorContext(ProcessingEnvironment env, ProcessCallback callback) {
         this.environment = env;
         this.callback = callback;
-        this.log = new Log(environment);
-        this.truffleTypes = new TruffleTypes(this);
+        boolean emitWarnings = !Boolean.parseBoolean(System.getProperty("truffle.dsl.ignoreCompilerWarnings", "false"));
+        this.log = new Log(environment, emitWarnings);
     }
 
-    public TruffleTypes getTruffleTypes() {
-        return truffleTypes;
+    public TruffleTypes getTypes() {
+        return types;
     }
 
     public Log getLog() {
@@ -96,12 +111,37 @@ public class ProcessorContext {
         return (DeclaredType) ElementUtils.getType(environment, element);
     }
 
+    public DeclaredType getDeclaredTypeOptional(String element) {
+        TypeElement type = ElementUtils.getTypeElement(environment, element);
+        if (type == null) {
+            return null;
+        }
+        return (DeclaredType) type.asType();
+    }
+
+    public DeclaredType getDeclaredType(String element) {
+        TypeElement type = ElementUtils.getTypeElement(environment, element);
+        if (type == null) {
+            throw new IllegalArgumentException("Processor requested type " + element + " but was not on the classpath.");
+        }
+        return (DeclaredType) type.asType();
+    }
+
     public boolean isType(TypeMirror type, Class<?> clazz) {
         return ElementUtils.typeEquals(type, getType(clazz));
     }
 
     public TypeMirror getType(Class<?> element) {
         return ElementUtils.getType(environment, element);
+    }
+
+    public TypeElement getTypeElement(Class<?> element) {
+        DeclaredType type = getDeclaredType(element);
+        return (TypeElement) type.asElement();
+    }
+
+    public TypeElement getTypeElement(DeclaredType element) {
+        return (TypeElement) element.asElement();
     }
 
     public interface ProcessCallback {
@@ -115,7 +155,7 @@ public class ProcessorContext {
     }
 
     private TypeMirror getType(String className) {
-        TypeElement element = environment.getElementUtils().getTypeElement(className);
+        TypeElement element = ElementUtils.getTypeElement(environment, className);
         if (element != null) {
             return element.asType();
         }
@@ -128,13 +168,13 @@ public class ProcessorContext {
         } else if (type.getKind().isPrimitive()) {
             return type;
         }
-        Types types = getEnvironment().getTypeUtils();
+        Types typesUtils = getEnvironment().getTypeUtils();
 
         switch (type.getKind()) {
             case ARRAY:
-                return types.getArrayType(reloadType(((ArrayType) type).getComponentType()));
+                return typesUtils.getArrayType(reloadType(((ArrayType) type).getComponentType()));
             case WILDCARD:
-                return types.getWildcardType(((WildcardType) type).getExtendsBound(), ((WildcardType) type).getSuperBound());
+                return typesUtils.getWildcardType(((WildcardType) type).getExtendsBound(), ((WildcardType) type).getSuperBound());
             case DECLARED:
                 return reloadTypeElement((TypeElement) (((DeclaredType) type).asElement()));
         }
@@ -143,8 +183,30 @@ public class ProcessorContext {
 
     private static final ThreadLocal<ProcessorContext> instance = new ThreadLocal<>();
 
-    public static void setThreadLocalInstance(ProcessorContext context) {
+    public static ProcessorContext enter(ProcessingEnvironment environment, ProcessCallback callback) {
+        ProcessorContext context = new ProcessorContext(environment, callback);
+        setThreadLocalInstance(context);
+        return context;
+    }
+
+    public static ProcessorContext enter(ProcessingEnvironment environment) {
+        return enter(environment, null);
+    }
+
+    public static void leave() {
+        instance.set(null);
+    }
+
+    private static void setThreadLocalInstance(ProcessorContext context) {
         instance.set(context);
+        if (context != null && context.types == null) {
+            try {
+                context.types = new TruffleTypes();
+            } catch (IllegalArgumentException e) {
+                TruffleProcessor.handleThrowable(null, e, null);
+                throw e;
+            }
+        }
     }
 
     public static ProcessorContext getInstance() {
@@ -152,6 +214,18 @@ public class ProcessorContext {
     }
 
     public List<TypeMirror> getFrameTypes() {
-        return Arrays.asList(getType(VirtualFrame.class), getType(MaterializedFrame.class), getType(Frame.class));
+        return Arrays.asList(types.VirtualFrame, types.MaterializedFrame, types.Frame);
+    }
+
+    private final Map<Class<?>, Map<?, ?>> caches = new HashMap<>();
+
+    @SuppressWarnings("unchecked")
+    public <K, V> Map<K, V> getCacheMap(Class<?> key) {
+        Map<?, ?> cacheMap = caches.get(key);
+        if (cacheMap == null) {
+            cacheMap = new HashMap<>();
+            caches.put(key, cacheMap);
+        }
+        return (Map<K, V>) cacheMap;
     }
 }

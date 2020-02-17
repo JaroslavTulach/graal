@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2015, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -31,9 +33,6 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
-import org.junit.Assert;
-import org.junit.Test;
-
 import org.graalvm.compiler.api.directives.GraalDirectives;
 import org.graalvm.compiler.core.test.GraalCompilerTest;
 import org.graalvm.compiler.graph.Node;
@@ -44,6 +43,9 @@ import org.graalvm.compiler.nodes.ReturnNode;
 import org.graalvm.compiler.nodes.StructuredGraph;
 import org.graalvm.compiler.nodes.StructuredGraph.AllowAssumptions;
 import org.graalvm.compiler.nodes.debug.ControlFlowAnchorNode;
+import org.graalvm.compiler.phases.OptimisticOptimizations;
+import org.junit.Assert;
+import org.junit.Test;
 
 import jdk.vm.ci.meta.ResolvedJavaMethod;
 
@@ -239,7 +241,12 @@ public class ControlFlowAnchorDirectiveTest extends GraalCompilerTest {
     }
 
     @Override
-    protected boolean checkLowTierGraph(StructuredGraph graph) {
+    protected OptimisticOptimizations getOptimisticOptimizations() {
+        return OptimisticOptimizations.ALL.remove(OptimisticOptimizations.Optimization.RemoveNeverExecutedCode);
+    }
+
+    @Override
+    protected void checkLowTierGraph(StructuredGraph graph) {
         List<ControlFlowAnchorNode> anchors = graph.getNodes().filter(ControlFlowAnchorNode.class).snapshot();
         for (int i = 0; i < anchors.size(); i++) {
             ControlFlowAnchorNode a = anchors.get(i);
@@ -255,6 +262,5 @@ public class ControlFlowAnchorDirectiveTest extends GraalCompilerTest {
             NodeIterable<? extends Node> nodes = graph.getNodes().filter(nodeCount.nodeClass());
             Assert.assertEquals(nodeCount.nodeClass().getSimpleName(), nodeCount.expectedCount(), nodes.count());
         }
-        return true;
     }
 }

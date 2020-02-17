@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2017, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -22,21 +24,29 @@
  */
 package org.graalvm.compiler.truffle.test;
 
-import org.graalvm.compiler.debug.DebugHandlersFactory;
-import org.graalvm.compiler.debug.DebugContext;
-import org.graalvm.compiler.options.OptionValues;
-import org.graalvm.compiler.truffle.hotspot.HotSpotTruffleCompiler;
-import org.graalvm.compiler.truffle.GraalTruffleRuntime;
-import org.graalvm.compiler.truffle.OptimizedCallTarget;
-import org.graalvm.compiler.truffle.TruffleCompilerOptions;
+import org.graalvm.compiler.truffle.common.TruffleInliningPlan;
+import org.graalvm.compiler.truffle.runtime.DefaultInliningPolicy;
+import org.graalvm.compiler.truffle.runtime.GraalTruffleRuntime;
+import org.graalvm.compiler.truffle.runtime.OptimizedCallTarget;
+import org.graalvm.compiler.truffle.runtime.TruffleInlining;
 import org.junit.Assert;
+import org.junit.Before;
 import org.junit.Test;
 
 import com.oracle.truffle.api.CompilerDirectives;
 import com.oracle.truffle.api.frame.VirtualFrame;
 import com.oracle.truffle.api.nodes.RootNode;
+import java.util.Map;
+import org.graalvm.compiler.truffle.common.TruffleCompilation;
+import org.graalvm.compiler.truffle.common.TruffleCompiler;
+import org.graalvm.compiler.truffle.common.TruffleDebugContext;
 
-public class TransferToInterpreterTest {
+public class TransferToInterpreterTest extends TestWithPolyglotOptions {
+
+    @Before
+    public void setup() {
+        setupContext("engine.CompileImmediately", Boolean.FALSE.toString());
+    }
 
     private final class TestRootNode extends RootNode {
 
@@ -63,9 +73,14 @@ public class TransferToInterpreterTest {
         OptimizedCallTarget target = (OptimizedCallTarget) runtime.createCallTarget(rootNode);
         target.call(0);
         Assert.assertFalse(target.isValid());
-        OptionValues options = TruffleCompilerOptions.getOptions();
-        DebugContext debug = DebugContext.create(options, DebugHandlersFactory.LOADER);
-        HotSpotTruffleCompiler.create(runtime).compileMethod(debug, target, runtime);
+        final OptimizedCallTarget compilable = target;
+        TruffleCompiler compiler = runtime.newTruffleCompiler();
+        Map<String, Object> options = runtime.getOptions();
+        try (TruffleCompilation compilation = compiler.openCompilation(compilable)) {
+            TruffleDebugContext debug = compiler.openDebugContext(options, compilation);
+            TruffleInliningPlan inliningPlan = new TruffleInlining(compilable, new DefaultInliningPolicy());
+            compiler.doCompile(debug, compilation, options, inliningPlan, null, null);
+        }
         Assert.assertTrue(target.isValid());
         target.call(0);
         Assert.assertTrue(target.isValid());

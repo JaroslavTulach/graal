@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2011, 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -23,11 +25,14 @@
 package org.graalvm.compiler.nodes.calc;
 
 import org.graalvm.compiler.core.common.type.IntegerStamp;
+import org.graalvm.compiler.core.common.type.Stamp;
 import org.graalvm.compiler.graph.NodeClass;
 import org.graalvm.compiler.graph.spi.CanonicalizerTool;
 import org.graalvm.compiler.nodeinfo.NodeInfo;
 import org.graalvm.compiler.nodes.ConstantNode;
+import org.graalvm.compiler.nodes.NodeView;
 import org.graalvm.compiler.nodes.ValueNode;
+import org.graalvm.compiler.nodes.extended.GuardingNode;
 import org.graalvm.compiler.nodes.spi.LIRLowerable;
 import org.graalvm.compiler.nodes.spi.NodeLIRBuilderTool;
 
@@ -38,23 +43,35 @@ public class UnsignedDivNode extends IntegerDivRemNode implements LIRLowerable {
 
     public static final NodeClass<UnsignedDivNode> TYPE = NodeClass.create(UnsignedDivNode.class);
 
-    public UnsignedDivNode(ValueNode x, ValueNode y) {
-        this(TYPE, x, y);
+    public UnsignedDivNode(ValueNode x, ValueNode y, GuardingNode zeroCheck) {
+        this(TYPE, x, y, zeroCheck);
     }
 
-    protected UnsignedDivNode(NodeClass<? extends UnsignedDivNode> c, ValueNode x, ValueNode y) {
-        super(c, x.stamp().unrestricted(), Op.DIV, Type.UNSIGNED, x, y);
+    protected UnsignedDivNode(NodeClass<? extends UnsignedDivNode> c, ValueNode x, ValueNode y, GuardingNode zeroCheck) {
+        super(c, x.stamp(NodeView.DEFAULT).unrestricted(), Op.DIV, Type.UNSIGNED, x, y, zeroCheck);
+    }
+
+    public static ValueNode create(ValueNode x, ValueNode y, GuardingNode zeroCheck, NodeView view) {
+        Stamp stamp = x.stamp(view).unrestricted();
+        return canonical(null, x, y, zeroCheck, stamp, view);
     }
 
     @Override
     public ValueNode canonical(CanonicalizerTool tool, ValueNode forX, ValueNode forY) {
-        int bits = ((IntegerStamp) stamp()).getBits();
+        NodeView view = NodeView.from(tool);
+        return canonical(this, forX, forY, getZeroCheck(), stamp(view), view);
+    }
+
+    @SuppressWarnings("unused")
+    private static ValueNode canonical(UnsignedDivNode self, ValueNode forX, ValueNode forY, GuardingNode zeroCheck, Stamp stamp, NodeView view) {
+        int bits = ((IntegerStamp) stamp).getBits();
         if (forX.isConstant() && forY.isConstant()) {
             long yConst = CodeUtil.zeroExtend(forY.asJavaConstant().asLong(), bits);
             if (yConst == 0) {
-                return this; // this will trap, cannot canonicalize
+                /* This will trap, cannot canonicalize. */
+                return self != null ? self : new UnsignedDivNode(forX, forY, zeroCheck);
             }
-            return ConstantNode.forIntegerStamp(stamp(), Long.divideUnsigned(CodeUtil.zeroExtend(forX.asJavaConstant().asLong(), bits), yConst));
+            return ConstantNode.forIntegerStamp(stamp, Long.divideUnsigned(CodeUtil.zeroExtend(forX.asJavaConstant().asLong(), bits), yConst));
         } else if (forY.isConstant()) {
             long c = CodeUtil.zeroExtend(forY.asJavaConstant().asLong(), bits);
             if (c == 1) {
@@ -64,7 +81,7 @@ public class UnsignedDivNode extends IntegerDivRemNode implements LIRLowerable {
                 return new UnsignedRightShiftNode(forX, ConstantNode.forInt(CodeUtil.log2(c)));
             }
         }
-        return this;
+        return self != null ? self : new UnsignedDivNode(forX, forY, zeroCheck);
     }
 
     @Override

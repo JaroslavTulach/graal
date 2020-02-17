@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2015, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -29,11 +31,9 @@ import org.graalvm.compiler.core.common.LIRKind;
 import org.graalvm.compiler.core.common.cfg.AbstractBlockBase;
 import org.graalvm.compiler.lir.LIR;
 import org.graalvm.compiler.lir.LIRInstruction;
-import org.graalvm.compiler.lir.LIRInstruction.OperandMode;
 import org.graalvm.compiler.lir.StandardOp.BlockEndOp;
 import org.graalvm.compiler.lir.StandardOp.JumpOp;
 import org.graalvm.compiler.lir.StandardOp.LabelOp;
-import org.graalvm.compiler.lir.ValueConsumer;
 
 import jdk.vm.ci.meta.Value;
 
@@ -140,10 +140,6 @@ public final class SSAUtil {
         return new SSAVerifier(lir).verify();
     }
 
-    public static boolean isMerge(AbstractBlockBase<?> block) {
-        return block.getPredecessorCount() > 1;
-    }
-
     public static void verifyPhi(LIR lir, AbstractBlockBase<?> merge) {
         assert merge.getPredecessorCount() > 1;
         for (AbstractBlockBase<?> pred : merge.getPredecessors()) {
@@ -154,25 +150,7 @@ public final class SSAUtil {
         }
     }
 
-    public static void forEachPhiRegisterHint(LIR lir, AbstractBlockBase<?> block, LabelOp label, Value targetValue, OperandMode mode, ValueConsumer valueConsumer) {
-        assert mode == OperandMode.DEF : "Wrong operand mode: " + mode;
-        assert lir.getLIRforBlock(block).get(0).equals(label) : String.format("Block %s and Label %s do not match!", block, label);
-
-        if (!label.isPhiIn()) {
-            return;
-        }
-        int idx = indexOfValue(label, targetValue);
-        assert idx >= 0 : String.format("Value %s not in label %s", targetValue, label);
-
-        for (AbstractBlockBase<?> pred : block.getPredecessors()) {
-            JumpOp jump = phiOut(lir, pred);
-            Value sourceValue = jump.getOutgoingValue(idx);
-            valueConsumer.visitValue(jump, sourceValue, null, null);
-        }
-
-    }
-
-    private static int indexOfValue(LabelOp label, Value value) {
+    public static int indexOfValue(LabelOp label, Value value) {
         for (int i = 0; i < label.getIncomingSize(); i++) {
             if (label.getIncomingValue(i).equals(value)) {
                 return i;
@@ -180,5 +158,4 @@ public final class SSAUtil {
         }
         return -1;
     }
-
 }

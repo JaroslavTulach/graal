@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2009, 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2009, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -22,11 +24,12 @@
  */
 package org.graalvm.compiler.asm;
 
-import org.graalvm.compiler.core.common.NumUtil;
-
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.Arrays;
+
+import org.graalvm.compiler.core.common.NumUtil;
+import org.graalvm.compiler.serviceprovider.BufferUtil;
 
 /**
  * Code buffer management for the assembler.
@@ -46,7 +49,7 @@ final class Buffer {
 
     public void setPosition(int position) {
         assert position >= 0 && position <= data.limit();
-        data.position(position);
+        BufferUtil.asBaseBuffer(data).position(position);
     }
 
     /**
@@ -91,7 +94,7 @@ final class Buffer {
             byte[] newBuf = Arrays.copyOf(data.array(), length * 4);
             ByteBuffer newData = ByteBuffer.wrap(newBuf);
             newData.order(data.order());
-            newData.position(data.position());
+            BufferUtil.asBaseBuffer(newData).position(data.position());
             data = newData;
         }
     }
@@ -168,6 +171,6 @@ final class Buffer {
     }
 
     public void reset() {
-        data.clear();
+        BufferUtil.asBaseBuffer(data).clear();
     }
 }

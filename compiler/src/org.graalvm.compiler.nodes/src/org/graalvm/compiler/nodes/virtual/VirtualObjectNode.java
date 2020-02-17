@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2011, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -37,7 +39,9 @@ import org.graalvm.compiler.nodes.spi.LIRLowerable;
 import org.graalvm.compiler.nodes.spi.NodeLIRBuilderTool;
 
 import jdk.vm.ci.meta.JavaKind;
+import jdk.vm.ci.meta.MetaAccessProvider;
 import jdk.vm.ci.meta.ResolvedJavaType;
+import org.graalvm.compiler.nodes.spi.VirtualizerTool;
 
 @NodeInfo(cycles = CYCLES_0, size = SIZE_0)
 public abstract class VirtualObjectNode extends ValueNode implements LIRLowerable, IterableNodeType {
@@ -93,9 +97,8 @@ public abstract class VirtualObjectNode extends ValueNode implements LIRLowerabl
      *
      * @param constantOffset offset, where the value is placed.
      * @param expectedEntryKind Specifies which type is expected at this offset (Is important when
-     *            doing implicit casts, especially on big endian systems.
      */
-    public abstract int entryIndexForOffset(long constantOffset, JavaKind expectedEntryKind);
+    public abstract int entryIndexForOffset(MetaAccessProvider metaAccess, long constantOffset, JavaKind expectedEntryKind);
 
     /**
      * Returns the {@link JavaKind} of the entry at the given index.
@@ -131,4 +134,33 @@ public abstract class VirtualObjectNode extends ValueNode implements LIRLowerabl
     public void generate(NodeLIRBuilderTool gen) {
         // nothing to do...
     }
+
+    /**
+     * Checks that a read in a virtual object is a candidate for byte array virtualization.
+     *
+     * Virtualizing reads in byte arrays can happen iff all of these hold true:
+     * <li>The virtualized object is a virtualized byte array
+     * <li>Both the virtualized entry and the access kind are primitives
+     * <li>The number of bytes actually occupied by the entry is equal to the number of bytes of the
+     * access kind
+     */
+    public boolean canVirtualizeLargeByteArrayUnsafeRead(ValueNode entry, int index, JavaKind accessKind, VirtualizerTool tool) {
+        return (tool.canVirtualizeLargeByteArrayUnsafeAccess() || accessKind == JavaKind.Byte) &&
+                        !entry.isIllegalConstant() && entry.getStackKind() == accessKind.getStackKind() &&
+                        isVirtualByteArrayAccess(accessKind) &&
+                        accessKind.getByteCount() == ((VirtualArrayNode) this).byteArrayEntryByteCount(index, tool);
+    }
+
+    public boolean isVirtualByteArrayAccess(JavaKind accessKind) {
+        return accessKind.isPrimitive() && isVirtualByteArray();
+    }
+
+    public boolean isVirtualByteArray() {
+        return isVirtualArray() && entryCount() > 0 && entryKind(0) == JavaKind.Byte;
+    }
+
+    private boolean isVirtualArray() {
+        return this instanceof VirtualArrayNode;
+    }
+
 }

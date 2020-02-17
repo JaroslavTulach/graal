@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2013, 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2013, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -35,6 +37,7 @@ import java.io.PrintStream;
 import java.util.List;
 
 import org.graalvm.compiler.core.test.GraalCompilerTest;
+import org.graalvm.compiler.debug.DebugOptions.PrintGraphTarget;
 import org.graalvm.compiler.test.SubprocessUtil;
 import org.graalvm.compiler.test.SubprocessUtil.Subprocess;
 import org.junit.Assert;
@@ -52,12 +55,12 @@ public class OptionsInFileTest extends GraalCompilerTest {
         try {
             Assert.assertFalse(methodFilterValue.equals(MethodFilter.getDefaultValue()));
             Assert.assertFalse(debugFilterValue.equals(Dump.getDefaultValue()));
-            Assert.assertTrue(PrintGraph.getDefaultValue());
+            Assert.assertEquals(PrintGraphTarget.File, PrintGraph.getDefaultValue());
 
             try (PrintStream out = new PrintStream(new FileOutputStream(optionsFile))) {
                 out.println(MethodFilter.getName() + "=" + methodFilterValue);
                 out.println(Dump.getName() + "=" + debugFilterValue);
-                out.println(PrintGraph.getName() + " = false");
+                out.println(PrintGraph.getName() + " = Network");
             }
 
             List<String> vmArgs = withoutDebuggerArguments(getVMCommandLine());
@@ -68,7 +71,7 @@ public class OptionsInFileTest extends GraalCompilerTest {
             String[] expected = {
                             "graal.MethodFilter := \"a very unlikely method name\"",
                             "graal.Dump := \"a very unlikely debug scope\"",
-                            "graal.PrintGraph := false"};
+                            "graal.PrintGraph := Network"};
             for (String line : proc.output) {
                 for (int i = 0; i < expected.length; i++) {
                     if (expected[i] != null && line.contains(expected[i])) {

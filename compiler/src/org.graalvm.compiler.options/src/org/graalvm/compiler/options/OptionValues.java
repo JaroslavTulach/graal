@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2013, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2013, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -30,10 +32,10 @@ import java.util.Map;
 import java.util.SortedMap;
 import java.util.TreeMap;
 
-import org.graalvm.util.EconomicMap;
-import org.graalvm.util.Equivalence;
-import org.graalvm.util.UnmodifiableEconomicMap;
-import org.graalvm.util.UnmodifiableMapCursor;
+import org.graalvm.collections.EconomicMap;
+import org.graalvm.collections.Equivalence;
+import org.graalvm.collections.UnmodifiableEconomicMap;
+import org.graalvm.collections.UnmodifiableMapCursor;
 
 /**
  * A context for obtaining values for {@link OptionKey}s.
@@ -126,7 +128,7 @@ public class OptionValues {
     /**
      * Decodes a value that may be the sentinel value for {@code null} in a map.
      */
-    protected static Object decodeNull(Object value) {
+    public static Object decodeNull(Object value) {
         return value == NULL ? null : value;
     }
 
@@ -211,8 +213,8 @@ public class OptionValues {
             }
 
             String name = namePrefix + e.getKey();
-            String assign = containsKey(desc.optionKey) ? ":=" : "=";
-            String typeName = desc.getOptionKey() instanceof EnumOptionKey ? "String" : desc.getType().getSimpleName();
+            String assign = containsKey(desc.getOptionKey()) ? ":=" : "=";
+            String typeName = desc.getOptionKey() instanceof EnumOptionKey ? "String" : desc.getOptionValueType().getSimpleName();
             String linePrefix = String.format("%s %s %s ", name, assign, value);
             int typeStartPos = PROPERTY_LINE_WIDTH - typeName.length();
             int linePad = typeStartPos - linePrefix.length();

@@ -1,31 +1,47 @@
 /*
- * Copyright (c) 2015, 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
- * This code is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.  Oracle designates this
- * particular file as subject to the "Classpath" exception as provided
- * by Oracle in the LICENSE file that accompanied this code.
+ * The Universal Permissive License (UPL), Version 1.0
  *
- * This code is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
- * version 2 for more details (a copy is included in the LICENSE file that
- * accompanied this code).
+ * Subject to the condition set forth below, permission is hereby granted to any
+ * person obtaining a copy of this software, associated documentation and/or
+ * data (collectively the "Software"), free of charge and under any and all
+ * copyright rights in the Software, and any and all patent rights owned or
+ * freely licensable by each licensor hereunder covering either (i) the
+ * unmodified Software as contributed to or provided by such licensor, or (ii)
+ * the Larger Works (as defined below), to deal in both
  *
- * You should have received a copy of the GNU General Public License version
- * 2 along with this work; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
+ * (a) the Software, and
  *
- * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
- * or visit www.oracle.com if you need additional information or have any
- * questions.
+ * (b) any piece of software and/or hardware listed in the lrgrwrks.txt file if
+ * one is included with the Software each a "Larger Work" to which the Software
+ * is contributed by such licensors),
+ *
+ * without restriction, including without limitation the rights to copy, create
+ * derivative works of, display, perform, and distribute the Software and make,
+ * use, sell, offer for sale, import, export, have made, and have sold the
+ * Software and the Larger Work(s), and to sublicense the foregoing rights on
+ * either these or other terms.
+ *
+ * This license is subject to the following condition:
+ *
+ * The above copyright notice and either this complete permission notice or at a
+ * minimum a reference to the UPL must be included in all copies or substantial
+ * portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
  */
 package com.oracle.truffle.api.debug;
 
-import com.oracle.truffle.api.debug.DebuggerSession.SteppingLocation;
 import com.oracle.truffle.api.instrumentation.EventContext;
+import com.oracle.truffle.api.instrumentation.ProbeNode;
 
 /**
  * Implementation of a strategy for a debugger <em>action</em> that allows execution to continue
@@ -53,19 +69,60 @@ abstract class SteppingStrategy {
     void notifyCallExit() {
     }
 
+    @SuppressWarnings("unused")
+    void notifyNodeEntry(EventContext context) {
+    }
+
+    @SuppressWarnings("unused")
+    void notifyNodeExit(EventContext context) {
+    }
+
+    Object notifyOnUnwind() {
+        return null;
+    }
+
     boolean isStopAfterCall() {
         return true;
     }
 
-    boolean isActive() {
+    boolean isCollectingInputValues() {
+        return false;
+    }
+
+    /**
+     * Like {@link #isActive(EventContext, SuspendAnchor)}, but is called on a node entry/return
+     * only. It allows to include the node entry/return events to call entry/exit events for cases
+     * when the step over/out is not determined by pushed frames only, but pushed nodes also.
+     */
+    final boolean isActiveOnStepTo(EventContext context, SuspendAnchor suspendAnchor) {
+        if (SuspendAnchor.BEFORE == suspendAnchor) {
+            notifyNodeEntry(context);
+        } else {
+            notifyNodeExit(context);
+        }
+        return isActive(context, suspendAnchor);
+    }
+
+    /**
+     * Test if the strategy is active at this context. If yes,
+     * {@link #step(DebuggerSession, EventContext, SuspendAnchor)} will be called.
+     */
+    @SuppressWarnings("unused")
+    boolean isActive(EventContext context, SuspendAnchor suspendAnchor) {
         return true;
     }
 
-    abstract boolean step(DebuggerSession steppingSession, EventContext context, SteppingLocation location);
+    abstract boolean step(DebuggerSession steppingSession, EventContext context, SuspendAnchor suspendAnchor);
 
-    abstract void initialize();
+    @SuppressWarnings("unused")
+    void initialize(SuspendedContext context, SuspendAnchor suspendAnchor) {
+    }
 
     boolean isDone() {
+        return false;
+    }
+
+    boolean isUnwind() {
         return false;
     }
 
@@ -94,16 +151,20 @@ abstract class SteppingStrategy {
         return new Continue();
     }
 
-    static SteppingStrategy createStepInto(int stepCount) {
-        return new StepInto(stepCount);
+    static SteppingStrategy createStepInto(DebuggerSession session, StepConfig config) {
+        return new StepInto(session, config);
     }
 
-    static SteppingStrategy createStepOut(int stepCount) {
-        return new StepOut(stepCount);
+    static SteppingStrategy createStepOut(DebuggerSession session, StepConfig config) {
+        return new StepOut(session, config);
     }
 
-    static SteppingStrategy createStepOver(int stepCount) {
-        return new StepOver(stepCount);
+    static SteppingStrategy createStepOver(DebuggerSession session, StepConfig config) {
+        return new StepOver(session, config);
+    }
+
+    static SteppingStrategy createUnwind(int depth) {
+        return new Unwind(depth);
     }
 
     static SteppingStrategy createComposed(SteppingStrategy strategy1, SteppingStrategy strategy2) {
@@ -113,13 +174,8 @@ abstract class SteppingStrategy {
     private static final class Kill extends SteppingStrategy {
 
         @Override
-        boolean step(DebuggerSession steppingSession, EventContext context, SteppingLocation location) {
+        boolean step(DebuggerSession steppingSession, EventContext context, SuspendAnchor suspendAnchor) {
             return true;
-        }
-
-        @Override
-        void initialize() {
-
         }
 
         @Override
@@ -142,12 +198,13 @@ abstract class SteppingStrategy {
     private static final class AlwaysHalt extends SteppingStrategy {
 
         @Override
-        boolean step(DebuggerSession steppingSession, EventContext context, SteppingLocation location) {
-            return true;
+        boolean isActive(EventContext context, SuspendAnchor suspendAnchor) {
+            return SuspendAnchor.BEFORE == suspendAnchor;
         }
 
         @Override
-        void initialize() {
+        boolean step(DebuggerSession steppingSession, EventContext context, SuspendAnchor suspendAnchor) {
+            return SuspendAnchor.BEFORE == suspendAnchor;
         }
 
         @Override
@@ -171,13 +228,8 @@ abstract class SteppingStrategy {
     private static final class Continue extends SteppingStrategy {
 
         @Override
-        boolean step(DebuggerSession steppingSession, EventContext context, SteppingLocation location) {
+        boolean step(DebuggerSession steppingSession, EventContext context, SuspendAnchor suspendAnchor) {
             return false;
-        }
-
-        @Override
-        void initialize() {
-
         }
 
         @Override
@@ -209,15 +261,19 @@ abstract class SteppingStrategy {
      */
     private static final class StepInto extends SteppingStrategy {
 
+        private final DebuggerSession session;
+        private final StepConfig stepConfig;
         private int stackCounter;
         private int unfinishedStepCount;
 
-        StepInto(int stepCount) {
-            this.unfinishedStepCount = stepCount;
+        StepInto(DebuggerSession session, StepConfig stepConfig) {
+            this.session = session;
+            this.stepConfig = stepConfig;
+            this.unfinishedStepCount = stepConfig.getCount();
         }
 
         @Override
-        void initialize() {
+        void initialize(SuspendedContext context, SuspendAnchor suspendAnchor) {
             this.stackCounter = 0;
         }
 
@@ -237,9 +293,19 @@ abstract class SteppingStrategy {
         }
 
         @Override
-        boolean step(DebuggerSession steppingSession, EventContext context, SteppingLocation location) {
-            if (location == SteppingLocation.BEFORE_STATEMENT ||
-                            location == SteppingLocation.AFTER_CALL && stackCounter < 0) {
+        boolean isCollectingInputValues() {
+            return stepConfig.containsSourceElement(session, SourceElement.EXPRESSION);
+        }
+
+        @Override
+        boolean isActive(EventContext context, SuspendAnchor suspendAnchor) {
+            return stepConfig.matches(session, context, suspendAnchor);
+        }
+
+        @Override
+        boolean step(DebuggerSession steppingSession, EventContext context, SuspendAnchor suspendAnchor) {
+            if (stepConfig.matches(session, context, suspendAnchor) ||
+                            SuspendAnchor.AFTER == suspendAnchor && stackCounter < 0) {
                 stackCounter = 0;
                 if (--unfinishedStepCount <= 0) {
                     return true;
@@ -272,53 +338,83 @@ abstract class SteppingStrategy {
      */
     private static final class StepOut extends SteppingStrategy {
 
+        private final DebuggerSession session;
+        private final StepConfig stepConfig;
+        private final boolean exprStepping;
         private int stackCounter;
+        private int exprCounter;
         private int unfinishedStepCount;
-        private boolean active = false;
+        private boolean activeFrame = false;
+        private boolean activeExpression = false;
 
-        StepOut(int stepCount) {
-            this.unfinishedStepCount = stepCount;
+        StepOut(DebuggerSession session, StepConfig stepConfig) {
+            this.session = session;
+            this.stepConfig = stepConfig;
+            this.exprStepping = stepConfig.containsSourceElement(session, SourceElement.EXPRESSION);
+            this.unfinishedStepCount = stepConfig.getCount();
         }
 
         @Override
-        void initialize() {
+        void initialize(SuspendedContext context, SuspendAnchor suspendAnchor) {
             this.stackCounter = 0;
+            this.exprCounter = 0;
         }
 
         @Override
         void notifyCallEntry() {
             stackCounter++;
-            active = false;
+            activeFrame = false;
         }
 
         @Override
         void notifyCallExit() {
             boolean isOn = (--stackCounter) < 0;
             if (isOn) {
-                active = true;
+                activeFrame = true;
+            }
+        }
+
+        @Override
+        void notifyNodeEntry(EventContext context) {
+            if (exprStepping && context.hasTag(SourceElement.EXPRESSION.getTag())) {
+                exprCounter++;
+                activeExpression = false;
+            }
+        }
+
+        @Override
+        void notifyNodeExit(EventContext context) {
+            if (exprStepping && context.hasTag(SourceElement.EXPRESSION.getTag())) {
+                boolean isOn = (--exprCounter) < 0;
+                if (isOn) {
+                    activeExpression = true;
+                }
             }
         }
 
         @Override
         boolean isStopAfterCall() {
-            return active;
+            return activeFrame;
         }
 
         @Override
-        boolean isActive() {
-            return active;
+        boolean isCollectingInputValues() {
+            return stepConfig.containsSourceElement(session, SourceElement.EXPRESSION);
         }
 
         @Override
-        boolean step(DebuggerSession steppingSession, EventContext context, SteppingLocation location) {
+        boolean isActive(EventContext context, SuspendAnchor suspendAnchor) {
+            return (activeFrame || activeExpression) && stepConfig.matches(session, context, suspendAnchor);
+        }
+
+        @Override
+        boolean step(DebuggerSession steppingSession, EventContext context, SuspendAnchor suspendAnchor) {
             stackCounter = 0;
-            if (location == SteppingLocation.BEFORE_STATEMENT || // when there is no call node
-                            location == SteppingLocation.AFTER_CALL) {
-                if (--unfinishedStepCount <= 0) {
-                    return true;
-                }
+            exprCounter = 0;
+            if (--unfinishedStepCount <= 0) {
+                return true;
             }
-            active = false; // waiting for next call exit
+            activeFrame = false; // waiting for next call exit
             return false;
         }
 
@@ -344,30 +440,57 @@ abstract class SteppingStrategy {
      */
     private static final class StepOver extends SteppingStrategy {
 
+        private final DebuggerSession session;
+        private final StepConfig stepConfig;
+        private final boolean exprStepping;
         private int stackCounter;
+        private int exprCounter;
         private int unfinishedStepCount;
-        private boolean active = true;
+        private boolean activeFrame = true;
+        private boolean activeExpression = true;
 
-        StepOver(int stepCount) {
-            this.unfinishedStepCount = stepCount;
+        StepOver(DebuggerSession session, StepConfig stepConfig) {
+            this.session = session;
+            this.stepConfig = stepConfig;
+            this.exprStepping = stepConfig.containsSourceElement(session, SourceElement.EXPRESSION);
+            this.unfinishedStepCount = stepConfig.getCount();
         }
 
         @Override
-        void initialize() {
+        void initialize(SuspendedContext context, SuspendAnchor suspendAnchor) {
             this.stackCounter = 0;
+            this.exprCounter = context.hasTag(SourceElement.EXPRESSION.getTag()) && SuspendAnchor.BEFORE == suspendAnchor ? 0 : -1;
         }
 
         @Override
         void notifyCallEntry() {
             stackCounter++;
-            active = stackCounter <= 0;
+            activeFrame = stackCounter <= 0;
         }
 
         @Override
         void notifyCallExit() {
             boolean isOn = (--stackCounter) <= 0;
             if (isOn) {
-                active = true;
+                activeFrame = true;
+            }
+        }
+
+        @Override
+        void notifyNodeEntry(EventContext context) {
+            if (exprStepping && context.hasTag(SourceElement.EXPRESSION.getTag())) {
+                exprCounter++;
+                activeExpression = exprCounter <= 0;
+            }
+        }
+
+        @Override
+        void notifyNodeExit(EventContext context) {
+            if (exprStepping && context.hasTag(SourceElement.EXPRESSION.getTag())) {
+                boolean isOn = (--exprCounter) < 0;
+                if (isOn) {
+                    activeExpression = true;
+                }
             }
         }
 
@@ -377,15 +500,21 @@ abstract class SteppingStrategy {
         }
 
         @Override
-        boolean isActive() {
-            return active;
+        boolean isCollectingInputValues() {
+            return stepConfig.containsSourceElement(session, SourceElement.EXPRESSION);
         }
 
         @Override
-        boolean step(DebuggerSession steppingSession, EventContext context, SteppingLocation location) {
-            if (location == SteppingLocation.BEFORE_STATEMENT ||
-                            location == SteppingLocation.AFTER_CALL && stackCounter < 0) {
+        boolean isActive(EventContext context, SuspendAnchor suspendAnchor) {
+            return activeFrame && activeExpression && stepConfig.matches(session, context, suspendAnchor);
+        }
+
+        @Override
+        boolean step(DebuggerSession steppingSession, EventContext context, SuspendAnchor suspendAnchor) {
+            if (stepConfig.matches(session, context, suspendAnchor) ||
+                            SuspendAnchor.AFTER == suspendAnchor && (stackCounter < 0 || exprCounter < 0)) {
                 stackCounter = 0;
+                exprCounter = context.hasTag(SourceElement.EXPRESSION.getTag()) && SuspendAnchor.BEFORE == suspendAnchor ? 0 : -1;
                 return --unfinishedStepCount <= 0;
             } else {
                 return false;
@@ -395,6 +524,68 @@ abstract class SteppingStrategy {
         @Override
         public String toString() {
             return String.format("STEP_OVER(stackCounter=%s, stepCount=%s)", stackCounter, unfinishedStepCount);
+        }
+
+    }
+
+    static final class Unwind extends SteppingStrategy {
+
+        private final int depth; // Negative depth
+        private int stackCounter;
+        ThreadDeath unwind;
+
+        Unwind(int depth) {
+            this.depth = -depth;
+        }
+
+        @Override
+        void initialize(SuspendedContext contex, SuspendAnchor suspendAnchor) {
+            // We're entered already, we'll be called on exit once before unwind.
+            this.stackCounter = 1;
+        }
+
+        @Override
+        void notifyCallEntry() {
+            stackCounter++;
+        }
+
+        @Override
+        void notifyCallExit() {
+            stackCounter--;
+        }
+
+        @Override
+        Object notifyOnUnwind() {
+            if (depth == stackCounter) {
+                return ProbeNode.UNWIND_ACTION_REENTER;
+            } else {
+                return null;
+            }
+        }
+
+        @Override
+        boolean isActive(EventContext context, SuspendAnchor suspendAnchor) {
+            return SuspendAnchor.BEFORE == suspendAnchor;
+        }
+
+        @Override
+        boolean step(DebuggerSession steppingSession, EventContext context, SuspendAnchor suspendAnchor) {
+            return true;
+        }
+
+        @Override
+        boolean isUnwind() {
+            return true;
+        }
+
+        @Override
+        boolean isStopAfterCall() {
+            return false;
+        }
+
+        @Override
+        public String toString() {
+            return String.format("REENTER(stackCounter=%s, depth=%s)", stackCounter, depth);
         }
 
     }
@@ -413,9 +604,9 @@ abstract class SteppingStrategy {
         }
 
         @Override
-        void initialize() {
+        void initialize(SuspendedContext contex, SuspendAnchor suspendAnchor) {
             assert current == first;
-            current.initialize();
+            current.initialize(contex, suspendAnchor);
         }
 
         @Override
@@ -429,24 +620,34 @@ abstract class SteppingStrategy {
         }
 
         @Override
+        void notifyNodeEntry(EventContext context) {
+            current.notifyNodeEntry(context);
+        }
+
+        @Override
+        void notifyNodeExit(EventContext context) {
+            current.notifyNodeExit(context);
+        }
+
+        @Override
         boolean isStopAfterCall() {
             return current.isStopAfterCall();
         }
 
         @Override
-        boolean isActive() {
-            return current.isActive();
+        boolean isActive(EventContext context, SuspendAnchor suspendAnchor) {
+            return current.isActive(context, suspendAnchor);
         }
 
         @Override
-        boolean step(DebuggerSession steppingSession, EventContext context, SteppingLocation location) {
-            boolean hit = current.step(steppingSession, context, location);
+        boolean step(DebuggerSession steppingSession, EventContext context, SuspendAnchor suspendAnchor) {
+            boolean hit = current.step(steppingSession, context, suspendAnchor);
             if (hit) {
                 if (current == last) {
                     return true;
                 } else {
                     current = current.next;
-                    current.initialize();
+                    current.initialize(SuspendedContext.create(context, steppingSession.getDebugger().getEnv()), suspendAnchor);
                 }
             }
             return false;

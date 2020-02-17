@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2012, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -26,11 +28,13 @@ import java.lang.invoke.ConstantCallSite;
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.MethodType;
 
-import org.junit.Test;
-
 import org.graalvm.compiler.api.directives.GraalDirectives;
 import org.graalvm.compiler.api.replacements.MethodSubstitution;
+import org.graalvm.compiler.hotspot.GraalHotSpotVMConfig;
+import org.graalvm.compiler.hotspot.HotSpotBackend;
+import org.graalvm.compiler.nodes.IfNode;
 import org.graalvm.compiler.replacements.test.MethodSubstitutionTest;
+import org.junit.Test;
 
 /**
  * Tests HotSpot specific {@link MethodSubstitution}s.
@@ -46,6 +50,17 @@ public class HotSpotMethodSubstitutionTest extends MethodSubstitutionTest {
 
         test("getClass0", "a string");
         test("objectHashCode", obj);
+
+        testGraph("objectNotify", "Object.notify");
+        testGraph("objectNotifyAll", "Object.notifyAll");
+
+        synchronized (obj) {
+            test("objectNotify", obj);
+            test("objectNotifyAll", obj);
+        }
+        // Test with IllegalMonitorStateException (no synchronized block)
+        test("objectNotify", obj);
+        test("objectNotifyAll", obj);
     }
 
     @SuppressWarnings("all")
@@ -56,6 +71,16 @@ public class HotSpotMethodSubstitutionTest extends MethodSubstitutionTest {
     @SuppressWarnings("all")
     public static int objectHashCode(TestClassA obj) {
         return obj.hashCode();
+    }
+
+    @SuppressWarnings("all")
+    public static void objectNotify(Object obj) {
+        obj.notify();
+    }
+
+    @SuppressWarnings("all")
+    public static void objectNotifyAll(Object obj) {
+        obj.notifyAll();
     }
 
     @Test
@@ -109,13 +134,18 @@ public class HotSpotMethodSubstitutionTest extends MethodSubstitutionTest {
 
     @Test
     public void testThreadSubstitutions() {
+        GraalHotSpotVMConfig config = ((HotSpotBackend) getBackend()).getRuntime().getVMConfig();
         testGraph("currentThread");
-        testGraph("threadIsInterrupted");
-        testGraph("threadInterrupted");
+        if (config.osThreadInterruptedOffset != Integer.MAX_VALUE) {
+            assertInGraph(testGraph("threadIsInterrupted", "isInterrupted", true), IfNode.class);
+            assertInGraph(testGraph("threadInterrupted", "isInterrupted", true), IfNode.class);
+        }
 
         Thread currentThread = Thread.currentThread();
         test("currentThread", currentThread);
-        test("threadIsInterrupted", currentThread);
+        if (config.osThreadInterruptedOffset != Integer.MAX_VALUE) {
+            test("threadIsInterrupted", currentThread);
+        }
     }
 
     @SuppressWarnings("all")
@@ -208,7 +238,7 @@ public class HotSpotMethodSubstitutionTest extends MethodSubstitutionTest {
      */
     @Test
     public void testCast() {
-        test("testCastSnippet", 1, new Integer(1));
+        test("testCastSnippet", 1, Integer.valueOf(1));
     }
 
     /**

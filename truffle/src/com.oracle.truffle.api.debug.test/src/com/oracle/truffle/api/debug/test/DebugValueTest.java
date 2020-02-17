@@ -1,28 +1,59 @@
 /*
- * Copyright (c) 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2016, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
- * This code is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.  Oracle designates this
- * particular file as subject to the "Classpath" exception as provided
- * by Oracle in the LICENSE file that accompanied this code.
+ * The Universal Permissive License (UPL), Version 1.0
  *
- * This code is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
- * version 2 for more details (a copy is included in the LICENSE file that
- * accompanied this code).
+ * Subject to the condition set forth below, permission is hereby granted to any
+ * person obtaining a copy of this software, associated documentation and/or
+ * data (collectively the "Software"), free of charge and under any and all
+ * copyright rights in the Software, and any and all patent rights owned or
+ * freely licensable by each licensor hereunder covering either (i) the
+ * unmodified Software as contributed to or provided by such licensor, or (ii)
+ * the Larger Works (as defined below), to deal in both
  *
- * You should have received a copy of the GNU General Public License version
- * 2 along with this work; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
+ * (a) the Software, and
  *
- * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
- * or visit www.oracle.com if you need additional information or have any
- * questions.
+ * (b) any piece of software and/or hardware listed in the lrgrwrks.txt file if
+ * one is included with the Software each a "Larger Work" to which the Software
+ * is contributed by such licensors),
+ *
+ * without restriction, including without limitation the rights to copy, create
+ * derivative works of, display, perform, and distribute the Software and make,
+ * use, sell, offer for sale, import, export, have made, and have sold the
+ * Software and the Larger Work(s), and to sublicense the foregoing rights on
+ * either these or other terms.
+ *
+ * This license is subject to the following condition:
+ *
+ * The above copyright notice and either this complete permission notice or at a
+ * minimum a reference to the UPL must be included in all copies or substantial
+ * portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
  */
 package com.oracle.truffle.api.debug.test;
+
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertTrue;
+
+import java.util.HashMap;
+import java.util.Map;
+
+import com.oracle.truffle.api.test.polyglot.ProxyLanguage;
+import org.graalvm.polyglot.Context;
+import org.graalvm.polyglot.Source;
+import org.graalvm.polyglot.Value;
+import org.junit.Test;
 
 import com.oracle.truffle.api.debug.Breakpoint;
 import com.oracle.truffle.api.debug.DebugStackFrame;
@@ -30,24 +61,16 @@ import com.oracle.truffle.api.debug.DebugValue;
 import com.oracle.truffle.api.debug.Debugger;
 import com.oracle.truffle.api.debug.DebuggerSession;
 import com.oracle.truffle.api.debug.SuspendedEvent;
-import com.oracle.truffle.api.interop.ForeignAccess;
-import com.oracle.truffle.api.interop.KeyInfo;
-import com.oracle.truffle.api.interop.MessageResolution;
-import com.oracle.truffle.api.interop.Resolve;
+import com.oracle.truffle.api.instrumentation.test.InstrumentationTestLanguage;
+import com.oracle.truffle.api.interop.InteropLibrary;
+import com.oracle.truffle.api.interop.InvalidArrayIndexException;
 import com.oracle.truffle.api.interop.TruffleObject;
-import com.oracle.truffle.api.interop.java.JavaInterop;
-import com.oracle.truffle.api.nodes.Node;
+import com.oracle.truffle.api.interop.UnsupportedMessageException;
+import com.oracle.truffle.api.library.ExportLibrary;
+import com.oracle.truffle.api.library.ExportMessage;
 import com.oracle.truffle.api.source.SourceSection;
-import org.graalvm.polyglot.Context;
-import org.graalvm.polyglot.Source;
-import org.graalvm.polyglot.Value;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertTrue;
-import org.junit.Test;
 
+@SuppressWarnings({"static-method", "unused"})
 public class DebugValueTest extends AbstractDebugTest {
 
     @Test
@@ -81,6 +104,50 @@ public class DebugValueTest extends AbstractDebugTest {
         }
     }
 
+    @Test
+    public void testGetRawValue() throws Throwable {
+        final Source source = testSource("ROOT(\n" +
+                        "  VARIABLE(a, 42), \n" +
+                        "  VARIABLE(inf, infinity), \n" +
+                        "  STATEMENT()\n" +
+                        ")\n");
+        try (DebuggerSession session = startSession()) {
+            session.suspendNextExecution();
+            startEval(source);
+
+            expectSuspended((SuspendedEvent event) -> {
+                DebugStackFrame frame = event.getTopStackFrame();
+                DebugValue value42 = frame.getScope().getDeclaredValue("a");
+                assertEquals(42, value42.getRawValue(InstrumentationTestLanguage.class));
+                assertEquals(Double.POSITIVE_INFINITY, frame.getScope().getDeclaredValue("inf").getRawValue(InstrumentationTestLanguage.class));
+            });
+
+            expectDone();
+        }
+    }
+
+    @Test
+    public void testGetRawValueRestricted() throws Throwable {
+        final Source source = testSource("ROOT(\n" +
+                        "  VARIABLE(a, 42), \n" +
+                        "  VARIABLE(inf, infinity), \n" +
+                        "  STATEMENT()\n" +
+                        ")\n");
+        try (DebuggerSession session = startSession()) {
+            session.suspendNextExecution();
+            startEval(source);
+
+            expectSuspended((SuspendedEvent event) -> {
+                DebugStackFrame frame = event.getTopStackFrame();
+                DebugValue value42 = frame.getScope().getDeclaredValue("a");
+                assertNull(value42.getRawValue(ProxyLanguage.class));
+                assertNull(frame.getScope().getDeclaredValue("inf").getRawValue(ProxyLanguage.class));
+            });
+
+            expectDone();
+        }
+    }
+
     /**
      * Test of {@link DebugValue#isReadable()}, {@link DebugValue#isWritable()} and
      * {@link DebugValue#isInternal()}.
@@ -93,7 +160,7 @@ public class DebugValueTest extends AbstractDebugTest {
                         "))\n");
         Context context = Context.create();
         context.eval(source);
-        Value functionValue = context.importSymbol("function");
+        Value functionValue = context.getBindings(InstrumentationTestLanguage.ID).getMember("function");
         assertNotNull(functionValue);
         Debugger debugger = context.getEngine().getInstruments().get("debugger").lookup(Debugger.class);
 
@@ -112,6 +179,14 @@ public class DebugValueTest extends AbstractDebugTest {
             assertTrue(attributesTOValue.isWritable());
             // Property is not internal by default
             assertFalse(attributesTOValue.isInternal());
+            // Property does not have read side-effects by default
+            assertFalse(attributesTOValue.hasReadSideEffects());
+            // Property does not have write side-effects by default
+            assertFalse(attributesTOValue.hasWriteSideEffects());
+            // Test canExecute
+            assertFalse(attributesTOValue.canExecute());
+            DebugValue fvalue = event.getSession().getTopScope(InstrumentationTestLanguage.ID).getDeclaredValue("function");
+            assertTrue(fvalue.canExecute());
             event.prepareContinue();
             suspended[0] = true;
         });
@@ -133,6 +208,8 @@ public class DebugValueTest extends AbstractDebugTest {
             assertFalse(attributesTOValue.isReadable());
             assertFalse(attributesTOValue.isWritable());
             assertFalse(attributesTOValue.isInternal());
+            assertFalse(attributesTOValue.hasReadSideEffects());
+            assertFalse(attributesTOValue.hasWriteSideEffects());
             mao.setIsReadable(true);
             attributesTOValue = value.getProperties().iterator().next();
             assertTrue(attributesTOValue.isReadable());
@@ -142,6 +219,11 @@ public class DebugValueTest extends AbstractDebugTest {
             mao.setIsInternal(true);
             attributesTOValue = value.getProperties().iterator().next();
             assertTrue(attributesTOValue.isInternal());
+            mao.setHasReadSideEffects(true);
+            mao.setHasWriteSideEffects(true);
+            attributesTOValue = value.getProperties().iterator().next();
+            assertTrue(attributesTOValue.hasReadSideEffects());
+            assertTrue(attributesTOValue.hasWriteSideEffects());
             event.prepareContinue();
             suspended[0] = true;
         });
@@ -151,145 +233,260 @@ public class DebugValueTest extends AbstractDebugTest {
         assertTrue(suspended[0]);
     }
 
+    @Test
+    public void testCached() {
+        final Source source = testSource("DEFINE(function, ROOT(\n" +
+                        "  ARGUMENT(a), \n" +
+                        "  STATEMENT()\n" +
+                        "))\n");
+        Context context = Context.create();
+        context.eval(source);
+        Value functionValue = context.getBindings(InstrumentationTestLanguage.ID).getMember("function");
+        assertNotNull(functionValue);
+        Debugger debugger = context.getEngine().getInstruments().get("debugger").lookup(Debugger.class);
+
+        boolean[] suspended = new boolean[]{false};
+        final ModifiableAttributesTruffleObject ma = new ModifiableAttributesTruffleObject();
+        try (DebuggerSession session = debugger.startSession((SuspendedEvent event) -> {
+            assertFalse(suspended[0]);
+            DebugValue a = event.getTopStackFrame().getScope().getDeclaredValue("a");
+            ma.setIsReadable(true);
+            DebugValue ap1 = a.getProperty("p1");
+            DebugValue ap2 = a.getProperty("p2");
+            assertNotNull(ap1);
+            assertNotNull(ap2);
+
+            assertEquals(0, ap1.as(Number.class).intValue());
+            assertEquals(0, ap2.as(Number.class).intValue());
+            assertEquals(0, ap1.as(Number.class).intValue());
+            ap2 = a.getProperty("p2"); // Get a fresh property value
+            assertEquals(1, ap2.as(Number.class).intValue());
+            ap1.isArray();
+            ap1.isNull();
+            ap2.isArray();
+            ap2.isNull();
+            assertEquals(0, ap1.as(Number.class).intValue());
+            assertEquals(1, ap2.as(Number.class).intValue());
+
+            DebugValue ap1New = a.getProperty("p1");
+            DebugValue ap2New = a.getProperty("p2");
+            ap1New.isNull();
+            ap2New.isNull();
+            assertEquals(1, ap1New.as(Number.class).intValue());
+            assertEquals(2, ap2New.as(Number.class).intValue());
+            a.getProperty("p1");
+            ap1New = a.getProperty("p1");
+            ap1New.isNull();
+            ap2New.isNull();
+            assertEquals(2, ap1New.as(Number.class).intValue());
+            assertEquals(2, ap2New.as(Number.class).intValue());
+            // Original properties are unchanged:
+            assertEquals(0, ap1.as(Number.class).intValue());
+            assertEquals(1, ap2.as(Number.class).intValue());
+            event.prepareContinue();
+            suspended[0] = true;
+        })) {
+            session.install(Breakpoint.newBuilder(getSourceImpl(source)).lineIs(3).build());
+            functionValue.execute(ma);
+        }
+        assertTrue(suspended[0]);
+    }
+
+    @ExportLibrary(InteropLibrary.class)
     static final class NoAttributesTruffleObject implements TruffleObject {
 
-        @Override
-        public ForeignAccess getForeignAccess() {
-            return NoAttributesMessageResolutionForeign.ACCESS;
+        @ExportMessage
+        boolean hasMembers() {
+            return true;
         }
 
-        public static boolean isInstance(TruffleObject obj) {
-            return obj instanceof NoAttributesTruffleObject;
+        @ExportMessage
+        Object getMembers(boolean internal) {
+            return new PropertyKeysTruffleObject();
         }
 
-        @MessageResolution(receiverType = NoAttributesTruffleObject.class)
-        static final class NoAttributesMessageResolution {
+        @ExportMessage
+        boolean isMemberReadable(String member) {
+            return true;
+        }
 
-            @Resolve(message = "KEYS")
-            abstract static class NoAttributesKeysNode extends Node {
+        @ExportMessage
+        boolean isMemberModifiable(String member) {
+            return true;
+        }
 
-                @SuppressWarnings("unused")
-                public Object access(NoAttributesTruffleObject ato) {
-                    return new PropertyKeysTruffleObject();
-                }
-            }
+        @ExportMessage
+        boolean isMemberInsertable(String member) {
+            return false;
+        }
 
-            @Resolve(message = "READ")
-            abstract static class NoAttributesReadNode extends Node {
+        @ExportMessage
+        void writeMember(String member, Object value) {
+        }
 
-                @SuppressWarnings("unused")
-                public Object access(NoAttributesTruffleObject ato, String name) {
-                    return "propertyValue";
-                }
-            }
+        @ExportMessage
+        Object readMember(String member) {
+            return "propertyValue";
         }
     }
 
+    @ExportLibrary(InteropLibrary.class)
     static final class ModifiableAttributesTruffleObject implements TruffleObject {
 
         private boolean isReadable;
+        private boolean hasReadSideEffects;
         private boolean isWritable;
+        private boolean hasWriteSideEffects;
         private boolean isInternal;
+        private final Map<String, Integer> memberCounters = new HashMap<>();
 
-        @Override
-        public ForeignAccess getForeignAccess() {
-            return ModifiableAttributesMessageResolutionForeign.ACCESS;
+        @ExportMessage
+        boolean hasMembers() {
+            return true;
+        }
+
+        @ExportMessage
+        Object getMembers(boolean internal) {
+            if (internal || isInternal == internal) {
+                return new PropertyKeysTruffleObject();
+            } else {
+                return new EmptyKeysTruffleObject();
+            }
+        }
+
+        @ExportMessage
+        boolean isMemberReadable(String member) {
+            return isReadable;
+        }
+
+        @ExportMessage
+        boolean isMemberModifiable(String member) {
+            return isWritable;
+        }
+
+        @ExportMessage
+        boolean isMemberInternal(String member) {
+            return isInternal;
+        }
+
+        @ExportMessage
+        boolean hasMemberReadSideEffects(String member) {
+            return hasReadSideEffects;
+        }
+
+        @ExportMessage
+        boolean hasMemberWriteSideEffects(String member) {
+            return hasWriteSideEffects;
+        }
+
+        @ExportMessage
+        boolean isMemberInsertable(String member) {
+            return false;
+        }
+
+        @ExportMessage
+        void writeMember(String member, Object value) {
+        }
+
+        @ExportMessage
+        Object readMember(String member) {
+            Integer counter = memberCounters.get(member);
+            if (counter == null) {
+                counter = 0;
+            } else {
+                counter++;
+            }
+            memberCounters.put(member, counter);
+            return counter;
         }
 
         public void setIsReadable(boolean isReadable) {
             this.isReadable = isReadable;
         }
 
+        public void setHasReadSideEffects(boolean hasSideEffects) {
+            this.hasReadSideEffects = hasSideEffects;
+        }
+
         public void setIsWritable(boolean isWritable) {
             this.isWritable = isWritable;
+        }
+
+        public void setHasWriteSideEffects(boolean hasSideEffects) {
+            this.hasWriteSideEffects = hasSideEffects;
         }
 
         public void setIsInternal(boolean isInternal) {
             this.isInternal = isInternal;
         }
 
+        public String getMemberCounters() {
+            return memberCounters.toString();
+        }
+
         public static boolean isInstance(TruffleObject obj) {
             return obj instanceof ModifiableAttributesTruffleObject;
         }
 
-        @MessageResolution(receiverType = ModifiableAttributesTruffleObject.class)
-        static final class ModifiableAttributesMessageResolution {
-
-            @Resolve(message = "KEYS")
-            abstract static class ModifiableAttributesKeysNode extends Node {
-
-                public Object access(ModifiableAttributesTruffleObject ato, boolean internal) {
-                    if (internal || ato.isInternal == internal) {
-                        return new PropertyKeysTruffleObject();
-                    } else {
-                        return JavaInterop.asTruffleObject(new Object[]{});
-                    }
-                }
-            }
-
-            @Resolve(message = "READ")
-            abstract static class ModifiableAttributesReadNode extends Node {
-
-                @SuppressWarnings("unused")
-                public Object access(ModifiableAttributesTruffleObject ato, String name) {
-                    return "propertyValue";
-                }
-            }
-
-            @Resolve(message = "KEY_INFO")
-            abstract static class ModifiableAttributesKeyInfoNode extends Node {
-
-                @SuppressWarnings("unused")
-                public int access(ModifiableAttributesTruffleObject ato, String propName) {
-                    return KeyInfo.newBuilder().setReadable(ato.isReadable).setWritable(ato.isWritable).setInternal(ato.isInternal).build();
-                }
-            }
-        }
     }
 
     /**
      * Truffle object representing property keys and having one property named "property".
      */
+    @ExportLibrary(InteropLibrary.class)
     static final class PropertyKeysTruffleObject implements TruffleObject {
 
-        @Override
-        public ForeignAccess getForeignAccess() {
-            return PropertyKeysMessageResolutionForeign.ACCESS;
+        @ExportMessage
+        boolean hasArrayElements() {
+            return true;
         }
 
-        public static boolean isInstance(TruffleObject obj) {
-            return obj instanceof PropertyKeysTruffleObject;
-        }
-
-        @MessageResolution(receiverType = PropertyKeysTruffleObject.class)
-        static final class PropertyKeysMessageResolution {
-
-            @Resolve(message = "HAS_SIZE")
-            abstract static class PropertyKeysHasSizeNode extends Node {
-
-                @SuppressWarnings("unused")
-                public boolean access(PropertyKeysTruffleObject ato) {
-                    return true;
-                }
-            }
-
-            @Resolve(message = "GET_SIZE")
-            abstract static class PropertyKeysGetSizeNode extends Node {
-
-                @SuppressWarnings("unused")
-                public int access(PropertyKeysTruffleObject ato) {
-                    return 1;
-                }
-            }
-
-            @Resolve(message = "READ")
-            abstract static class PropertyKeysReadNode extends Node {
-
-                @SuppressWarnings("unused")
-                public Object access(PropertyKeysTruffleObject ato, int index) {
+        @ExportMessage
+        Object readArrayElement(long index) throws UnsupportedMessageException, InvalidArrayIndexException {
+            switch ((int) index) {
+                case 0:
                     return "property";
-                }
+                case 1:
+                    return "p1";
+                case 2:
+                    return "p2";
+                default:
+                    throw new IllegalStateException("Wrong index: " + index);
             }
+        }
+
+        @ExportMessage
+        long getArraySize() throws UnsupportedMessageException {
+            return 3L;
+        }
+
+        @ExportMessage
+        boolean isArrayElementReadable(long index) {
+            return 0 <= index && index < 3;
+        }
+    }
+
+    @ExportLibrary(InteropLibrary.class)
+    static final class EmptyKeysTruffleObject implements TruffleObject {
+
+        @ExportMessage
+        boolean hasArrayElements() {
+            return true;
+        }
+
+        @ExportMessage
+        Object readArrayElement(long index) throws UnsupportedMessageException, InvalidArrayIndexException {
+            throw InvalidArrayIndexException.create(index);
+        }
+
+        @ExportMessage
+        long getArraySize() throws UnsupportedMessageException {
+            return 0L;
+        }
+
+        @ExportMessage
+        boolean isArrayElementReadable(long index) {
+            return false;
         }
     }
 

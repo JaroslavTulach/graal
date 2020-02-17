@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2014, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -22,9 +24,10 @@
  */
 package org.graalvm.compiler.core.common;
 
-import static org.graalvm.compiler.core.common.UnsafeAccess.UNSAFE;
+import static org.graalvm.compiler.serviceprovider.GraalUnsafeAccess.getUnsafe;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 
 import org.graalvm.compiler.debug.GraalError;
@@ -35,6 +38,8 @@ import sun.misc.Unsafe;
  * Describes fields in a class, primarily for access via {@link Unsafe}.
  */
 public class Fields {
+
+    private static final Unsafe UNSAFE = getUnsafe();
 
     /**
      * Offsets used with {@link Unsafe} to access the fields.
@@ -142,9 +147,40 @@ public class Fields {
                 }
             } else {
                 Object obj = UNSAFE.getObject(from, offset);
+                if (obj != null && type.isArray()) {
+                    if (type.getComponentType().isPrimitive()) {
+                        obj = copyObjectAsArray(obj);
+                    } else {
+                        obj = ((Object[]) obj).clone();
+                    }
+                }
                 UNSAFE.putObject(to, offset, trans == null ? obj : trans.apply(index, obj));
             }
         }
+    }
+
+    private static Object copyObjectAsArray(Object obj) {
+        Object objCopy;
+        if (obj instanceof int[]) {
+            objCopy = Arrays.copyOf((int[]) obj, ((int[]) obj).length);
+        } else if (obj instanceof short[]) {
+            objCopy = Arrays.copyOf((short[]) obj, ((short[]) obj).length);
+        } else if (obj instanceof long[]) {
+            objCopy = Arrays.copyOf((long[]) obj, ((long[]) obj).length);
+        } else if (obj instanceof float[]) {
+            objCopy = Arrays.copyOf((float[]) obj, ((float[]) obj).length);
+        } else if (obj instanceof double[]) {
+            objCopy = Arrays.copyOf((double[]) obj, ((double[]) obj).length);
+        } else if (obj instanceof boolean[]) {
+            objCopy = Arrays.copyOf((boolean[]) obj, ((boolean[]) obj).length);
+        } else if (obj instanceof byte[]) {
+            objCopy = Arrays.copyOf((byte[]) obj, ((byte[]) obj).length);
+        } else if (obj instanceof char[]) {
+            objCopy = Arrays.copyOf((char[]) obj, ((char[]) obj).length);
+        } else {
+            throw GraalError.shouldNotReachHere();
+        }
+        return objCopy;
     }
 
     /**
@@ -324,7 +360,7 @@ public class Fields {
 
     public void appendFields(StringBuilder sb) {
         for (int i = 0; i < offsets.length; i++) {
-            sb.append(i == 0 ? "" : ", ").append(getName(i)).append('@').append(offsets[i]);
+            sb.append(i == 0 ? "" : ", ").append(getDeclaringClass(i).getSimpleName()).append('.').append(getName(i)).append('@').append(offsets[i]);
         }
     }
 

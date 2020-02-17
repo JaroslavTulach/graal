@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2014, 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2014, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -25,6 +27,7 @@ package org.graalvm.compiler.nodes.extended;
 import static org.graalvm.compiler.nodeinfo.NodeCycles.CYCLES_2;
 import static org.graalvm.compiler.nodeinfo.NodeSize.SIZE_1;
 
+import org.graalvm.compiler.core.common.type.Stamp;
 import org.graalvm.compiler.core.common.type.StampFactory;
 import org.graalvm.compiler.graph.Node;
 import org.graalvm.compiler.graph.NodeClass;
@@ -52,7 +55,11 @@ public final class JavaReadNode extends FixedAccessNode implements Lowerable, Gu
     protected final boolean compressible;
 
     public JavaReadNode(JavaKind readKind, AddressNode address, LocationIdentity location, BarrierType barrierType, boolean compressible) {
-        super(TYPE, address, location, StampFactory.forKind(readKind), barrierType);
+        this(StampFactory.forKind(readKind), readKind, address, location, barrierType, compressible);
+    }
+
+    public JavaReadNode(Stamp stamp, JavaKind readKind, AddressNode address, LocationIdentity location, BarrierType barrierType, boolean compressible) {
+        super(TYPE, address, location, stamp, barrierType);
         this.readKind = readKind;
         this.compressible = compressible;
     }
@@ -79,4 +86,5 @@ public final class JavaReadNode extends FixedAccessNode implements Lowerable, Gu
     public Node canonical(CanonicalizerTool tool) {
         return ReadNode.canonicalizeRead(this, getAddress(), getLocationIdentity(), tool);
     }
+
 }

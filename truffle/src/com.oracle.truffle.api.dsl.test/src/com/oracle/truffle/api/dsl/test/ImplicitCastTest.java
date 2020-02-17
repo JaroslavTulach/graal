@@ -1,29 +1,48 @@
 /*
- * Copyright (c) 2012, 2013, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
- * This code is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * The Universal Permissive License (UPL), Version 1.0
  *
- * This code is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
- * version 2 for more details (a copy is included in the LICENSE file that
- * accompanied this code).
+ * Subject to the condition set forth below, permission is hereby granted to any
+ * person obtaining a copy of this software, associated documentation and/or
+ * data (collectively the "Software"), free of charge and under any and all
+ * copyright rights in the Software, and any and all patent rights owned or
+ * freely licensable by each licensor hereunder covering either (i) the
+ * unmodified Software as contributed to or provided by such licensor, or (ii)
+ * the Larger Works (as defined below), to deal in both
  *
- * You should have received a copy of the GNU General Public License version
- * 2 along with this work; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
+ * (a) the Software, and
  *
- * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
- * or visit www.oracle.com if you need additional information or have any
- * questions.
+ * (b) any piece of software and/or hardware listed in the lrgrwrks.txt file if
+ * one is included with the Software each a "Larger Work" to which the Software
+ * is contributed by such licensors),
+ *
+ * without restriction, including without limitation the rights to copy, create
+ * derivative works of, display, perform, and distribute the Software and make,
+ * use, sell, offer for sale, import, export, have made, and have sold the
+ * Software and the Larger Work(s), and to sublicense the foregoing rights on
+ * either these or other terms.
+ *
+ * This license is subject to the following condition:
+ *
+ * The above copyright notice and either this complete permission notice or at a
+ * minimum a reference to the UPL must be included in all copies or substantial
+ * portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
  */
 package com.oracle.truffle.api.dsl.test;
 
 import static com.oracle.truffle.api.dsl.test.examples.ExampleNode.createArguments;
 
+import java.lang.reflect.Field;
 import java.util.concurrent.locks.ReentrantLock;
 
 import org.junit.Assert;
@@ -51,6 +70,8 @@ import com.oracle.truffle.api.dsl.test.ImplicitCastTestFactory.StringEquals1Node
 import com.oracle.truffle.api.dsl.test.ImplicitCastTestFactory.StringEquals2NodeGen;
 import com.oracle.truffle.api.dsl.test.ImplicitCastTestFactory.StringEquals3NodeGen;
 import com.oracle.truffle.api.dsl.test.ImplicitCastTestFactory.TestImplicitCastWithCacheNodeGen;
+import com.oracle.truffle.api.dsl.test.ImplicitCastTestFactory.ThirtyThreeBitsNodeGen;
+import com.oracle.truffle.api.dsl.test.ImplicitCastTestFactory.ThirtyTwoBitsNodeGen;
 import com.oracle.truffle.api.dsl.test.TypeSystemTest.TestRootNode;
 import com.oracle.truffle.api.dsl.test.TypeSystemTest.ValueNode;
 import com.oracle.truffle.api.dsl.test.examples.ExampleNode;
@@ -106,6 +127,19 @@ public class ImplicitCastTest {
             return value;
         }
 
+    }
+
+    @TypeSystemReference(ImplicitCast0Types.class)
+    abstract static class ImplicitCastTypedExecuteNode extends Node {
+
+        public abstract Object execute(int value);
+
+        // TODO: this should not be an error
+        @ExpectError("Method signature (boolean) does not match to the expected signature: %")
+        @Specialization
+        public boolean op1(boolean value) {
+            return value;
+        }
     }
 
     @Test
@@ -215,7 +249,7 @@ public class ImplicitCastTest {
         CharSequence seq2 = "bar";
         charSequenceCast = 0;
         node.executeEvaluated(seq1, seq2);
-        Assert.assertEquals(2, charSequenceCast);
+        Assert.assertEquals(0, charSequenceCast);
     }
 
     @TypeSystem
@@ -599,4 +633,76 @@ public class ImplicitCastTest {
 
     }
 
+    @Test
+    public void test33Bits() throws NoSuchFieldException, SecurityException {
+        ExampleNode node = ThirtyThreeBitsNodeGen.create(null);
+        Field stateField = node.getClass().getDeclaredField("state_");
+        Assert.assertEquals(long.class, stateField.getType());
+    }
+
+    @Test
+    public void test32Bits() throws NoSuchFieldException, SecurityException {
+        ExampleNode node = ThirtyTwoBitsNodeGen.create(null);
+        Field stateField = node.getClass().getDeclaredField("state_");
+        Assert.assertEquals(int.class, stateField.getType());
+    }
+
+    @TypeSystem
+    public static class FourBitImplicitCastTS {
+        @ImplicitCast
+        public static Number castNumber(Byte value) {
+            return value;
+        }
+
+        @ImplicitCast
+        public static Number castNumber(Short value) {
+            return value;
+        }
+
+        @ImplicitCast
+        public static Number castNumber(Integer value) {
+            return value;
+        }
+    }
+
+    /*
+     * Requires 33 state bits: 1 bit for the specialization + 8 * 4 bits for the Number parameters
+     * (3 bits for the implicit casts to Number + 1 bit for Number itself).
+     */
+    @TypeSystemReference(FourBitImplicitCastTS.class)
+    @SuppressWarnings("unused")
+    public abstract static class ThirtyThreeBitsNode extends ExampleNode {
+        @Specialization
+        public String s0(Number a, Number b, Number c, Number d, Number e, Number f, Number g, Number h) {
+            return "s0";
+        }
+    }
+
+    /*
+     * Requires 32 state bits: 4 bits for the specializations + 7 * 4 bits for the Number parameters
+     * (3 bits for the implicit casts to Number + 1 bit for Number itself).
+     */
+    @TypeSystemReference(FourBitImplicitCastTS.class)
+    @SuppressWarnings("unused")
+    public abstract static class ThirtyTwoBitsNode extends ExampleNode {
+        @Specialization
+        public String s0(Number a, Number b, Number c, Number d, Number e, Number f, Number g) {
+            return "s0";
+        }
+
+        @Specialization
+        public String s1(String a, String b, String c, String d, String e, String f, String g) {
+            return "s1";
+        }
+
+        @Specialization
+        public String s2(Boolean a, Boolean b, Boolean c, Boolean d, Boolean e, Boolean f, Boolean g) {
+            return "s2";
+        }
+
+        @Specialization
+        public String s3(Character a, Character b, Character c, Character d, Character e, Character f, Character g) {
+            return "s3";
+        }
+    }
 }

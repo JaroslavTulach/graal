@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2016, 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2016, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -29,6 +31,8 @@ import static org.graalvm.compiler.nodes.ConstantNode.getConstantNodes;
 import java.util.HashSet;
 import java.util.List;
 
+import org.graalvm.collections.EconomicMap;
+import org.graalvm.collections.Equivalence;
 import org.graalvm.compiler.core.common.cfg.BlockMap;
 import org.graalvm.compiler.core.common.type.ObjectStamp;
 import org.graalvm.compiler.core.common.type.Stamp;
@@ -58,13 +62,12 @@ import org.graalvm.compiler.nodes.StructuredGraph.ScheduleResult;
 import org.graalvm.compiler.nodes.ValueNode;
 import org.graalvm.compiler.nodes.calc.FloatingNode;
 import org.graalvm.compiler.nodes.cfg.Block;
+import org.graalvm.compiler.nodes.spi.CoreProviders;
 import org.graalvm.compiler.phases.BasePhase;
 import org.graalvm.compiler.phases.graph.ReentrantNodeIterator;
 import org.graalvm.compiler.phases.graph.ReentrantNodeIterator.NodeIteratorClosure;
 import org.graalvm.compiler.phases.schedule.SchedulePhase;
 import org.graalvm.compiler.phases.schedule.SchedulePhase.SchedulingStrategy;
-import org.graalvm.compiler.phases.tiers.PhaseContext;
-import org.graalvm.util.EconomicMap;
 
 import jdk.vm.ci.code.BytecodeFrame;
 import jdk.vm.ci.hotspot.HotSpotMetaspaceConstant;
@@ -73,44 +76,53 @@ import jdk.vm.ci.hotspot.HotSpotResolvedJavaType;
 import jdk.vm.ci.hotspot.HotSpotResolvedObjectType;
 import jdk.vm.ci.meta.Constant;
 import jdk.vm.ci.meta.ConstantReflectionProvider;
+import jdk.vm.ci.meta.MetaAccessProvider;
 import jdk.vm.ci.meta.ResolvedJavaType;
 
-public class ReplaceConstantNodesPhase extends BasePhase<PhaseContext> {
+public class ReplaceConstantNodesPhase extends BasePhase<CoreProviders> {
 
-    private static final HashSet<Class<?>> builtIns = new HashSet<>();
     private final boolean verifyFingerprints;
 
-    static {
-        builtIns.add(Boolean.class);
+    static Class<?> characterCacheClass = Character.class.getDeclaredClasses()[0];
+    static Class<?> byteCacheClass = Byte.class.getDeclaredClasses()[0];
+    static Class<?> shortCacheClass = Short.class.getDeclaredClasses()[0];
+    static Class<?> integerCacheClass = Integer.class.getDeclaredClasses()[0];
+    static Class<?> longCacheClass = Long.class.getDeclaredClasses()[0];
 
-        Class<?> characterCacheClass = Character.class.getDeclaredClasses()[0];
-        assert "java.lang.Character$CharacterCache".equals(characterCacheClass.getName());
-        builtIns.add(characterCacheClass);
+    static class ClassInfo {
 
-        Class<?> byteCacheClass = Byte.class.getDeclaredClasses()[0];
-        assert "java.lang.Byte$ByteCache".equals(byteCacheClass.getName());
-        builtIns.add(byteCacheClass);
+        private ResolvedJavaType stringType;
+        private final HashSet<ResolvedJavaType> builtIns = new HashSet<>();
 
-        Class<?> shortCacheClass = Short.class.getDeclaredClasses()[0];
-        assert "java.lang.Short$ShortCache".equals(shortCacheClass.getName());
-        builtIns.add(shortCacheClass);
+        ClassInfo(MetaAccessProvider metaAccessProvider) {
+            builtIns.add(metaAccessProvider.lookupJavaType(Boolean.class));
 
-        Class<?> integerCacheClass = Integer.class.getDeclaredClasses()[0];
-        assert "java.lang.Integer$IntegerCache".equals(integerCacheClass.getName());
-        builtIns.add(integerCacheClass);
+            assert "java.lang.Character$CharacterCache".equals(characterCacheClass.getName());
+            builtIns.add(metaAccessProvider.lookupJavaType(characterCacheClass));
 
-        Class<?> longCacheClass = Long.class.getDeclaredClasses()[0];
-        assert "java.lang.Long$LongCache".equals(longCacheClass.getName());
-        builtIns.add(longCacheClass);
+            assert "java.lang.Byte$ByteCache".equals(byteCacheClass.getName());
+            builtIns.add(metaAccessProvider.lookupJavaType(byteCacheClass));
+
+            assert "java.lang.Short$ShortCache".equals(shortCacheClass.getName());
+            builtIns.add(metaAccessProvider.lookupJavaType(shortCacheClass));
+
+            assert "java.lang.Integer$IntegerCache".equals(integerCacheClass.getName());
+            builtIns.add(metaAccessProvider.lookupJavaType(integerCacheClass));
+
+            assert "java.lang.Long$LongCache".equals(longCacheClass.getName());
+            builtIns.add(metaAccessProvider.lookupJavaType(longCacheClass));
+
+            stringType = metaAccessProvider.lookupJavaType(String.class);
+        }
     }
 
     private static boolean isReplacementNode(Node n) {
         // @formatter:off
         return n instanceof LoadConstantIndirectlyNode      ||
-               n instanceof LoadConstantIndirectlyFixedNode ||
-               n instanceof ResolveDynamicConstantNode      ||
-               n instanceof ResolveConstantNode             ||
-               n instanceof InitializeKlassNode;
+                n instanceof LoadConstantIndirectlyFixedNode ||
+                n instanceof ResolveDynamicConstantNode      ||
+                n instanceof ResolveConstantNode             ||
+                n instanceof InitializeKlassNode;
         // @formatter:on
     }
 
@@ -307,7 +319,7 @@ public class ReplaceConstantNodesPhase extends BasePhase<PhaseContext> {
         NodeMap<Block> nodeToBlock = schedule.getNodeToBlockMap();
         BlockMap<List<Node>> blockToNodes = schedule.getBlockToNodesMap();
 
-        EconomicMap<Block, Node> blockToExisting = EconomicMap.create();
+        EconomicMap<Block, Node> blockToExisting = EconomicMap.create(Equivalence.IDENTITY);
         for (Node n : node.usages().filter(n -> isReplacementNode(n))) {
             blockToExisting.put(nodeToBlock.get(n), n);
         }
@@ -351,7 +363,7 @@ public class ReplaceConstantNodesPhase extends BasePhase<PhaseContext> {
      * @param node {@link ConstantNode} containing a {@link HotSpotResolvedJavaType} that needs
      *            resolution.
      */
-    private static void replaceWithResolution(StructuredGraph graph, FrameStateMapperClosure stateMapper, ConstantNode node) {
+    private static void replaceWithResolution(StructuredGraph graph, FrameStateMapperClosure stateMapper, ConstantNode node, ClassInfo classInfo) {
         HotSpotMetaspaceConstant metaspaceConstant = (HotSpotMetaspaceConstant) node.asConstant();
         HotSpotResolvedJavaType type = (HotSpotResolvedJavaType) metaspaceConstant.asResolvedJavaType();
         ResolvedJavaType topMethodHolder = graph.method().getDeclaringClass();
@@ -368,7 +380,7 @@ public class ReplaceConstantNodesPhase extends BasePhase<PhaseContext> {
             replacement = graph.addOrUnique(new LoadConstantIndirectlyNode(node));
         } else {
             FixedWithNextNode fixedReplacement;
-            if (builtIns.contains(type.mirror())) {
+            if (classInfo.builtIns.contains(type)) {
                 // Special case of klass constants that come from {@link BoxingSnippets}.
                 fixedReplacement = graph.add(new ResolveConstantNode(node, HotSpotConstantLoadAction.INITIALIZE));
             } else {
@@ -388,7 +400,7 @@ public class ReplaceConstantNodesPhase extends BasePhase<PhaseContext> {
      * @param node {@link ConstantNode} containing a {@link HotSpotResolvedJavaType} that needs
      *            resolution.
      */
-    private void handleHotSpotMetaspaceConstant(StructuredGraph graph, FrameStateMapperClosure stateMapper, ConstantNode node) {
+    private void handleHotSpotMetaspaceConstant(StructuredGraph graph, FrameStateMapperClosure stateMapper, ConstantNode node, ClassInfo classInfo) {
         HotSpotMetaspaceConstant metaspaceConstant = (HotSpotMetaspaceConstant) node.asConstant();
         HotSpotResolvedJavaType type = (HotSpotResolvedJavaType) metaspaceConstant.asResolvedJavaType();
 
@@ -399,7 +411,7 @@ public class ReplaceConstantNodesPhase extends BasePhase<PhaseContext> {
             assert !metaspaceConstant.isCompressed() : "No support for replacing compressed metaspace constants";
             tryToReplaceWithExisting(graph, node);
             if (anyUsagesNeedReplacement(node)) {
-                replaceWithResolution(graph, stateMapper, node);
+                replaceWithResolution(graph, stateMapper, node, classInfo);
             }
         } else {
             throw new GraalError("Unsupported metaspace constant type: " + type);
@@ -415,10 +427,10 @@ public class ReplaceConstantNodesPhase extends BasePhase<PhaseContext> {
      * @param node {@link ConstantNode} containing a {@link HotSpotObjectConstant} that needs
      *            resolution.
      */
-    private static void handleHotSpotObjectConstant(StructuredGraph graph, FrameStateMapperClosure stateMapper, ConstantNode node) {
+    private static void handleHotSpotObjectConstant(StructuredGraph graph, FrameStateMapperClosure stateMapper, ConstantNode node, ClassInfo classInfo) {
         HotSpotObjectConstant constant = (HotSpotObjectConstant) node.asJavaConstant();
         HotSpotResolvedJavaType type = (HotSpotResolvedJavaType) constant.getType();
-        if (type.mirror().equals(String.class)) {
+        if (type.equals(classInfo.stringType)) {
             assert !constant.isCompressed() : "No support for replacing compressed oop constants";
             FixedWithNextNode replacement = graph.add(new ResolveConstantNode(node));
             insertReplacement(graph, stateMapper, node, replacement);
@@ -437,7 +449,7 @@ public class ReplaceConstantNodesPhase extends BasePhase<PhaseContext> {
      * @param node
      * @param context
      */
-    private static void handleLoadMethodCounters(StructuredGraph graph, FrameStateMapperClosure stateMapper, LoadMethodCountersNode node, PhaseContext context) {
+    private static void handleLoadMethodCounters(StructuredGraph graph, FrameStateMapperClosure stateMapper, LoadMethodCountersNode node, CoreProviders context) {
         ResolvedJavaType type = node.getMethod().getDeclaringClass();
         Stamp hubStamp = context.getStampProvider().createHubStamp((ObjectStamp) StampFactory.objectNonNull());
         ConstantReflectionProvider constantReflection = context.getConstantReflection();
@@ -455,7 +467,7 @@ public class ReplaceConstantNodesPhase extends BasePhase<PhaseContext> {
      * @param stateMapper
      * @param context
      */
-    private static void replaceLoadMethodCounters(StructuredGraph graph, FrameStateMapperClosure stateMapper, PhaseContext context) {
+    private static void replaceLoadMethodCounters(StructuredGraph graph, FrameStateMapperClosure stateMapper, CoreProviders context) {
         new SchedulePhase(SchedulingStrategy.LATEST_OUT_OF_LOOPS, true).apply(graph, false);
 
         for (LoadMethodCountersNode node : getLoadMethodCountersNodes(graph)) {
@@ -471,21 +483,21 @@ public class ReplaceConstantNodesPhase extends BasePhase<PhaseContext> {
      * @param graph
      * @param stateMapper
      */
-    private void replaceKlassesAndObjects(StructuredGraph graph, FrameStateMapperClosure stateMapper) {
+    private void replaceKlassesAndObjects(StructuredGraph graph, FrameStateMapperClosure stateMapper, ClassInfo classInfo) {
         new SchedulePhase(SchedulingStrategy.LATEST_OUT_OF_LOOPS, true).apply(graph, false);
 
         for (ConstantNode node : getConstantNodes(graph)) {
             Constant constant = node.asConstant();
             if (constant instanceof HotSpotMetaspaceConstant && anyUsagesNeedReplacement(node)) {
-                handleHotSpotMetaspaceConstant(graph, stateMapper, node);
+                handleHotSpotMetaspaceConstant(graph, stateMapper, node, classInfo);
             } else if (constant instanceof HotSpotObjectConstant && anyUsagesNeedReplacement(node)) {
-                handleHotSpotObjectConstant(graph, stateMapper, node);
+                handleHotSpotObjectConstant(graph, stateMapper, node, classInfo);
             }
         }
     }
 
     @Override
-    protected void run(StructuredGraph graph, PhaseContext context) {
+    protected void run(StructuredGraph graph, CoreProviders context) {
         FrameStateMapperClosure stateMapper = new FrameStateMapperClosure(graph);
         ReentrantNodeIterator.apply(stateMapper, graph.start(), null);
 
@@ -495,7 +507,7 @@ public class ReplaceConstantNodesPhase extends BasePhase<PhaseContext> {
 
         // Replace object and klass constants (including the ones added in the previous pass) with
         // resolution nodes.
-        replaceKlassesAndObjects(graph, stateMapper);
+        replaceKlassesAndObjects(graph, stateMapper, new ClassInfo(context.getMetaAccess()));
     }
 
     @Override

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * The Universal Permissive License (UPL), Version 1.0
@@ -41,6 +41,7 @@
 package com.oracle.truffle.sl.runtime;
 
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
+import com.oracle.truffle.api.nodes.Node;
 import com.oracle.truffle.sl.SLException;
 
 public final class SLUndefinedNameException extends SLException {
@@ -48,16 +49,16 @@ public final class SLUndefinedNameException extends SLException {
     private static final long serialVersionUID = 1L;
 
     @TruffleBoundary
-    public static SLUndefinedNameException undefinedFunction(Object name) {
-        throw new SLUndefinedNameException("Undefined function: " + name);
+    public static SLUndefinedNameException undefinedFunction(Node location, Object name) {
+        throw new SLUndefinedNameException("Undefined function: " + name, location);
     }
 
     @TruffleBoundary
-    public static SLUndefinedNameException undefinedProperty(Object name) {
-        throw new SLUndefinedNameException("Undefined property: " + name);
+    public static SLUndefinedNameException undefinedProperty(Node location, Object name) {
+        throw new SLUndefinedNameException("Undefined property: " + name, location);
     }
 
-    private SLUndefinedNameException(String message) {
-        super(message);
+    private SLUndefinedNameException(String message, Node node) {
+        super(message, node);
     }
 }

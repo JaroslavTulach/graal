@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2013, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2013, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -22,7 +24,6 @@
  */
 package org.graalvm.compiler.phases.common;
 
-import org.graalvm.compiler.core.common.cfg.Loop;
 import org.graalvm.compiler.debug.DebugCloseable;
 import org.graalvm.compiler.debug.DebugContext;
 import org.graalvm.compiler.graph.Node;
@@ -32,8 +33,6 @@ import org.graalvm.compiler.nodes.DeoptimizeNode;
 import org.graalvm.compiler.nodes.FixedWithNextNode;
 import org.graalvm.compiler.nodes.GuardNode;
 import org.graalvm.compiler.nodes.IfNode;
-import org.graalvm.compiler.nodes.LoopBeginNode;
-import org.graalvm.compiler.nodes.LoopExitNode;
 import org.graalvm.compiler.nodes.StructuredGraph;
 import org.graalvm.compiler.nodes.StructuredGraph.GuardsStage;
 import org.graalvm.compiler.nodes.StructuredGraph.ScheduleResult;
@@ -60,11 +59,9 @@ public class GuardLoweringPhase extends BasePhase<MidTierContext> {
 
     private static class LowerGuards extends ScheduledNodeIterator {
 
-        private final Block block;
         private boolean useGuardIdAsDebugId;
 
-        LowerGuards(Block block, boolean useGuardIdAsDebugId) {
-            this.block = block;
+        LowerGuards(boolean useGuardIdAsDebugId) {
             this.useGuardIdAsDebugId = useGuardIdAsDebugId;
         }
 
@@ -86,13 +83,13 @@ public class GuardLoweringPhase extends BasePhase<MidTierContext> {
             try (DebugCloseable position = guard.withNodeSourcePosition()) {
                 StructuredGraph graph = guard.graph();
                 AbstractBeginNode fastPath = graph.add(new BeginNode());
+                fastPath.setNodeSourcePosition(guard.getNoDeoptSuccessorPosition());
                 @SuppressWarnings("deprecation")
                 int debugId = useGuardIdAsDebugId ? guard.getId() : DeoptimizeNode.DEFAULT_DEBUG_ID;
                 DeoptimizeNode deopt = graph.add(new DeoptimizeNode(guard.getAction(), guard.getReason(), debugId, guard.getSpeculation(), null));
                 AbstractBeginNode deoptBranch = BeginNode.begin(deopt);
                 AbstractBeginNode trueSuccessor;
                 AbstractBeginNode falseSuccessor;
-                insertLoopExits(deopt);
                 if (guard.isNegated()) {
                     trueSuccessor = deoptBranch;
                     falseSuccessor = fastPath;
@@ -105,22 +102,12 @@ public class GuardLoweringPhase extends BasePhase<MidTierContext> {
                 insert(ifNode, fastPath);
             }
         }
-
-        private void insertLoopExits(DeoptimizeNode deopt) {
-            Loop<Block> loop = block.getLoop();
-            StructuredGraph graph = deopt.graph();
-            while (loop != null) {
-                LoopExitNode exit = graph.add(new LoopExitNode((LoopBeginNode) loop.getHeader().getBeginNode()));
-                graph.addBeforeFixed(deopt, exit);
-                loop = loop.getParent();
-            }
-        }
     }
 
     @Override
     protected void run(StructuredGraph graph, MidTierContext context) {
         if (graph.getGuardsStage().allowsFloatingGuards()) {
-            SchedulePhase schedulePhase = new SchedulePhase(SchedulingStrategy.EARLIEST);
+            SchedulePhase schedulePhase = new SchedulePhase(SchedulingStrategy.EARLIEST_WITH_GUARD_ORDER);
             schedulePhase.apply(graph);
             ScheduleResult schedule = graph.getLastSchedule();
 
@@ -140,6 +127,6 @@ public class GuardLoweringPhase extends BasePhase<MidTierContext> {
 
     private static void processBlock(Block block, ScheduleResult schedule) {
         DebugContext debug = block.getBeginNode().getDebug();
-        new LowerGuards(block, debug.isDumpEnabledForMethod() || debug.isLogEnabledForMethod()).processNodes(block, schedule);
+        new LowerGuards(debug.isDumpEnabledForMethod() || debug.isLogEnabledForMethod()).processNodes(block, schedule);
     }
 }

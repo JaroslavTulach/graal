@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * The Universal Permissive License (UPL), Version 1.0
@@ -40,12 +40,13 @@
  */
 package com.oracle.truffle.sl.nodes.expression;
 
-import java.math.BigInteger;
-
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
+import com.oracle.truffle.api.dsl.Fallback;
 import com.oracle.truffle.api.dsl.Specialization;
 import com.oracle.truffle.api.nodes.NodeInfo;
+import com.oracle.truffle.sl.SLException;
 import com.oracle.truffle.sl.nodes.SLBinaryNode;
+import com.oracle.truffle.sl.runtime.SLBigNumber;
 
 /**
  * This class is similar to the extensively documented {@link SLAddNode}. Divisions by 0 throw the
@@ -69,7 +70,12 @@ public abstract class SLDivNode extends SLBinaryNode {
 
     @Specialization
     @TruffleBoundary
-    protected BigInteger div(BigInteger left, BigInteger right) {
-        return left.divide(right);
+    protected SLBigNumber div(SLBigNumber left, SLBigNumber right) {
+        return new SLBigNumber(left.getValue().divide(right.getValue()));
+    }
+
+    @Fallback
+    protected Object typeError(Object left, Object right) {
+        throw SLException.typeError(this, left, right);
     }
 }

@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2011, 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -26,6 +28,7 @@ import java.util.Collection;
 import java.util.List;
 
 import org.graalvm.compiler.core.common.cfg.BlockMap;
+import org.graalvm.compiler.core.common.spi.ForeignCallLinkage;
 import org.graalvm.compiler.core.common.type.Stamp;
 import org.graalvm.compiler.graph.Node;
 import org.graalvm.compiler.graph.NodeSourcePosition;
@@ -92,4 +95,13 @@ public interface NodeLIRBuilderTool extends NodeValueMap {
     default OptionValues getOptions() {
         return getLIRGeneratorTool().getResult().getLIR().getOptions();
     }
+
+    void emitReadExceptionObject(ValueNode node);
+
+    @SuppressWarnings("unused")
+    default ForeignCallLinkage lookupGraalStub(ValueNode valueNode) {
+        return null;
+    }
+
+    void matchBlock(Block b, StructuredGraph graph, StructuredGraph.ScheduleResult blockMap);
 }

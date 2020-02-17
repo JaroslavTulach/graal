@@ -1,27 +1,48 @@
 /*
- * Copyright (c) 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
- * This code is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * The Universal Permissive License (UPL), Version 1.0
  *
- * This code is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
- * version 2 for more details (a copy is included in the LICENSE file that
- * accompanied this code).
+ * Subject to the condition set forth below, permission is hereby granted to any
+ * person obtaining a copy of this software, associated documentation and/or
+ * data (collectively the "Software"), free of charge and under any and all
+ * copyright rights in the Software, and any and all patent rights owned or
+ * freely licensable by each licensor hereunder covering either (i) the
+ * unmodified Software as contributed to or provided by such licensor, or (ii)
+ * the Larger Works (as defined below), to deal in both
  *
- * You should have received a copy of the GNU General Public License version
- * 2 along with this work; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
+ * (a) the Software, and
  *
- * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
- * or visit www.oracle.com if you need additional information or have any
- * questions.
+ * (b) any piece of software and/or hardware listed in the lrgrwrks.txt file if
+ * one is included with the Software each a "Larger Work" to which the Software
+ * is contributed by such licensors),
+ *
+ * without restriction, including without limitation the rights to copy, create
+ * derivative works of, display, perform, and distribute the Software and make,
+ * use, sell, offer for sale, import, export, have made, and have sold the
+ * Software and the Larger Work(s), and to sublicense the foregoing rights on
+ * either these or other terms.
+ *
+ * This license is subject to the following condition:
+ *
+ * The above copyright notice and either this complete permission notice or at a
+ * minimum a reference to the UPL must be included in all copies or substantial
+ * portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
  */
 package com.oracle.truffle.dsl.processor;
 
+import com.oracle.truffle.dsl.processor.java.ElementUtils;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
@@ -39,7 +60,7 @@ public class ExpectError {
 
     public static void assertNoErrorExpected(ProcessingEnvironment processingEnv, Element element) {
         for (String errorType : EXPECT_ERROR_TYPES) {
-            assertNoErrorExpectedImpl(processingEnv, element, processingEnv.getElementUtils().getTypeElement(errorType));
+            assertNoErrorExpectedImpl(processingEnv, element, ElementUtils.getTypeElement(processingEnv, errorType));
         }
     }
 
@@ -53,16 +74,31 @@ public class ExpectError {
         }
     }
 
-    public static boolean isExpectedError(ProcessingEnvironment processingEnv, Element element, String message) {
-        for (String errorType : EXPECT_ERROR_TYPES) {
-            if (isExpectedErrorImpl(element, message, processingEnv.getElementUtils().getTypeElement(errorType))) {
+    public static boolean isExpectedError(ProcessingEnvironment processingEnv, Element element, String actualText) {
+        List<String> expectedErrors = getExpectedErrors(processingEnv, element);
+        for (String expectedText : expectedErrors) {
+            String newExpectedText = expectedText.replaceAll("%n", System.lineSeparator());
+            if (newExpectedText.endsWith("%") && actualText.startsWith(newExpectedText.substring(0, newExpectedText.length() - 1))) {
+                return true;
+            } else if (actualText.equals(newExpectedText)) {
                 return true;
             }
         }
         return false;
     }
 
-    private static boolean isExpectedErrorImpl(Element element, String message, TypeElement eee) {
+    public static List<String> getExpectedErrors(ProcessingEnvironment processingEnv, Element element) {
+        if (element == null) {
+            return Collections.emptyList();
+        }
+        List<String> expectedErrors = new ArrayList<>();
+        for (String errorType : EXPECT_ERROR_TYPES) {
+            collectExpectedErrors(expectedErrors, element, processingEnv.getElementUtils().getTypeElement(errorType));
+        }
+        return expectedErrors;
+    }
+
+    private static void collectExpectedErrors(List<String> expectedErrors, Element element, TypeElement eee) {
         if (eee != null) {
             for (AnnotationMirror am : element.getAnnotationMirrors()) {
                 if (am.getAnnotationType().asElement().equals(eee)) {
@@ -74,9 +110,7 @@ public class ExpectError {
                             for (Object o : arr) {
                                 if (o instanceof AnnotationValue) {
                                     AnnotationValue ov = (AnnotationValue) o;
-                                    if (message.equals(ov.getValue())) {
-                                        return true;
-                                    }
+                                    expectedErrors.add((String) ov.getValue());
                                 }
                             }
                         }
@@ -84,7 +118,6 @@ public class ExpectError {
                 }
             }
         }
-        return false;
     }
 
 }

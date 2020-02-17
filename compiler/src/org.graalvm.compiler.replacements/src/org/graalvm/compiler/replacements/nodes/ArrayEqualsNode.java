@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2013, 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2013, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -22,8 +24,10 @@
  */
 package org.graalvm.compiler.replacements.nodes;
 
+import static org.graalvm.compiler.core.common.GraalOptions.UseGraalStubs;
 import static org.graalvm.compiler.nodeinfo.InputType.Memory;
 
+import org.graalvm.compiler.core.common.spi.ForeignCallLinkage;
 import org.graalvm.compiler.core.common.type.StampFactory;
 import org.graalvm.compiler.graph.Node;
 import org.graalvm.compiler.graph.NodeClass;
@@ -35,6 +39,7 @@ import org.graalvm.compiler.nodeinfo.NodeSize;
 import org.graalvm.compiler.nodes.ConstantNode;
 import org.graalvm.compiler.nodes.FixedWithNextNode;
 import org.graalvm.compiler.nodes.NamedLocationIdentity;
+import org.graalvm.compiler.nodes.NodeView;
 import org.graalvm.compiler.nodes.ValueNode;
 import org.graalvm.compiler.nodes.ValueNodeUtil;
 import org.graalvm.compiler.nodes.memory.MemoryAccess;
@@ -81,18 +86,6 @@ public final class ArrayEqualsNode extends FixedWithNextNode implements LIRLower
         this.array1 = array1;
         this.array2 = array2;
         this.length = length;
-    }
-
-    public ValueNode getArray1() {
-        return array1;
-    }
-
-    public ValueNode getArray2() {
-        return array2;
-    }
-
-    public ValueNode getLength() {
-        return length;
     }
 
     private static boolean isNaNFloat(JavaConstant constant) {
@@ -154,14 +147,14 @@ public final class ArrayEqualsNode extends FixedWithNextNode implements LIRLower
                             // Float NaN constants are different constant nodes but treated as
                             // equal in Arrays.equals([F[F) or Arrays.equals([D[D).
                             if (entry1.getStackKind() == JavaKind.Float && entry2.getStackKind() == JavaKind.Float) {
-                                float value1 = ((JavaConstant) ((ConstantNode) entry1).asConstant()).asFloat();
-                                float value2 = ((JavaConstant) ((ConstantNode) entry2).asConstant()).asFloat();
+                                float value1 = ((JavaConstant) entry1.asConstant()).asFloat();
+                                float value2 = ((JavaConstant) entry2.asConstant()).asFloat();
                                 if (Float.floatToIntBits(value1) != Float.floatToIntBits(value2)) {
                                     allEqual = false;
                                 }
                             } else if (entry1.getStackKind() == JavaKind.Double && entry2.getStackKind() == JavaKind.Double) {
-                                double value1 = ((JavaConstant) ((ConstantNode) entry1).asConstant()).asDouble();
-                                double value2 = ((JavaConstant) ((ConstantNode) entry2).asConstant()).asDouble();
+                                double value1 = ((JavaConstant) entry1.asConstant()).asDouble();
+                                double value2 = ((JavaConstant) entry2.asConstant()).asDouble();
                                 if (Double.doubleToLongBits(value1) != Double.doubleToLongBits(value2)) {
                                     allEqual = false;
                                 }
@@ -173,7 +166,7 @@ public final class ArrayEqualsNode extends FixedWithNextNode implements LIRLower
                             allEqual = false;
                         }
                     }
-                    if (entry1.stamp().alwaysDistinct(entry2.stamp())) {
+                    if (entry1.stamp(NodeView.DEFAULT).alwaysDistinct(entry2.stamp(NodeView.DEFAULT))) {
                         // the contents are different
                         tool.replaceWithValue(ConstantNode.forBoolean(false, graph()));
                         return;
@@ -221,9 +214,25 @@ public final class ArrayEqualsNode extends FixedWithNextNode implements LIRLower
         return equals(array1, array2, length, JavaKind.Double);
     }
 
+    public ValueNode getLength() {
+        return length;
+    }
+
+    public JavaKind getKind() {
+        return kind;
+    }
+
     @Override
     public void generate(NodeLIRBuilderTool gen) {
-        Value result = gen.getLIRGeneratorTool().emitArrayEquals(kind, gen.operand(array1), gen.operand(array2), gen.operand(length));
+        if (UseGraalStubs.getValue(graph().getOptions())) {
+            ForeignCallLinkage linkage = gen.lookupGraalStub(this);
+            if (linkage != null) {
+                Value result = gen.getLIRGeneratorTool().emitForeignCall(linkage, null, gen.operand(array1), gen.operand(array2), gen.operand(length));
+                gen.setResult(this, result);
+                return;
+            }
+        }
+        Value result = gen.getLIRGeneratorTool().emitArrayEquals(kind, gen.operand(array1), gen.operand(array2), gen.operand(length), false);
         gen.setResult(this, result);
     }
 
@@ -242,4 +251,5 @@ public final class ArrayEqualsNode extends FixedWithNextNode implements LIRLower
         updateUsages(ValueNodeUtil.asNode(lastLocationAccess), ValueNodeUtil.asNode(lla));
         lastLocationAccess = lla;
     }
+
 }

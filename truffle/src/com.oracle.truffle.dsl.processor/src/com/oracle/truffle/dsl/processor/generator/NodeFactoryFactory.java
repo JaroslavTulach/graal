@@ -1,24 +1,42 @@
 /*
- * Copyright (c) 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2014, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
- * This code is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * The Universal Permissive License (UPL), Version 1.0
  *
- * This code is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
- * version 2 for more details (a copy is included in the LICENSE file that
- * accompanied this code).
+ * Subject to the condition set forth below, permission is hereby granted to any
+ * person obtaining a copy of this software, associated documentation and/or
+ * data (collectively the "Software"), free of charge and under any and all
+ * copyright rights in the Software, and any and all patent rights owned or
+ * freely licensable by each licensor hereunder covering either (i) the
+ * unmodified Software as contributed to or provided by such licensor, or (ii)
+ * the Larger Works (as defined below), to deal in both
  *
- * You should have received a copy of the GNU General Public License version
- * 2 along with this work; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
+ * (a) the Software, and
  *
- * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
- * or visit www.oracle.com if you need additional information or have any
- * questions.
+ * (b) any piece of software and/or hardware listed in the lrgrwrks.txt file if
+ * one is included with the Software each a "Larger Work" to which the Software
+ * is contributed by such licensors),
+ *
+ * without restriction, including without limitation the rights to copy, create
+ * derivative works of, display, perform, and distribute the Software and make,
+ * use, sell, offer for sale, import, export, have made, and have sold the
+ * Software and the Larger Work(s), and to sublicense the foregoing rights on
+ * either these or other terms.
+ *
+ * This license is subject to the following condition:
+ *
+ * The above copyright notice and either this complete permission notice or at a
+ * minimum a reference to the UPL must be included in all copies or substantial
+ * portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
  */
 package com.oracle.truffle.dsl.processor.generator;
 
@@ -26,6 +44,7 @@ import static com.oracle.truffle.dsl.processor.java.ElementUtils.modifiers;
 import static javax.lang.model.element.Modifier.PRIVATE;
 import static javax.lang.model.element.Modifier.PUBLIC;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
@@ -36,11 +55,9 @@ import javax.lang.model.element.TypeElement;
 import javax.lang.model.element.VariableElement;
 import javax.lang.model.type.TypeMirror;
 
-import com.oracle.truffle.api.dsl.NodeFactory;
 import com.oracle.truffle.dsl.processor.ProcessorContext;
+import com.oracle.truffle.dsl.processor.TruffleTypes;
 import com.oracle.truffle.dsl.processor.java.ElementUtils;
-import com.oracle.truffle.dsl.processor.java.model.CodeAnnotationMirror;
-import com.oracle.truffle.dsl.processor.java.model.CodeAnnotationValue;
 import com.oracle.truffle.dsl.processor.java.model.CodeExecutableElement;
 import com.oracle.truffle.dsl.processor.java.model.CodeNames;
 import com.oracle.truffle.dsl.processor.java.model.CodeTreeBuilder;
@@ -49,27 +66,29 @@ import com.oracle.truffle.dsl.processor.java.model.CodeVariableElement;
 import com.oracle.truffle.dsl.processor.model.NodeData;
 import com.oracle.truffle.dsl.processor.model.NodeExecutionData;
 
-class NodeFactoryFactory {
+public class NodeFactoryFactory {
 
     private final ProcessorContext context;
     private final NodeData node;
     private final CodeTypeElement createdFactoryElement;
+    private final TruffleTypes types;
 
     NodeFactoryFactory(ProcessorContext context, NodeData node, CodeTypeElement createdClass) {
         this.context = context;
         this.node = node;
         this.createdFactoryElement = createdClass;
+        this.types = context.getTypes();
     }
 
-    public static String factoryClassName(NodeData node) {
-        return node.getNodeId() + "Factory";
+    public static String factoryClassName(Element type) {
+        return type.getSimpleName().toString() + "Factory";
     }
 
     public CodeTypeElement create() {
         Modifier visibility = ElementUtils.getVisibility(node.getTemplateType().getModifiers());
-        TypeMirror nodeFactory = ElementUtils.getDeclaredType(ElementUtils.fromTypeMirror(context.getType(NodeFactory.class)), node.getNodeType());
+        TypeMirror nodeFactory = ElementUtils.getDeclaredType(ElementUtils.fromTypeMirror(context.getTypes().NodeFactory), node.getNodeType());
 
-        CodeTypeElement clazz = GeneratorUtils.createClass(node, null, modifiers(), factoryClassName(node), null);
+        CodeTypeElement clazz = GeneratorUtils.createClass(node, null, modifiers(), factoryClassName(node.getTemplateType()), null);
         if (visibility != null) {
             clazz.getModifiers().add(visibility);
         }
@@ -78,26 +97,26 @@ class NodeFactoryFactory {
         if (createdFactoryElement != null) {
             clazz.getImplements().add(nodeFactory);
 
-            CodeAnnotationMirror supressWarnings = new CodeAnnotationMirror(context.getDeclaredType(SuppressWarnings.class));
-            supressWarnings.setElementValue(supressWarnings.findExecutableElement("value"),
-                            new CodeAnnotationValue(Arrays.asList(new CodeAnnotationValue("unchecked"), new CodeAnnotationValue("rawtypes"))));
-            clazz.getAnnotationMirrors().add(supressWarnings);
-
             clazz.add(createNodeFactoryConstructor());
             clazz.add(createCreateGetNodeClass());
             clazz.add(createCreateGetExecutionSignature());
             clazz.add(createCreateGetNodeSignatures());
             clazz.add(createCreateNodeMethod());
+            clazz.addOptional(createGetUncached());
             clazz.add(createGetInstanceMethod(visibility));
             clazz.add(createInstanceConstant(clazz.asType()));
-            createFactoryMethods(clazz);
+            List<ExecutableElement> constructors = GeneratorUtils.findUserConstructors(createdFactoryElement.asType());
+            List<CodeExecutableElement> factoryMethods = createFactoryMethods(node, constructors);
+            for (CodeExecutableElement method : factoryMethods) {
+                clazz.add(method);
+            }
         }
 
         return clazz;
     }
 
     private Element createNodeFactoryConstructor() {
-        CodeExecutableElement method = new CodeExecutableElement(modifiers(PRIVATE), null, factoryClassName(node));
+        CodeExecutableElement method = new CodeExecutableElement(modifiers(PRIVATE), null, factoryClassName(node.getTemplateType()));
         return method;
     }
 
@@ -109,8 +128,8 @@ class NodeFactoryFactory {
     }
 
     private CodeExecutableElement createCreateGetNodeSignatures() {
-        TypeMirror returnValue = ElementUtils.getDeclaredType(ElementUtils.fromTypeMirror(context.getType(List.class)));
-        CodeExecutableElement method = new CodeExecutableElement(modifiers(PUBLIC), returnValue, "getNodeSignatures");
+        TypeMirror returnType = ElementUtils.findMethod(types.NodeFactory, "getNodeSignatures").getReturnType();
+        CodeExecutableElement method = new CodeExecutableElement(modifiers(PUBLIC), returnType, "getNodeSignatures");
         CodeTreeBuilder builder = method.createBuilder();
         builder.startReturn();
 
@@ -134,17 +153,39 @@ class NodeFactoryFactory {
     }
 
     private CodeExecutableElement createCreateGetExecutionSignature() {
-        TypeMirror returnValue = ElementUtils.getDeclaredType(ElementUtils.fromTypeMirror(context.getType(List.class)));
-        CodeExecutableElement method = new CodeExecutableElement(modifiers(PUBLIC), returnValue, "getExecutionSignature");
+        ExecutableElement overriddenMethod = ElementUtils.findMethod(types.NodeFactory, "getExecutionSignature");
+        CodeExecutableElement method = new CodeExecutableElement(modifiers(PUBLIC), overriddenMethod.getReturnType(), "getExecutionSignature");
         CodeTreeBuilder builder = method.createBuilder();
         builder.startReturn();
 
         builder.startStaticCall(context.getType(Arrays.class), "asList");
         for (NodeExecutionData execution : node.getChildExecutions()) {
-            builder.typeLiteral(execution.getNodeType());
+            TypeMirror nodeType = execution.getNodeType();
+            if (nodeType != null) {
+                builder.typeLiteral(nodeType);
+            } else {
+                builder.typeLiteral(types.Node);
+            }
         }
         builder.end();
 
+        builder.end();
+        return method;
+    }
+
+    private CodeExecutableElement createGetUncached() {
+        if (!node.isGenerateUncached()) {
+            return null;
+        }
+        CodeExecutableElement method = new CodeExecutableElement(modifiers(PUBLIC), node.getNodeType(), "getUncachedInstance");
+        String className = createdFactoryElement.getSimpleName().toString();
+        CodeTreeBuilder builder = method.createBuilder();
+        builder.startReturn();
+        if (node.isGenerateFactory()) {
+            builder.string(className).string(".").string("UNCACHED");
+        } else {
+            builder.string("UNCACHED");
+        }
         builder.end();
         return method;
     }
@@ -189,6 +230,9 @@ class NodeFactoryFactory {
                 builder.startGroup();
                 if (!ElementUtils.isObject(param.asType())) {
                     builder.string("(").type(param.asType()).string(") ");
+                    if (ElementUtils.hasGenericTypes(param.asType())) {
+                        GeneratorUtils.mergeSupressWarnings(method, "unchecked");
+                    }
                 }
                 builder.string("arguments[").string(String.valueOf(index)).string("]");
                 builder.end();
@@ -208,7 +252,7 @@ class NodeFactoryFactory {
     }
 
     private ExecutableElement createGetInstanceMethod(Modifier visibility) {
-        TypeElement nodeFactoryType = ElementUtils.fromTypeMirror(context.getType(NodeFactory.class));
+        TypeElement nodeFactoryType = ElementUtils.fromTypeMirror(types.NodeFactory);
         TypeMirror returnType = ElementUtils.getDeclaredType(nodeFactoryType, node.getNodeType());
 
         CodeExecutableElement method = new CodeExecutableElement(modifiers(), returnType, "getInstance");
@@ -227,7 +271,7 @@ class NodeFactoryFactory {
         builder.startStatement();
         builder.string(varName);
         builder.string(" = ");
-        builder.startNew(factoryClassName(node)).end();
+        builder.startNew(factoryClassName(node.getTemplateType())).end();
         builder.end();
 
         builder.end();
@@ -237,7 +281,7 @@ class NodeFactoryFactory {
 
     private static String instanceVarName(NodeData node) {
         if (node.getDeclaringNode() != null) {
-            return ElementUtils.firstLetterLowerCase(factoryClassName(node)) + "Instance";
+            return ElementUtils.firstLetterLowerCase(factoryClassName(node.getTemplateType())) + "Instance";
         } else {
             return "instance";
         }
@@ -251,18 +295,48 @@ class NodeFactoryFactory {
         return var;
     }
 
-    public void createFactoryMethods(CodeTypeElement clazz) {
-        List<ExecutableElement> constructors = GeneratorUtils.findUserConstructors(createdFactoryElement.asType());
+    public static List<CodeExecutableElement> createFactoryMethods(NodeData node, List<ExecutableElement> constructors) {
+        List<CodeExecutableElement> methods = new ArrayList<>();
         for (ExecutableElement constructor : constructors) {
-            clazz.add(createCreateMethod(constructor));
+            methods.add(createCreateMethod(node, constructor));
             if (constructor instanceof CodeExecutableElement) {
                 ElementUtils.setVisibility(constructor.getModifiers(), Modifier.PRIVATE);
             }
+            if (node.isGenerateUncached()) {
+                methods.add(createGetUncached(node, constructor));
+            }
         }
+
+        return methods;
     }
 
-    private CodeExecutableElement createCreateMethod(ExecutableElement constructor) {
-        CodeExecutableElement method = CodeExecutableElement.clone(context.getEnvironment(), constructor);
+    private static CodeExecutableElement createGetUncached(NodeData node, ExecutableElement constructor) {
+        CodeExecutableElement method = CodeExecutableElement.clone(constructor);
+        method.setSimpleName(CodeNames.of("getUncached"));
+        method.getModifiers().clear();
+        method.getModifiers().add(Modifier.PUBLIC);
+        method.getModifiers().add(Modifier.STATIC);
+        method.setReturnType(node.getNodeType());
+        CodeTreeBuilder body = method.createBuilder();
+        body.startReturn();
+        TypeMirror type = NodeCodeGenerator.nodeType(node);
+        if (node.hasErrors()) {
+            body.startNew(type);
+            for (VariableElement var : method.getParameters()) {
+                body.defaultValue(var.asType());
+            }
+            body.end();
+        } else {
+            TypeElement typeElement = ElementUtils.castTypeElement(type);
+            body.string(typeElement.getSimpleName().toString(), ".UNCACHED");
+        }
+        body.end();
+        method.getParameters().clear();
+        return method;
+    }
+
+    private static CodeExecutableElement createCreateMethod(NodeData node, ExecutableElement constructor) {
+        CodeExecutableElement method = CodeExecutableElement.clone(constructor);
         method.setSimpleName(CodeNames.of("create"));
         method.getModifiers().clear();
         method.getModifiers().add(Modifier.PUBLIC);

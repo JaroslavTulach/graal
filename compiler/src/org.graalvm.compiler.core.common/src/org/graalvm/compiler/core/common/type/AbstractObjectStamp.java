@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2012, 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -44,6 +46,13 @@ public abstract class AbstractObjectStamp extends AbstractPointerStamp {
         super(nonNull, alwaysNull);
         this.type = type;
         this.exactType = exactType;
+    }
+
+    @Override
+    public void accept(Visitor v) {
+        super.accept(v);
+        v.visitObject(type);
+        v.visitBoolean(exactType);
     }
 
     protected abstract AbstractObjectStamp copyWith(ResolvedJavaType newType, boolean newExactType, boolean newNonNull, boolean newAlwaysNull);
@@ -191,8 +200,6 @@ public abstract class AbstractObjectStamp extends AbstractPointerStamp {
         boolean joinExactType = exactType || other.exactType;
         if (Objects.equals(type, other.type)) {
             joinType = type;
-        } else if (type == null && other.type == null) {
-            joinType = null;
         } else if (type == null) {
             joinType = other.type;
         } else if (other.type == null) {

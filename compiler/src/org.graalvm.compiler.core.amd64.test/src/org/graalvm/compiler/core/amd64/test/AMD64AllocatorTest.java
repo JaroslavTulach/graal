@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2013, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2013, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -22,7 +24,6 @@
  */
 package org.graalvm.compiler.core.amd64.test;
 
-import static org.graalvm.compiler.core.common.GraalOptions.TraceRA;
 import static org.graalvm.compiler.core.common.GraalOptions.RegisterPressure;
 import static org.junit.Assume.assumeTrue;
 import jdk.vm.ci.amd64.AMD64;
@@ -39,12 +40,11 @@ public class AMD64AllocatorTest extends AllocatorTest {
     public void checkAMD64() {
         assumeTrue("skipping AMD64 specific test", getTarget().arch instanceof AMD64);
         assumeTrue("RegisterPressure is set -> skip", RegisterPressure.getValue(getInitialOptions()) == null);
-        assumeTrue("TraceRA is set -> skip", !TraceRA.getValue(getInitialOptions()));
     }
 
     @Test
     public void test1() {
-        testAllocation("test1snippet", 3, 1, 0);
+        testAllocation("test1snippet", 3, 0, 0);
     }
 
     public static long test1snippet(long x) {

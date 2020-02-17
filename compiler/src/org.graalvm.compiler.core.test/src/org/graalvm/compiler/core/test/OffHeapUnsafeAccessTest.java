@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2017, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -22,38 +24,17 @@
  */
 package org.graalvm.compiler.core.test;
 
-import java.lang.reflect.Field;
-
 import org.graalvm.compiler.nodes.NamedLocationIdentity;
 import org.graalvm.compiler.nodes.memory.ReadNode;
 import org.junit.Assert;
 import org.junit.Test;
 
 import jdk.vm.ci.meta.JavaKind;
-import sun.misc.Unsafe;
 
 /**
  * Tests that off-heap memory writes don't prevent optimization of on-heap accesses.
  */
 public class OffHeapUnsafeAccessTest extends GraalCompilerTest {
-
-    static final Unsafe UNSAFE = initUnsafe();
-
-    private static Unsafe initUnsafe() {
-        try {
-            // Fast path when we are trusted.
-            return Unsafe.getUnsafe();
-        } catch (SecurityException se) {
-            // Slow path when we are not trusted.
-            try {
-                Field theUnsafe = Unsafe.class.getDeclaredField("theUnsafe");
-                theUnsafe.setAccessible(true);
-                return (Unsafe) theUnsafe.get(Unsafe.class);
-            } catch (Exception e) {
-                throw new RuntimeException("exception while trying to get Unsafe", e);
-            }
-        }
-    }
 
     public byte unboxByteAndStore(long memory, byte[] box) {
         byte val = box[0];

@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2011, 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -39,7 +41,7 @@ import org.graalvm.compiler.nodeinfo.NodeInfo;
 import org.graalvm.compiler.nodeinfo.Verbosity;
 import org.graalvm.compiler.nodes.FixedWithNextNode;
 import org.graalvm.compiler.nodes.ValueNode;
-import org.graalvm.compiler.nodes.memory.MemoryCheckpoint;
+import org.graalvm.compiler.nodes.memory.MultiMemoryKill;
 import org.graalvm.compiler.nodes.spi.LIRLowerable;
 import org.graalvm.compiler.nodes.spi.NodeLIRBuilderTool;
 import org.graalvm.word.LocationIdentity;
@@ -50,7 +52,7 @@ import jdk.vm.ci.meta.Value;
  * Node for a {@linkplain ForeignCallDescriptor foreign} call from within a stub.
  */
 @NodeInfo(nameTemplate = "StubForeignCall#{p#descriptor/s}", allowedUsageTypes = Memory, cycles = CYCLES_UNKNOWN, size = SIZE_UNKNOWN)
-public final class StubForeignCallNode extends FixedWithNextNode implements LIRLowerable, MemoryCheckpoint.Multi {
+public final class StubForeignCallNode extends FixedWithNextNode implements LIRLowerable, MultiMemoryKill {
 
     public static final NodeClass<StubForeignCallNode> TYPE = NodeClass.create(StubForeignCallNode.class);
     @Input NodeInputList<ValueNode> arguments;
@@ -70,7 +72,7 @@ public final class StubForeignCallNode extends FixedWithNextNode implements LIRL
     }
 
     @Override
-    public LocationIdentity[] getLocationIdentities() {
+    public LocationIdentity[] getKilledLocationIdentities() {
         LocationIdentity[] killedLocations = foreignCalls.getKilledLocations(descriptor);
         killedLocations = Arrays.copyOf(killedLocations, killedLocations.length + 1);
         killedLocations[killedLocations.length - 1] = HotSpotReplacementsUtil.PENDING_EXCEPTION_LOCATION;

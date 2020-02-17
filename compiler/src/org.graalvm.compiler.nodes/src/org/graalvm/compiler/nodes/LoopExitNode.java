@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2012, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -33,6 +35,7 @@ import org.graalvm.compiler.graph.iterators.NodeIterable;
 import org.graalvm.compiler.graph.spi.Simplifiable;
 import org.graalvm.compiler.graph.spi.SimplifierTool;
 import org.graalvm.compiler.nodeinfo.NodeInfo;
+import org.graalvm.compiler.nodes.util.GraphUtil;
 
 @NodeInfo(allowedUsageTypes = {Association}, cycles = CYCLES_0, size = SIZE_0)
 public final class LoopExitNode extends BeginStateSplitNode implements IterableNodeType, Simplifiable {
@@ -100,11 +103,21 @@ public final class LoopExitNode extends BeginStateSplitNode implements IterableN
         });
     }
 
+    public void removeExit() {
+        this.removeProxies();
+        FrameState loopStateAfter = this.stateAfter();
+        graph().replaceFixedWithFixed(this, graph().add(new BeginNode()));
+        if (loopStateAfter != null) {
+            GraphUtil.tryKillUnused(loopStateAfter);
+        }
+    }
+
     @Override
     public void simplify(SimplifierTool tool) {
         Node prev = this.predecessor();
         while (tool.allUsagesAvailable() && prev instanceof BeginNode && prev.hasNoUsages()) {
             AbstractBeginNode begin = (AbstractBeginNode) prev;
+            this.setNodeSourcePosition(begin.getNodeSourcePosition());
             prev = prev.predecessor();
             graph().removeFixed(begin);
         }

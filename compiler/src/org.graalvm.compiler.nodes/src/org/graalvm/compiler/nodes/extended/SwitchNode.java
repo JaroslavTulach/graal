@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2009, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2009, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -46,6 +48,7 @@ import org.graalvm.compiler.nodeinfo.NodeInfo;
 import org.graalvm.compiler.nodeinfo.NodeSize;
 import org.graalvm.compiler.nodes.AbstractBeginNode;
 import org.graalvm.compiler.nodes.ControlSplitNode;
+import org.graalvm.compiler.nodes.NodeView;
 import org.graalvm.compiler.nodes.ValueNode;
 
 import jdk.vm.ci.meta.Constant;
@@ -79,7 +82,8 @@ public abstract class SwitchNode extends ControlSplitNode {
      */
     protected SwitchNode(NodeClass<? extends SwitchNode> c, ValueNode value, AbstractBeginNode[] successors, int[] keySuccessors, double[] keyProbabilities) {
         super(c, StampFactory.forVoid());
-        assert value.stamp().getStackKind().isNumericInteger() || value.stamp() instanceof AbstractPointerStamp : value.stamp() + " key not supported by SwitchNode";
+        assert value.stamp(NodeView.DEFAULT).getStackKind().isNumericInteger() || value.stamp(NodeView.DEFAULT) instanceof AbstractPointerStamp : value.stamp(NodeView.DEFAULT) +
+                        " key not supported by SwitchNode";
         assert keySuccessors.length == keyProbabilities.length;
         this.successors = new NodeSuccessorList<>(this, successors);
         this.value = value;
@@ -194,6 +198,13 @@ public abstract class SwitchNode extends ControlSplitNode {
     }
 
     /**
+     * Returns the probability of taking the default branch.
+     */
+    public double defaultProbability() {
+        return keyProbabilities[keyProbabilities.length - 1];
+    }
+
+    /**
      * Returns the index of the default (fall through) successor of this switch.
      */
     public int defaultSuccessorIndex() {
@@ -226,7 +237,7 @@ public abstract class SwitchNode extends ControlSplitNode {
 
     @Override
     public AbstractBeginNode getPrimarySuccessor() {
-        return this.defaultSuccessor();
+        return null;
     }
 
     /**
@@ -279,4 +290,7 @@ public abstract class SwitchNode extends ControlSplitNode {
         }
     }
 
+    public int[] getKeySuccessors() {
+        return keySuccessors.clone();
+    }
 }

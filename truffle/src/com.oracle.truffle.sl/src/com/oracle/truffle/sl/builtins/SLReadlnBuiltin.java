@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2014, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * The Universal Permissive License (UPL), Version 1.0
@@ -44,9 +44,11 @@ import java.io.BufferedReader;
 import java.io.IOException;
 
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
+import com.oracle.truffle.api.dsl.CachedContext;
 import com.oracle.truffle.api.dsl.Specialization;
 import com.oracle.truffle.api.nodes.NodeInfo;
 import com.oracle.truffle.sl.SLException;
+import com.oracle.truffle.sl.SLLanguage;
 import com.oracle.truffle.sl.runtime.SLContext;
 
 /**
@@ -56,8 +58,8 @@ import com.oracle.truffle.sl.runtime.SLContext;
 public abstract class SLReadlnBuiltin extends SLBuiltinNode {
 
     @Specialization
-    public String readln() {
-        String result = doRead(getContext().getInput());
+    public String readln(@CachedContext(SLLanguage.class) SLContext context) {
+        String result = doRead(context.getInput());
         if (result == null) {
             /*
              * We do not have a sophisticated end of file handling, so returning an empty string is
@@ -70,11 +72,11 @@ public abstract class SLReadlnBuiltin extends SLBuiltinNode {
     }
 
     @TruffleBoundary
-    private static String doRead(BufferedReader in) {
+    private String doRead(BufferedReader in) {
         try {
             return in.readLine();
         } catch (IOException ex) {
-            throw new SLException(ex.getMessage());
+            throw new SLException(ex.getMessage(), this);
         }
     }
 }

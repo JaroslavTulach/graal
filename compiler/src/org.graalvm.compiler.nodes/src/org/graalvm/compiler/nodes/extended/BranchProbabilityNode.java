@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2012, 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -25,20 +27,29 @@ package org.graalvm.compiler.nodes.extended;
 import static org.graalvm.compiler.nodeinfo.NodeCycles.CYCLES_0;
 import static org.graalvm.compiler.nodeinfo.NodeSize.SIZE_0;
 
-import org.graalvm.compiler.core.common.calc.Condition;
+import jdk.vm.ci.meta.JavaKind;
+import org.graalvm.compiler.core.common.calc.CanonicalCondition;
+import org.graalvm.compiler.core.common.type.IntegerStamp;
+import org.graalvm.compiler.core.common.type.StampFactory;
 import org.graalvm.compiler.debug.GraalError;
+import org.graalvm.compiler.graph.Node;
 import org.graalvm.compiler.graph.NodeClass;
 import org.graalvm.compiler.graph.iterators.NodePredicates;
+import org.graalvm.compiler.graph.spi.Canonicalizable;
+import org.graalvm.compiler.graph.spi.CanonicalizerTool;
 import org.graalvm.compiler.graph.spi.Simplifiable;
 import org.graalvm.compiler.graph.spi.SimplifierTool;
 import org.graalvm.compiler.nodeinfo.NodeInfo;
 import org.graalvm.compiler.nodes.FixedGuardNode;
 import org.graalvm.compiler.nodes.IfNode;
+import org.graalvm.compiler.nodes.NodeView;
 import org.graalvm.compiler.nodes.ReturnNode;
 import org.graalvm.compiler.nodes.ValueNode;
 import org.graalvm.compiler.nodes.calc.ConditionalNode;
 import org.graalvm.compiler.nodes.calc.FloatingNode;
 import org.graalvm.compiler.nodes.calc.IntegerEqualsNode;
+import org.graalvm.compiler.nodes.calc.NarrowNode;
+import org.graalvm.compiler.nodes.calc.ZeroExtendNode;
 import org.graalvm.compiler.nodes.spi.Lowerable;
 import org.graalvm.compiler.nodes.spi.LoweringTool;
 
@@ -48,7 +59,7 @@ import org.graalvm.compiler.nodes.spi.LoweringTool;
  * intended primarily for snippets, so that they can define their fast and slow paths.
  */
 @NodeInfo(cycles = CYCLES_0, cyclesRationale = "Artificial Node", size = SIZE_0)
-public final class BranchProbabilityNode extends FloatingNode implements Simplifiable, Lowerable {
+public final class BranchProbabilityNode extends FloatingNode implements Simplifiable, Lowerable, Canonicalizable {
 
     public static final NodeClass<BranchProbabilityNode> TYPE = NodeClass.create(BranchProbabilityNode.class);
     public static final double LIKELY_PROBABILITY = 0.6;
@@ -63,11 +74,22 @@ public final class BranchProbabilityNode extends FloatingNode implements Simplif
     public static final double VERY_FAST_PATH_PROBABILITY = 0.999;
     public static final double VERY_SLOW_PATH_PROBABILITY = 1 - VERY_FAST_PATH_PROBABILITY;
 
+    public static final double DEOPT_PROBABILITY = 0.0;
+
+    /*
+     * This probability may seem excessive, but it makes a difference in long running loops. Lets
+     * say a loop is executed 100k times and it has a few null checks with probability 0.999. As
+     * these probabilities multiply for every loop iteration, the overall loop frequency will be
+     * calculated as approximately 30 while it should be 100k.
+     */
+    public static final double LUDICROUSLY_FAST_PATH_PROBABILITY = 0.999999;
+    public static final double LUDICROUSLY_SLOW_PATH_PROBABILITY = 1 - LUDICROUSLY_FAST_PATH_PROBABILITY;
+
     @Input ValueNode probability;
     @Input ValueNode condition;
 
     public BranchProbabilityNode(ValueNode probability, ValueNode condition) {
-        super(TYPE, condition.stamp());
+        super(TYPE, StampFactory.forKind(JavaKind.Boolean));
         this.probability = probability;
         this.condition = condition;
     }
@@ -78,6 +100,15 @@ public final class BranchProbabilityNode extends FloatingNode implements Simplif
 
     public ValueNode getCondition() {
         return condition;
+    }
+
+    @Override
+    public Node canonical(CanonicalizerTool tool) {
+        if (condition.isConstant()) {
+            // fold constant conditions early during PE
+            return condition;
+        }
+        return this;
     }
 
     @Override
@@ -100,7 +131,7 @@ public final class BranchProbabilityNode extends FloatingNode implements Simplif
             }
             boolean usageFound = false;
             for (IntegerEqualsNode node : this.usages().filter(IntegerEqualsNode.class)) {
-                assert node.condition() == Condition.EQ;
+                assert node.condition() == CanonicalCondition.EQ;
                 ValueNode other = node.getX();
                 if (node.getX() == this) {
                     other = node.getY();
@@ -121,6 +152,11 @@ public final class BranchProbabilityNode extends FloatingNode implements Simplif
             }
             if (usageFound) {
                 ValueNode currentCondition = condition;
+                IntegerStamp currentStamp = (IntegerStamp) currentCondition.stamp(NodeView.DEFAULT);
+                if (currentStamp.lowerBound() < 0 || 1 < currentStamp.upperBound()) {
+                    ValueNode narrow = graph().maybeAddOrUnique(NarrowNode.create(currentCondition, 1, NodeView.DEFAULT));
+                    currentCondition = graph().maybeAddOrUnique(ZeroExtendNode.create(narrow, 32, NodeView.DEFAULT));
+                }
                 replaceAndDelete(currentCondition);
                 if (tool != null) {
                     tool.addToWorkList(currentCondition.usages());

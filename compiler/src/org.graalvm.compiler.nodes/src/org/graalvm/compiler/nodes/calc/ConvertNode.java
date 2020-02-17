@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2014, 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2014, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -22,7 +24,7 @@
  */
 package org.graalvm.compiler.nodes.calc;
 
-import org.graalvm.compiler.core.common.calc.Condition;
+import org.graalvm.compiler.core.common.calc.CanonicalCondition;
 import org.graalvm.compiler.nodes.ValueNode;
 import org.graalvm.compiler.nodes.ValueNodeInterface;
 
@@ -61,7 +63,7 @@ public interface ConvertNode extends ValueNodeInterface {
      * @param op a comparison operator
      * @return true iff (c1 op c2) == (convert(c1) op convert(c2)) for all c1, c2
      */
-    default boolean preservesOrder(Condition op) {
+    default boolean preservesOrder(CanonicalCondition op) {
         return isLossless();
     }
 
@@ -73,7 +75,7 @@ public interface ConvertNode extends ValueNodeInterface {
      * @param constantReflection
      * @return true iff (c1 op value) == (convert(c1) op convert(value)) for value and all c1
      */
-    default boolean preservesOrder(Condition op, Constant value, ConstantReflectionProvider constantReflection) {
+    default boolean preservesOrder(CanonicalCondition op, Constant value, ConstantReflectionProvider constantReflection) {
         return preservesOrder(op);
     }
 }

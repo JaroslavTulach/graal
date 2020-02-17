@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2013, 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2013, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -24,15 +26,17 @@ package org.graalvm.compiler.replacements.test;
 
 import org.graalvm.compiler.api.replacements.Snippet;
 import org.graalvm.compiler.nodes.NamedLocationIdentity;
+import org.graalvm.compiler.nodes.NodeView;
 import org.graalvm.compiler.nodes.ReturnNode;
 import org.graalvm.compiler.nodes.StructuredGraph;
 import org.graalvm.compiler.nodes.StructuredGraph.AllowAssumptions;
+import org.graalvm.compiler.nodes.ValueNode;
+import org.graalvm.compiler.nodes.calc.ConvertNode;
 import org.graalvm.compiler.nodes.calc.SignExtendNode;
 import org.graalvm.compiler.nodes.extended.JavaReadNode;
 import org.graalvm.compiler.nodes.extended.JavaWriteNode;
 import org.graalvm.compiler.nodes.memory.address.OffsetAddressNode;
 import org.graalvm.compiler.phases.OptimisticOptimizations;
-import org.graalvm.compiler.phases.common.CanonicalizerPhase;
 import org.graalvm.compiler.phases.tiers.HighTierContext;
 import org.graalvm.compiler.word.Word;
 import org.graalvm.compiler.word.WordCastNode;
@@ -83,21 +87,21 @@ public class PointerTest extends SnippetsTest {
     @Test
     public void testWrite1() {
         for (JavaKind kind : KINDS) {
-            assertWrite(parseEager("write" + kind.name() + "1", AllowAssumptions.YES), true, ID);
+            assertWrite(parseEager("write" + kind.name() + "1", AllowAssumptions.YES), kind, true, ID);
         }
     }
 
     @Test
     public void testWrite2() {
         for (JavaKind kind : KINDS) {
-            assertWrite(parseEager("write" + kind.name() + "2", AllowAssumptions.YES), true, ID);
+            assertWrite(parseEager("write" + kind.name() + "2", AllowAssumptions.YES), kind, true, ID);
         }
     }
 
     @Test
     public void testWrite3() {
         for (JavaKind kind : KINDS) {
-            assertWrite(parseEager("write" + kind.name() + "3", AllowAssumptions.YES), true, LocationIdentity.any());
+            assertWrite(parseEager("write" + kind.name() + "3", AllowAssumptions.YES), kind, true, LocationIdentity.any());
         }
     }
 
@@ -105,12 +109,12 @@ public class PointerTest extends SnippetsTest {
         WordCastNode cast = (WordCastNode) graph.start().next();
 
         JavaReadNode read = (JavaReadNode) cast.next();
-        Assert.assertEquals(kind.getStackKind(), read.stamp().getStackKind());
+        Assert.assertEquals(kind.getStackKind(), read.stamp(NodeView.DEFAULT).getStackKind());
 
         OffsetAddressNode address = (OffsetAddressNode) read.getAddress();
         Assert.assertEquals(cast, address.getBase());
         Assert.assertEquals(graph.getParameter(0), cast.getInput());
-        Assert.assertEquals(target.wordJavaKind, cast.stamp().getStackKind());
+        Assert.assertEquals(target.wordJavaKind, cast.stamp(NodeView.DEFAULT).getStackKind());
 
         Assert.assertEquals(locationIdentity, read.getLocationIdentity());
 
@@ -127,19 +131,25 @@ public class PointerTest extends SnippetsTest {
         Assert.assertEquals(read, ret.result());
     }
 
-    private void assertWrite(StructuredGraph graph, boolean indexConvert, LocationIdentity locationIdentity) {
+    private void assertWrite(StructuredGraph graph, JavaKind kind, boolean indexConvert, LocationIdentity locationIdentity) {
         WordCastNode cast = (WordCastNode) graph.start().next();
 
         JavaWriteNode write = (JavaWriteNode) cast.next();
-        Assert.assertEquals(graph.getParameter(2), write.value());
+        ValueNode valueNode = write.value();
+        if (kind != kind.getStackKind()) {
+            while (valueNode instanceof ConvertNode) {
+                valueNode = ((ConvertNode) valueNode).getValue();
+            }
+        }
+        Assert.assertEquals(graph.getParameter(2), valueNode);
         Assert.assertEquals(BytecodeFrame.AFTER_BCI, write.stateAfter().bci);
 
         OffsetAddressNode address = (OffsetAddressNode) write.getAddress();
         Assert.assertEquals(cast, address.getBase());
         Assert.assertEquals(graph.getParameter(0), cast.getInput());
-        Assert.assertEquals(target.wordJavaKind, cast.stamp().getStackKind());
+        Assert.assertEquals(target.wordJavaKind, cast.stamp(NodeView.DEFAULT).getStackKind());
 
-        Assert.assertEquals(locationIdentity, write.getLocationIdentity());
+        Assert.assertEquals(locationIdentity, write.getKilledLocationIdentity());
 
         if (indexConvert) {
             SignExtendNode convert = (SignExtendNode) address.getOffset();
@@ -398,7 +408,7 @@ public class PointerTest extends SnippetsTest {
         HighTierContext context = new HighTierContext(getProviders(), null, OptimisticOptimizations.ALL);
 
         StructuredGraph graph = parseEager(snippetName, AllowAssumptions.YES);
-        new CanonicalizerPhase().apply(graph, context);
+        this.createCanonicalizerPhase().apply(graph, context);
         Assert.assertEquals(expectedWordCasts, graph.getNodes().filter(WordCastNode.class).count());
     }
 

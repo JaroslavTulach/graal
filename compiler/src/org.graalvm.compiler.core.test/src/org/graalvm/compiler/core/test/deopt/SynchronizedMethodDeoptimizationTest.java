@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -22,11 +24,11 @@
  */
 package org.graalvm.compiler.core.test.deopt;
 
-import org.junit.Assume;
-import org.junit.Test;
-
 import org.graalvm.compiler.core.test.GraalCompilerTest;
 import org.graalvm.compiler.core.test.ea.EATestBase.TestClassObject;
+import org.graalvm.compiler.serviceprovider.JavaVersionUtil;
+import org.junit.Assume;
+import org.junit.Test;
 
 /**
  * In the following tests, we try to deoptimize out of synchronized methods.
@@ -46,7 +48,7 @@ public class SynchronizedMethodDeoptimizationTest extends GraalCompilerTest {
     @Test
     public void test1() {
         // https://bugs.openjdk.java.net/browse/JDK-8182755
-        Assume.assumeTrue(Java8OrEarlier);
+        Assume.assumeTrue(JavaVersionUtil.JAVA_SPEC <= 8);
 
         test("testMethodSynchronized", "test");
         test("testMethodSynchronized", (Object) null);

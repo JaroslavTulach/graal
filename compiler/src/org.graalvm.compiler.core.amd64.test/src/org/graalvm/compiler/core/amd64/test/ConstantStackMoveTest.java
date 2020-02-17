@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2015, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -141,7 +143,7 @@ public class ConstantStackMoveTest extends LIRTest {
     }
 
     @Test
-    public void runByte() throws Throwable {
+    public void runByte() {
         runTest("testByte");
     }
 
@@ -155,7 +157,7 @@ public class ConstantStackMoveTest extends LIRTest {
     }
 
     @Test
-    public void runShort() throws Throwable {
+    public void runShort() {
         runTest("testShort");
     }
 
@@ -169,7 +171,7 @@ public class ConstantStackMoveTest extends LIRTest {
     }
 
     @Test
-    public void runInt() throws Throwable {
+    public void runInt() {
         runTest("testInt");
     }
 
@@ -183,7 +185,7 @@ public class ConstantStackMoveTest extends LIRTest {
     }
 
     @Test
-    public void runLong() throws Throwable {
+    public void runLong() {
         runTest("testLong");
     }
 
@@ -197,7 +199,7 @@ public class ConstantStackMoveTest extends LIRTest {
     }
 
     @Test
-    public void runFloat() throws Throwable {
+    public void runFloat() {
         runTest("testFloat");
     }
 
@@ -211,7 +213,7 @@ public class ConstantStackMoveTest extends LIRTest {
     }
 
     @Test
-    public void runDouble() throws Throwable {
+    public void runDouble() {
         runTest("testDouble");
     }
 

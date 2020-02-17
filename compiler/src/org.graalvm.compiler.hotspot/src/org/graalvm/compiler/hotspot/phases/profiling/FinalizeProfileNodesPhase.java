@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2016, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -35,6 +37,7 @@ import org.graalvm.compiler.hotspot.nodes.profiling.RandomSeedNode;
 import org.graalvm.compiler.nodes.ConstantNode;
 import org.graalvm.compiler.nodes.InvokeNode;
 import org.graalvm.compiler.nodes.LoopBeginNode;
+import org.graalvm.compiler.nodes.NodeView;
 import org.graalvm.compiler.nodes.PhiNode;
 import org.graalvm.compiler.nodes.StructuredGraph;
 import org.graalvm.compiler.nodes.ValueNode;
@@ -43,16 +46,16 @@ import org.graalvm.compiler.nodes.calc.AddNode;
 import org.graalvm.compiler.nodes.calc.MulNode;
 import org.graalvm.compiler.nodes.cfg.Block;
 import org.graalvm.compiler.nodes.cfg.ControlFlowGraph;
+import org.graalvm.compiler.nodes.spi.CoreProviders;
 import org.graalvm.compiler.nodes.util.GraphUtil;
 import org.graalvm.compiler.options.Option;
 import org.graalvm.compiler.options.OptionKey;
 import org.graalvm.compiler.options.OptionType;
 import org.graalvm.compiler.phases.BasePhase;
-import org.graalvm.compiler.phases.tiers.PhaseContext;
 
 import jdk.vm.ci.meta.ResolvedJavaMethod;
 
-public class FinalizeProfileNodesPhase extends BasePhase<PhaseContext> {
+public class FinalizeProfileNodesPhase extends BasePhase<CoreProviders> {
     private int inlineeInvokeNotificationFreqLog;
 
     public static class Options {
@@ -130,7 +133,7 @@ public class FinalizeProfileNodesPhase extends BasePhase<PhaseContext> {
                 LoopBeginNode loopBegin = (LoopBeginNode) loop.getHeader().getBeginNode();
                 random = loopRandomValueCache.get(loopBegin);
                 if (random == null) {
-                    PhiNode phi = graph.addWithoutUnique(new ValuePhiNode(seed.stamp(), loopBegin));
+                    PhiNode phi = graph.addWithoutUnique(new ValuePhiNode(seed.stamp(NodeView.DEFAULT), loopBegin));
                     phi.addInput(seed);
                     // X_{n+1} = a*X_n + c, using glibc-like constants
                     ValueNode a = ConstantNode.forInt(1103515245, graph);
@@ -153,7 +156,7 @@ public class FinalizeProfileNodesPhase extends BasePhase<PhaseContext> {
     }
 
     @Override
-    protected void run(StructuredGraph graph, PhaseContext context) {
+    protected void run(StructuredGraph graph, CoreProviders context) {
         if (simpleMethodHeuristic(graph)) {
             removeAllProfilingNodes(graph);
             return;

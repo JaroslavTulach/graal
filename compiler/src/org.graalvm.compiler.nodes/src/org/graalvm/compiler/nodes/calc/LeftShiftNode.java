@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2011, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -22,7 +24,10 @@
  */
 package org.graalvm.compiler.nodes.calc;
 
+import static org.graalvm.compiler.nodes.calc.BinaryArithmeticNode.getArithmeticOpTable;
+
 import org.graalvm.compiler.core.common.type.ArithmeticOpTable;
+import org.graalvm.compiler.core.common.type.ArithmeticOpTable.ShiftOp;
 import org.graalvm.compiler.core.common.type.ArithmeticOpTable.ShiftOp.Shl;
 import org.graalvm.compiler.core.common.type.IntegerStamp;
 import org.graalvm.compiler.core.common.type.Stamp;
@@ -31,6 +36,7 @@ import org.graalvm.compiler.graph.spi.CanonicalizerTool;
 import org.graalvm.compiler.lir.gen.ArithmeticLIRGeneratorTool;
 import org.graalvm.compiler.nodeinfo.NodeInfo;
 import org.graalvm.compiler.nodes.ConstantNode;
+import org.graalvm.compiler.nodes.NodeView;
 import org.graalvm.compiler.nodes.ValueNode;
 import org.graalvm.compiler.nodes.spi.NodeLIRBuilderTool;
 
@@ -42,18 +48,23 @@ public final class LeftShiftNode extends ShiftNode<Shl> {
     public static final NodeClass<LeftShiftNode> TYPE = NodeClass.create(LeftShiftNode.class);
 
     public LeftShiftNode(ValueNode x, ValueNode y) {
-        super(TYPE, ArithmeticOpTable::getShl, x, y);
+        super(TYPE, getArithmeticOpTable(x).getShl(), x, y);
     }
 
-    public static ValueNode create(ValueNode x, ValueNode y) {
-        ArithmeticOpTable.ShiftOp<Shl> op = ArithmeticOpTable.forStamp(x.stamp()).getShl();
-        Stamp stamp = op.foldStamp(x.stamp(), (IntegerStamp) y.stamp());
-        ValueNode value = ShiftNode.canonical(op, stamp, x, y);
+    public static ValueNode create(ValueNode x, ValueNode y, NodeView view) {
+        ArithmeticOpTable.ShiftOp<Shl> op = ArithmeticOpTable.forStamp(x.stamp(view)).getShl();
+        Stamp stamp = op.foldStamp(x.stamp(view), (IntegerStamp) y.stamp(view));
+        ValueNode value = ShiftNode.canonical(op, stamp, x, y, view);
         if (value != null) {
             return value;
         }
 
         return canonical(null, op, stamp, x, y);
+    }
+
+    @Override
+    protected ShiftOp<Shl> getOp(ArithmeticOpTable table) {
+        return table.getShl();
     }
 
     @Override
@@ -63,7 +74,7 @@ public final class LeftShiftNode extends ShiftNode<Shl> {
             return ret;
         }
 
-        return canonical(this, getArithmeticOp(), stamp(), forX, forY);
+        return canonical(this, getArithmeticOp(), stamp(NodeView.DEFAULT), forX, forY);
     }
 
     private static ValueNode canonical(LeftShiftNode leftShiftNode, ArithmeticOpTable.ShiftOp<Shl> op, Stamp stamp, ValueNode forX, ValueNode forY) {

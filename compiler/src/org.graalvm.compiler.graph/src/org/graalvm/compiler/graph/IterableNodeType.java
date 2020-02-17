@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2013, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2013, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -25,8 +27,8 @@ package org.graalvm.compiler.graph;
 /**
  * A marker for a node type supporting {@linkplain Graph#getNodes(NodeClass) fast iteration} of its
  * instances in a graph. The support for fast iteration comes with a memory cost (e.g., extra data
- * structures {@link Graph}) so only node types for which fast iteration provides a compilation
- * performance benefit should implement this interface.
+ * structures {@link Graph}) and additional bookkeeping when adding nodes, so only node types for
+ * which fast iteration provides a compilation performance benefit should implement this interface.
  */
 public interface IterableNodeType {
 }

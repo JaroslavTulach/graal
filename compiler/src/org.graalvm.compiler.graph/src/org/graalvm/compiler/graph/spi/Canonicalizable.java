@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2011, 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -152,5 +154,50 @@ public interface Canonicalizable {
          * @return the original node or another node with the same input ordering
          */
         Node maybeCommuteInputs();
+    }
+
+    /**
+     * This sub-interface of {@link Canonicalizable} is intended for nodes that have exactly three
+     * inputs. It has an additional {@link #canonical(CanonicalizerTool, Node, Node, Node)} method
+     * that looks at the given inputs instead of the current inputs of the node - which can be used
+     * to ask "what if this input is changed to this node" - questions.
+     *
+     * @param <T> the common supertype of all inputs of this node
+     */
+    public interface Ternary<T extends Node> extends Canonicalizable {
+
+        /**
+         * Similar to {@link Canonicalizable#canonical(CanonicalizerTool)}, except that
+         * implementations should act as if the current input of the node was the given one, i.e.,
+         * they should never look at the inputs via the this pointer.
+         */
+        Node canonical(CanonicalizerTool tool, T forX, T forY, T forZ);
+
+        /**
+         * Gets the current value of the input, so that calling
+         * {@link #canonical(CanonicalizerTool, Node, Node, Node)} with the value returned from this
+         * method should behave exactly like {@link Canonicalizable#canonical(CanonicalizerTool)}.
+         */
+        T getX();
+
+        /**
+         * Gets the current value of the input, so that calling
+         * {@link #canonical(CanonicalizerTool, Node, Node, Node)} with the value returned from this
+         * method should behave exactly like {@link Canonicalizable#canonical(CanonicalizerTool)}.
+         */
+        T getY();
+
+        /**
+         * Gets the current value of the input, so that calling
+         * {@link #canonical(CanonicalizerTool, Node, Node, Node)} with the value returned from this
+         * method should behave exactly like {@link Canonicalizable#canonical(CanonicalizerTool)}.
+         */
+        T getZ();
+
+        @SuppressWarnings("unchecked")
+        @Override
+        default T canonical(CanonicalizerTool tool) {
+            return (T) canonical(tool, getX(), getY(), getZ());
+        }
     }
 }

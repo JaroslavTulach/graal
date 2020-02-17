@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2012, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -33,14 +35,14 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.EnumSet;
 
+import org.graalvm.collections.EconomicMap;
+import org.graalvm.collections.Equivalence;
+import org.graalvm.collections.MapCursor;
 import org.graalvm.compiler.core.common.FieldIntrospection;
 import org.graalvm.compiler.core.common.Fields;
 import org.graalvm.compiler.core.common.FieldsScanner;
 import org.graalvm.compiler.lir.LIRInstruction.OperandFlag;
 import org.graalvm.compiler.lir.LIRInstruction.OperandMode;
-import org.graalvm.util.Equivalence;
-import org.graalvm.util.EconomicMap;
-import org.graalvm.util.MapCursor;
 
 import jdk.vm.ci.code.RegisterValue;
 import jdk.vm.ci.code.StackSlot;
@@ -212,6 +214,23 @@ abstract class LIRIntrospection<T> extends FieldIntrospection<T> {
         }
     }
 
+    private static boolean verifyAssignment(LIRInstruction inst, Value newValue, EnumSet<OperandFlag> flags) {
+        Class<?> type = newValue.getClass();
+        if (!flags.contains(REG)) {
+            assert !type.isAssignableFrom(REGISTER_VALUE_CLASS) && !type.isAssignableFrom(VARIABLE_CLASS) : "Cannot assign RegisterValue / Variable to field without REG flag: " + inst + " newValue=" +
+                            newValue;
+        }
+        if (!flags.contains(STACK)) {
+            assert !type.isAssignableFrom(STACK_SLOT_CLASS) : "Cannot assign StackSlot to field without STACK flag: " + inst + " newValue=" +
+                            newValue;
+        }
+        if (!flags.contains(CONST)) {
+            assert !type.isAssignableFrom(CONSTANT_VALUE_CLASS) : "Cannot assign Constant to field without CONST flag: " + inst + " newValue=" +
+                            newValue;
+        }
+        return true;
+    }
+
     protected static void forEach(LIRInstruction inst, Values values, OperandMode mode, InstructionValueProcedure proc) {
         for (int i = 0; i < values.getCount(); i++) {
             assert LIRInstruction.ALLOWED_FLAGS.get(mode).containsAll(values.getFlags(i));
@@ -226,6 +245,9 @@ abstract class LIRIntrospection<T> extends FieldIntrospection<T> {
                     newValue = proc.doValue(inst, value, mode, values.getFlags(i));
                 }
                 if (!value.identityEquals(newValue)) {
+                    if (!(value instanceof CompositeValue)) {
+                        assert verifyAssignment(inst, newValue, values.getFlags(i));
+                    }
                     values.setValue(inst, i, newValue);
                 }
             } else {
@@ -340,7 +362,7 @@ abstract class LIRIntrospection<T> extends FieldIntrospection<T> {
     private static boolean isPrintableAsciiString(byte[] array) {
         for (byte b : array) {
             char c = (char) b;
-            if (c != 0 && c < 0x20 && c > 0x7F) {
+            if (c != 0 && (c < 0x20 || c > 0x7F)) {
                 return false;
             }
         }

@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2009, 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2009, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -36,9 +38,12 @@ import org.graalvm.compiler.nodeinfo.NodeCycles;
 import org.graalvm.compiler.nodeinfo.NodeInfo;
 import org.graalvm.compiler.nodes.ConstantNode;
 import org.graalvm.compiler.nodes.DeoptimizeNode;
+import org.graalvm.compiler.nodes.FixedGuardNode;
+import org.graalvm.compiler.nodes.NodeView;
 import org.graalvm.compiler.nodes.PhiNode;
 import org.graalvm.compiler.nodes.ValueNode;
 import org.graalvm.compiler.nodes.ValuePhiNode;
+import org.graalvm.compiler.nodes.calc.IsNullNode;
 import org.graalvm.compiler.nodes.spi.UncheckedInterfaceProvider;
 import org.graalvm.compiler.nodes.spi.Virtualizable;
 import org.graalvm.compiler.nodes.spi.VirtualizerTool;
@@ -68,12 +73,20 @@ public final class LoadFieldNode extends AccessFieldNode implements Canonicaliza
     private final Stamp uncheckedStamp;
 
     protected LoadFieldNode(StampPair stamp, ValueNode object, ResolvedJavaField field) {
-        super(TYPE, stamp.getTrustedStamp(), object, field);
+        this(stamp, object, field, field.isVolatile());
+    }
+
+    protected LoadFieldNode(StampPair stamp, ValueNode object, ResolvedJavaField field, boolean volatileAccess) {
+        super(TYPE, stamp.getTrustedStamp(), object, field, volatileAccess);
         this.uncheckedStamp = stamp.getUncheckedStamp();
     }
 
     public static LoadFieldNode create(Assumptions assumptions, ValueNode object, ResolvedJavaField field) {
-        return new LoadFieldNode(StampFactory.forDeclaredType(assumptions, field.getType(), false), object, field);
+        return create(assumptions, object, field, field.isVolatile());
+    }
+
+    public static LoadFieldNode create(Assumptions assumptions, ValueNode object, ResolvedJavaField field, boolean volatileAccess) {
+        return new LoadFieldNode(StampFactory.forDeclaredType(assumptions, field.getType(), false), object, field, volatileAccess);
     }
 
     public static ValueNode create(ConstantFieldProvider constantFields, ConstantReflectionProvider constantReflection, MetaAccessProvider metaAccess,
@@ -98,8 +111,14 @@ public final class LoadFieldNode extends AccessFieldNode implements Canonicaliza
 
     @Override
     public ValueNode canonical(CanonicalizerTool tool, ValueNode forObject) {
-        if (tool.allUsagesAvailable() && hasNoUsages() && !isVolatile() && (isStatic() || StampTool.isPointerNonNull(forObject.stamp()))) {
-            return null;
+        NodeView view = NodeView.from(tool);
+        if (tool.allUsagesAvailable() && hasNoUsages() && !isVolatile()) {
+            if (isStatic() || StampTool.isPointerNonNull(forObject.stamp(view))) {
+                return null;
+            }
+            if (graph().getGuardsStage().allowsGuardInsertion()) {
+                return new FixedGuardNode(new IsNullNode(forObject), DeoptimizationReason.NullCheckException, DeoptimizationAction.InvalidateReprofile, true, getNodeSourcePosition());
+            }
         }
         return canonical(this, StampPair.create(stamp, uncheckedStamp), forObject, field, tool.getConstantFieldProvider(),
                         tool.getConstantReflection(), tool.getOptions(), tool.getMetaAccess(), tool.canonicalizeReads(), tool.allUsagesAvailable());
@@ -178,10 +197,10 @@ public final class LoadFieldNode extends AccessFieldNode implements Canonicaliza
             int fieldIndex = ((VirtualInstanceNode) alias).fieldIndex(field());
             if (fieldIndex != -1) {
                 ValueNode entry = tool.getEntry((VirtualObjectNode) alias, fieldIndex);
-                if (stamp.isCompatible(entry.stamp())) {
+                if (stamp.isCompatible(entry.stamp(NodeView.DEFAULT))) {
                     tool.replaceWith(entry);
                 } else {
-                    assert stamp().getStackKind() == JavaKind.Int && (entry.stamp().getStackKind() == JavaKind.Long || entry.getStackKind() == JavaKind.Double ||
+                    assert stamp(NodeView.DEFAULT).getStackKind() == JavaKind.Int && (entry.stamp(NodeView.DEFAULT).getStackKind() == JavaKind.Long || entry.getStackKind() == JavaKind.Double ||
                                     entry.getStackKind() == JavaKind.Illegal) : "Can only allow different stack kind two slot marker writes on one stot fields.";
                 }
             }
@@ -200,7 +219,7 @@ public final class LoadFieldNode extends AccessFieldNode implements Canonicaliza
 
     @Override
     public NodeCycles estimatedNodeCycles() {
-        if (field.isVolatile()) {
+        if (isVolatile()) {
             return CYCLES_2;
         }
         return super.estimatedNodeCycles();

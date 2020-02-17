@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -24,11 +26,40 @@ package org.graalvm.compiler.phases.common.inlining.policy;
 
 import org.graalvm.compiler.nodes.StructuredGraph;
 import org.graalvm.compiler.nodes.spi.Replacements;
+import org.graalvm.compiler.phases.common.inlining.info.InlineInfo;
 import org.graalvm.compiler.phases.common.inlining.walker.MethodInvocation;
 
 public interface InliningPolicy {
+    class Decision {
+        public static final Decision YES = new Decision(true, "(unknown reason)");
+        public static final Decision NO = new Decision(false, "(unknown reason)");
+
+        private final boolean shouldInline;
+        private final String reason;
+
+        private Decision(boolean shouldInline, String reason) {
+            this.shouldInline = shouldInline;
+            this.reason = reason;
+        }
+
+        public boolean shouldInline() {
+            return shouldInline;
+        }
+
+        public String getReason() {
+            return reason;
+        }
+
+        public Decision withReason(boolean isTracing, String newReason, Object... args) {
+            if (isTracing) {
+                return new Decision(shouldInline, String.format(newReason, args));
+            } else {
+                return this;
+            }
+        }
+    }
 
     boolean continueInlining(StructuredGraph graph);
 
-    boolean isWorthInlining(Replacements replacements, MethodInvocation invocation, int inliningDepth, boolean fullyProcessed);
+    Decision isWorthInlining(Replacements replacements, MethodInvocation invocation, InlineInfo calleeInfo, int inliningDepth, boolean fullyProcessed);
 }

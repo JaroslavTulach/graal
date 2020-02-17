@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2011, 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -28,7 +30,7 @@ import static org.graalvm.compiler.graph.Edges.translateInto;
 import static org.graalvm.compiler.graph.Graph.isModificationCountsEnabled;
 import static org.graalvm.compiler.graph.InputEdges.translateInto;
 import static org.graalvm.compiler.graph.Node.WithAllEdges;
-import static org.graalvm.compiler.graph.UnsafeAccess.UNSAFE;
+import static org.graalvm.compiler.serviceprovider.GraalUnsafeAccess.getUnsafe;
 
 import java.lang.annotation.Annotation;
 import java.lang.reflect.AnnotatedElement;
@@ -42,6 +44,8 @@ import java.util.NoSuchElementException;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import org.graalvm.collections.EconomicMap;
+import org.graalvm.collections.Equivalence;
 import org.graalvm.compiler.core.common.FieldIntrospection;
 import org.graalvm.compiler.core.common.Fields;
 import org.graalvm.compiler.core.common.FieldsScanner;
@@ -49,6 +53,7 @@ import org.graalvm.compiler.debug.CounterKey;
 import org.graalvm.compiler.debug.DebugCloseable;
 import org.graalvm.compiler.debug.DebugContext;
 import org.graalvm.compiler.debug.GraalError;
+import org.graalvm.compiler.debug.TTY;
 import org.graalvm.compiler.debug.TimerKey;
 import org.graalvm.compiler.graph.Edges.Type;
 import org.graalvm.compiler.graph.Graph.DuplicationReplacement;
@@ -65,8 +70,8 @@ import org.graalvm.compiler.nodeinfo.NodeCycles;
 import org.graalvm.compiler.nodeinfo.NodeInfo;
 import org.graalvm.compiler.nodeinfo.NodeSize;
 import org.graalvm.compiler.nodeinfo.Verbosity;
-import org.graalvm.util.EconomicMap;
-import org.graalvm.util.Equivalence;
+
+import sun.misc.Unsafe;
 
 /**
  * Metadata for every {@link Node} type. The metadata includes:
@@ -78,6 +83,7 @@ import org.graalvm.util.Equivalence;
  */
 public final class NodeClass<T> extends FieldIntrospection<T> {
 
+    private static final Unsafe UNSAFE = getUnsafe();
     // Timers for creation of a NodeClass instance
     private static final TimerKey Init_FieldScanning = DebugContext.timer("NodeClass.Init.FieldScanning");
     private static final TimerKey Init_FieldScanningInner = DebugContext.timer("NodeClass.Init.FieldScanning.Inner");
@@ -104,7 +110,7 @@ public final class NodeClass<T> extends FieldIntrospection<T> {
      * Gets the {@link NodeClass} associated with a given {@link Class}.
      */
     public static <T> NodeClass<T> create(Class<T> c) {
-        assert get(c) == null;
+        assert getUnchecked(c) == null;
         Class<? super T> superclass = c.getSuperclass();
         NodeClass<? super T> nodeSuperclass = null;
         if (superclass != NODE_CLASS) {
@@ -114,13 +120,43 @@ public final class NodeClass<T> extends FieldIntrospection<T> {
     }
 
     @SuppressWarnings("unchecked")
-    public static <T> NodeClass<T> get(Class<T> superclass) {
+    private static <T> NodeClass<T> getUnchecked(Class<T> clazz) {
         try {
-            Field field = superclass.getDeclaredField("TYPE");
+            Field field = clazz.getDeclaredField("TYPE");
             field.setAccessible(true);
             return (NodeClass<T>) field.get(null);
         } catch (IllegalArgumentException | IllegalAccessException | NoSuchFieldException | SecurityException e) {
-            throw new RuntimeException(e);
+            throw new RuntimeException("Could not load Graal NodeClass TYPE field for " + clazz, e);
+        }
+    }
+
+    public static <T> NodeClass<T> get(Class<T> clazz) {
+        int numTries = 0;
+        while (true) {
+            boolean shouldBeInitializedBefore = UNSAFE.shouldBeInitialized(clazz);
+
+            NodeClass<T> result = getUnchecked(clazz);
+            if (result != null || clazz == NODE_CLASS) {
+                return result;
+            }
+
+            /*
+             * GR-9537: We observed a transient problem with TYPE fields being null. Retry a couple
+             * of times and print something to the log so that we can gather more diagnostic
+             * information without failing gates.
+             */
+            numTries++;
+            boolean shouldBeInitializedAfter = UNSAFE.shouldBeInitialized(clazz);
+            String msg = "GR-9537 Reflective field access of TYPE field returned null. This is probably a bug in HotSpot class initialization. " +
+                            " clazz: " + clazz.getTypeName() + ", numTries: " + numTries +
+                            ", shouldBeInitializedBefore: " + shouldBeInitializedBefore + ", shouldBeInitializedAfter: " + shouldBeInitializedAfter;
+            if (numTries <= 100) {
+                TTY.println(msg);
+                UNSAFE.ensureClassInitialized(clazz);
+            } else {
+                throw GraalError.shouldNotReachHere(msg);
+            }
+            return result;
         }
     }
 
@@ -272,6 +308,17 @@ public final class NodeClass<T> extends FieldIntrospection<T> {
             assert size != null;
             debug.log("Node cost for node of type __| %s |_, cycles:%s,size:%s", clazz, cycles, size);
         }
+        assert verifyMemoryEdgeInvariant(fs) : "Nodes participating in the memory graph should have at most 1 optional memory input.";
+    }
+
+    private static boolean verifyMemoryEdgeInvariant(NodeFieldsScanner fs) {
+        int optionalMemoryInputs = 0;
+        for (InputInfo info : fs.inputs) {
+            if (info.optional && info.inputType == InputType.Memory) {
+                optionalMemoryInputs++;
+            }
+        }
+        return optionalMemoryInputs <= 1;
     }
 
     private final NodeCycles cycles;
@@ -705,6 +752,7 @@ public final class NodeClass<T> extends FieldIntrospection<T> {
             } else {
                 Object objectA = data.getObject(a, i);
                 Object objectB = data.getObject(b, i);
+                assert !isLambda(objectA) || !isLambda(objectB) : "lambdas are not permitted in fields of " + this.toString();
                 if (objectA != objectB) {
                     if (objectA != null && objectB != null) {
                         if (!deepEquals0(objectA, objectB)) {
@@ -717,6 +765,11 @@ public final class NodeClass<T> extends FieldIntrospection<T> {
             }
         }
         return true;
+    }
+
+    private static boolean isLambda(Object obj) {
+        // This needs to be consistent with InnerClassLambdaMetafactory constructor.
+        return obj != null && obj.getClass().getSimpleName().contains("$$Lambda$");
     }
 
     public boolean isValid(Position pos, NodeClass<?> from, Edges fromEdges) {
@@ -1181,8 +1234,8 @@ public final class NodeClass<T> extends FieldIntrospection<T> {
                     return false;
                 }
             } else {
-                Object v1 = Edges.getNodeListUnsafe(node, offset);
-                Object v2 = Edges.getNodeListUnsafe(other, offset);
+                NodeList<Node> v1 = Edges.getNodeListUnsafe(node, offset);
+                NodeList<Node> v2 = Edges.getNodeListUnsafe(other, offset);
                 if (!Objects.equals(v1, v2)) {
                     return false;
                 }

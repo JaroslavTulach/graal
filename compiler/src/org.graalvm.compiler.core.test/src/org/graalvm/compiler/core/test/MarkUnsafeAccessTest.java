@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2015, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -25,6 +27,7 @@ package org.graalvm.compiler.core.test;
 import static java.nio.file.StandardOpenOption.READ;
 import static java.nio.file.StandardOpenOption.WRITE;
 
+import java.io.File;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.MappedByteBuffer;
@@ -33,22 +36,19 @@ import java.nio.channels.FileChannel.MapMode;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
-import jdk.vm.ci.code.InstalledCode;
-import jdk.vm.ci.code.InvalidInstalledCodeException;
-import jdk.vm.ci.meta.ResolvedJavaMethod;
-import jdk.vm.ci.meta.ResolvedJavaType;
-
+import org.graalvm.compiler.nodes.StructuredGraph;
+import org.graalvm.compiler.phases.common.inlining.InliningPhase;
+import org.graalvm.compiler.phases.common.inlining.policy.InlineEverythingPolicy;
+import org.graalvm.compiler.phases.tiers.HighTierContext;
 import org.junit.Assert;
 import org.junit.Assume;
 import org.junit.Test;
 
+import jdk.vm.ci.code.InstalledCode;
+import jdk.vm.ci.code.InvalidInstalledCodeException;
+import jdk.vm.ci.meta.ResolvedJavaMethod;
+import jdk.vm.ci.meta.ResolvedJavaType;
 import sun.misc.Unsafe;
-
-import org.graalvm.compiler.nodes.StructuredGraph;
-import org.graalvm.compiler.phases.common.CanonicalizerPhase;
-import org.graalvm.compiler.phases.common.inlining.InliningPhase;
-import org.graalvm.compiler.phases.common.inlining.policy.InlineEverythingPolicy;
-import org.graalvm.compiler.phases.tiers.HighTierContext;
 
 public class MarkUnsafeAccessTest extends GraalCompilerTest {
 
@@ -117,14 +117,15 @@ public class MarkUnsafeAccessTest extends GraalCompilerTest {
 
     @Test
     public void testCompiled() throws IOException {
+        Assume.assumeFalse("Crashes on AArch64 (GR-8351)", System.getProperty("os.arch").equalsIgnoreCase("aarch64"));
         ResolvedJavaMethod getMethod = asResolvedJavaMethod(getMethod(ByteBuffer.class, "get", new Class<?>[]{}));
         ResolvedJavaType mbbClass = getMetaAccess().lookupJavaType(MappedByteBuffer.class);
         ResolvedJavaMethod getMethodImpl = mbbClass.findUniqueConcreteMethod(getMethod).getResult();
         Assert.assertNotNull(getMethodImpl);
         StructuredGraph graph = parseForCompile(getMethodImpl);
         HighTierContext highContext = getDefaultHighTierContext();
-        new CanonicalizerPhase().apply(graph, highContext);
-        new InliningPhase(new InlineEverythingPolicy(), new CanonicalizerPhase()).apply(graph, highContext);
+        createCanonicalizerPhase().apply(graph, highContext);
+        new InliningPhase(new InlineEverythingPolicy(), createCanonicalizerPhase()).apply(graph, highContext);
         InstalledCode compiledCode = getCode(getMethodImpl, graph);
         testMappedByteBuffer(mbb -> {
             try {
@@ -170,7 +171,9 @@ public class MarkUnsafeAccessTest extends GraalCompilerTest {
         try {
             mbb.position(BLOCK_SIZE);
             getter.get(mbb);
-            System.currentTimeMillis(); // materialize async exception
+
+            // Make a call that goes into native code to materialize async exception
+            new File("").exists();
         } catch (InternalError e) {
             return;
         }

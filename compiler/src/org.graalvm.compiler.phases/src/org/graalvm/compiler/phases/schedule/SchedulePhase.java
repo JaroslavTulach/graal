@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2011, 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -22,14 +24,23 @@
  */
 package org.graalvm.compiler.phases.schedule;
 
+import static org.graalvm.collections.Equivalence.IDENTITY;
+import static org.graalvm.compiler.core.common.GraalOptions.GuardPriorities;
 import static org.graalvm.compiler.core.common.GraalOptions.OptScheduleOutOfLoops;
 import static org.graalvm.compiler.core.common.cfg.AbstractControlFlowGraph.strictlyDominates;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Comparator;
+import java.util.EnumMap;
 import java.util.Formatter;
+import java.util.Iterator;
 import java.util.List;
+import java.util.SortedSet;
+import java.util.TreeSet;
+import java.util.function.Function;
 
+import org.graalvm.collections.EconomicSet;
 import org.graalvm.compiler.core.common.SuppressFBWarnings;
 import org.graalvm.compiler.core.common.cfg.AbstractControlFlowGraph;
 import org.graalvm.compiler.core.common.cfg.BlockMap;
@@ -48,7 +59,6 @@ import org.graalvm.compiler.nodes.ControlSinkNode;
 import org.graalvm.compiler.nodes.ControlSplitNode;
 import org.graalvm.compiler.nodes.DeoptimizeNode;
 import org.graalvm.compiler.nodes.FixedNode;
-import org.graalvm.compiler.nodes.FixedWithNextNode;
 import org.graalvm.compiler.nodes.GuardNode;
 import org.graalvm.compiler.nodes.IfNode;
 import org.graalvm.compiler.nodes.KillingBeginNode;
@@ -57,6 +67,8 @@ import org.graalvm.compiler.nodes.LoopExitNode;
 import org.graalvm.compiler.nodes.PhiNode;
 import org.graalvm.compiler.nodes.ProxyNode;
 import org.graalvm.compiler.nodes.StartNode;
+import org.graalvm.compiler.nodes.StaticDeoptimizingNode;
+import org.graalvm.compiler.nodes.StaticDeoptimizingNode.GuardPriority;
 import org.graalvm.compiler.nodes.StructuredGraph;
 import org.graalvm.compiler.nodes.StructuredGraph.GuardsStage;
 import org.graalvm.compiler.nodes.StructuredGraph.ScheduleResult;
@@ -69,7 +81,8 @@ import org.graalvm.compiler.nodes.cfg.ControlFlowGraph;
 import org.graalvm.compiler.nodes.cfg.HIRLoop;
 import org.graalvm.compiler.nodes.cfg.LocationSet;
 import org.graalvm.compiler.nodes.memory.FloatingReadNode;
-import org.graalvm.compiler.nodes.memory.MemoryCheckpoint;
+import org.graalvm.compiler.nodes.memory.MultiMemoryKill;
+import org.graalvm.compiler.nodes.memory.SingleMemoryKill;
 import org.graalvm.compiler.nodes.spi.ValueProxy;
 import org.graalvm.compiler.options.OptionValues;
 import org.graalvm.compiler.phases.Phase;
@@ -78,10 +91,27 @@ import org.graalvm.word.LocationIdentity;
 public final class SchedulePhase extends Phase {
 
     public enum SchedulingStrategy {
+        EARLIEST_WITH_GUARD_ORDER,
         EARLIEST,
         LATEST,
         LATEST_OUT_OF_LOOPS,
-        FINAL_SCHEDULE
+        LATEST_OUT_OF_LOOPS_IMPLICIT_NULL_CHECKS;
+
+        public boolean isEarliest() {
+            return this == EARLIEST || this == EARLIEST_WITH_GUARD_ORDER;
+        }
+
+        public boolean isLatest() {
+            return !isEarliest();
+        }
+
+        public boolean scheduleOutOfLoops() {
+            return this == LATEST_OUT_OF_LOOPS || this == LATEST_OUT_OF_LOOPS_IMPLICIT_NULL_CHECKS;
+        }
+
+        public boolean considerImplicitNullChecks() {
+            return this == LATEST_OUT_OF_LOOPS_IMPLICIT_NULL_CHECKS;
+        }
     }
 
     private final SchedulingStrategy selectedStrategy;
@@ -164,25 +194,26 @@ public final class SchedulePhase extends Phase {
             this.nodeToBlockMap = currentNodeMap;
             this.blockToNodesMap = earliestBlockToNodesMap;
 
-            scheduleEarliestIterative(earliestBlockToNodesMap, currentNodeMap, visited, graph, immutableGraph);
+            scheduleEarliestIterative(earliestBlockToNodesMap, currentNodeMap, visited, graph, immutableGraph, selectedStrategy == SchedulingStrategy.EARLIEST_WITH_GUARD_ORDER);
 
-            if (selectedStrategy != SchedulingStrategy.EARLIEST) {
+            if (!selectedStrategy.isEarliest()) {
                 // For non-earliest schedules, we need to do a second pass.
                 BlockMap<List<Node>> latestBlockToNodesMap = new BlockMap<>(cfg);
                 for (Block b : cfg.getBlocks()) {
-                    latestBlockToNodesMap.put(b, new ArrayList<Node>());
+                    latestBlockToNodesMap.put(b, new ArrayList<>());
                 }
 
                 BlockMap<ArrayList<FloatingReadNode>> watchListMap = calcLatestBlocks(selectedStrategy, currentNodeMap, earliestBlockToNodesMap, visited, latestBlockToNodesMap, immutableGraph);
                 sortNodesLatestWithinBlock(cfg, earliestBlockToNodesMap, latestBlockToNodesMap, currentNodeMap, watchListMap, visited);
 
                 assert verifySchedule(cfg, latestBlockToNodesMap, currentNodeMap);
-                assert (!Assertions.detailedAssertionsEnabled(graph.getOptions())) || MemoryScheduleVerification.check(cfg.getStartBlock(), latestBlockToNodesMap);
+                assert (!Assertions.detailedAssertionsEnabled(graph.getOptions())) ||
+                                ScheduleVerification.check(cfg.getStartBlock(), latestBlockToNodesMap, currentNodeMap);
 
                 this.blockToNodesMap = latestBlockToNodesMap;
 
-                cfg.setNodeToBlock(currentNodeMap);
             }
+            cfg.setNodeToBlock(currentNodeMap);
 
             graph.setLastSchedule(new ScheduleResult(this.cfg, this.nodeToBlockMap, this.blockToNodesMap));
         }
@@ -207,8 +238,14 @@ public final class SchedulePhase extends Phase {
                     } else {
                         Block latestBlock = null;
 
+                        if (currentBlock.getFirstDominated() == null && !(currentNode instanceof VirtualState)) {
+                            // This block doesn't dominate any other blocks =>
+                            // node must be scheduled in earliest block.
+                            latestBlock = currentBlock;
+                        }
+
                         LocationIdentity constrainingLocation = null;
-                        if (currentNode instanceof FloatingReadNode) {
+                        if (latestBlock == null && currentNode instanceof FloatingReadNode) {
                             // We are scheduling a floating read node => check memory
                             // anti-dependencies.
                             FloatingReadNode floatingReadNode = (FloatingReadNode) currentNode;
@@ -323,7 +360,7 @@ public final class SchedulePhase extends Phase {
             }
 
             if (lastBlock.getBeginNode() instanceof KillingBeginNode) {
-                LocationIdentity locationIdentity = ((KillingBeginNode) lastBlock.getBeginNode()).getLocationIdentity();
+                LocationIdentity locationIdentity = ((KillingBeginNode) lastBlock.getBeginNode()).getKilledLocationIdentity();
                 if ((locationIdentity.isAny() || locationIdentity.equals(location)) && lastBlock != earliestBlock) {
                     // The begin of this block kills the location, so we *have* to schedule the node
                     // in the dominating block.
@@ -338,14 +375,14 @@ public final class SchedulePhase extends Phase {
             if (!killed.isAny()) {
                 for (Node n : subList) {
                     // Check if this node kills a node in the watch list.
-                    if (n instanceof MemoryCheckpoint.Single) {
-                        LocationIdentity identity = ((MemoryCheckpoint.Single) n).getLocationIdentity();
+                    if (n instanceof SingleMemoryKill) {
+                        LocationIdentity identity = ((SingleMemoryKill) n).getKilledLocationIdentity();
                         killed.add(identity);
                         if (killed.isAny()) {
                             return;
                         }
-                    } else if (n instanceof MemoryCheckpoint.Multi) {
-                        for (LocationIdentity identity : ((MemoryCheckpoint.Multi) n).getLocationIdentities()) {
+                    } else if (n instanceof MultiMemoryKill) {
+                        for (LocationIdentity identity : ((MultiMemoryKill) n).getKilledLocationIdentities()) {
                             killed.add(identity);
                             if (killed.isAny()) {
                                 return;
@@ -435,11 +472,11 @@ public final class SchedulePhase extends Phase {
         private static void checkWatchList(Block b, NodeMap<Block> nodeMap, NodeBitMap unprocessed, ArrayList<Node> result, ArrayList<FloatingReadNode> watchList, Node n) {
             if (watchList != null && !watchList.isEmpty()) {
                 // Check if this node kills a node in the watch list.
-                if (n instanceof MemoryCheckpoint.Single) {
-                    LocationIdentity identity = ((MemoryCheckpoint.Single) n).getLocationIdentity();
+                if (n instanceof SingleMemoryKill) {
+                    LocationIdentity identity = ((SingleMemoryKill) n).getKilledLocationIdentity();
                     checkWatchList(watchList, identity, b, result, nodeMap, unprocessed);
-                } else if (n instanceof MemoryCheckpoint.Multi) {
-                    for (LocationIdentity identity : ((MemoryCheckpoint.Multi) n).getLocationIdentities()) {
+                } else if (n instanceof MultiMemoryKill) {
+                    for (LocationIdentity identity : ((MultiMemoryKill) n).getKilledLocationIdentities()) {
                         checkWatchList(watchList, identity, b, result, nodeMap, unprocessed);
                     }
                 }
@@ -523,14 +560,13 @@ public final class SchedulePhase extends Phase {
 
                 assert latestBlock != null : currentNode;
 
-                if (strategy == SchedulingStrategy.FINAL_SCHEDULE || strategy == SchedulingStrategy.LATEST_OUT_OF_LOOPS) {
-                    assert latestBlock != null;
+                if (strategy.scheduleOutOfLoops()) {
                     Block currentBlock = latestBlock;
                     while (currentBlock.getLoopDepth() > earliestBlock.getLoopDepth() && currentBlock != earliestBlock.getDominator()) {
                         Block previousCurrentBlock = currentBlock;
                         currentBlock = currentBlock.getDominator();
                         if (previousCurrentBlock.isLoopHeader()) {
-                            if (currentBlock.probability() < latestBlock.probability() || ((StructuredGraph) currentNode.graph()).hasValueProxies()) {
+                            if (currentBlock.getRelativeFrequency() < latestBlock.getRelativeFrequency() || ((StructuredGraph) currentNode.graph()).hasValueProxies()) {
                                 // Only assign new latest block if frequency is actually lower or if
                                 // loop proxies would be required otherwise.
                                 latestBlock = currentBlock;
@@ -544,26 +580,25 @@ public final class SchedulePhase extends Phase {
                 }
             }
 
-            if (latestBlock != earliestBlock && currentNode instanceof FloatingReadNode) {
-
-                FloatingReadNode floatingReadNode = (FloatingReadNode) currentNode;
-                if (isImplicitNullOpportunity(floatingReadNode, earliestBlock) && earliestBlock.probability() < latestBlock.probability() * IMPLICIT_NULL_CHECK_OPPORTUNITY_PROBABILITY_FACTOR) {
-                    latestBlock = earliestBlock;
-                }
+            if (latestBlock != earliestBlock && strategy.considerImplicitNullChecks() && isImplicitNullOpportunity(currentNode, earliestBlock) &&
+                            earliestBlock.getRelativeFrequency() < latestBlock.getRelativeFrequency() * IMPLICIT_NULL_CHECK_OPPORTUNITY_PROBABILITY_FACTOR) {
+                latestBlock = earliestBlock;
             }
 
             selectLatestBlock(currentNode, earliestBlock, latestBlock, currentNodeMap, watchListMap, constrainingLocation, latestBlockToNodesMap);
         }
 
-        private static boolean isImplicitNullOpportunity(FloatingReadNode floatingReadNode, Block block) {
-
-            Node pred = block.getBeginNode().predecessor();
-            if (pred instanceof IfNode) {
-                IfNode ifNode = (IfNode) pred;
-                if (ifNode.condition() instanceof IsNullNode) {
-                    IsNullNode isNullNode = (IsNullNode) ifNode.condition();
-                    if (getUnproxifiedUncompressed(floatingReadNode.getAddress().getBase()) == getUnproxifiedUncompressed(isNullNode.getValue())) {
-                        return true;
+        protected static boolean isImplicitNullOpportunity(Node currentNode, Block block) {
+            if (currentNode instanceof FloatingReadNode) {
+                FloatingReadNode floatingReadNode = (FloatingReadNode) currentNode;
+                Node pred = block.getBeginNode().predecessor();
+                if (pred instanceof IfNode) {
+                    IfNode ifNode = (IfNode) pred;
+                    if (ifNode.condition() instanceof IsNullNode && ifNode.getTrueSuccessorProbability() == 0.0) {
+                        IsNullNode isNullNode = (IsNullNode) ifNode.condition();
+                        if (getUnproxifiedUncompressed(floatingReadNode.getAddress().getBase()) == getUnproxifiedUncompressed(isNullNode.getValue())) {
+                            return true;
+                        }
                     }
                 }
             }
@@ -645,7 +680,7 @@ public final class SchedulePhase extends Phase {
              */
             public void add(Node node) {
                 assert !(node instanceof FixedNode) : node;
-                NodeEntry newTail = new NodeEntry(node, null);
+                NodeEntry newTail = new NodeEntry(node);
                 if (tail == null) {
                     tail = head = newTail;
                 } else {
@@ -659,7 +694,16 @@ public final class SchedulePhase extends Phase {
              * Number of nodes in this micro block.
              */
             public int getNodeCount() {
+                assert getActualNodeCount() == nodeCount : getActualNodeCount() + " != " + nodeCount;
                 return nodeCount;
+            }
+
+            private int getActualNodeCount() {
+                int count = 0;
+                for (NodeEntry e = head; e != null; e = e.next) {
+                    count++;
+                }
+                return count;
             }
 
             /**
@@ -685,6 +729,7 @@ public final class SchedulePhase extends Phase {
              */
             public void prependChildrenTo(MicroBlock newBlock) {
                 if (tail != null) {
+                    assert head != null;
                     tail.next = newBlock.head;
                     newBlock.head = head;
                     head = tail = null;
@@ -697,6 +742,11 @@ public final class SchedulePhase extends Phase {
             public String toString() {
                 return String.format("MicroBlock[id=%d]", id);
             }
+
+            @Override
+            public int hashCode() {
+                return id;
+            }
         }
 
         /**
@@ -706,9 +756,9 @@ public final class SchedulePhase extends Phase {
             private final Node node;
             private NodeEntry next;
 
-            NodeEntry(Node node, NodeEntry next) {
+            NodeEntry(Node node) {
                 this.node = node;
-                this.next = next;
+                this.next = null;
             }
 
             public NodeEntry getNext() {
@@ -720,7 +770,8 @@ public final class SchedulePhase extends Phase {
             }
         }
 
-        private void scheduleEarliestIterative(BlockMap<List<Node>> blockToNodes, NodeMap<Block> nodeToBlock, NodeBitMap visited, StructuredGraph graph, boolean immutableGraph) {
+        private void scheduleEarliestIterative(BlockMap<List<Node>> blockToNodes, NodeMap<Block> nodeToBlock, NodeBitMap visited, StructuredGraph graph, boolean immutableGraph,
+                        boolean withGuardOrder) {
 
             NodeMap<MicroBlock> entries = graph.createNodeMap();
             NodeStack stack = new NodeStack();
@@ -729,62 +780,44 @@ public final class SchedulePhase extends Phase {
             MicroBlock startBlock = null;
             int nextId = 1;
             for (Block b : cfg.reversePostOrder()) {
-                FixedNode current = b.getBeginNode();
-                while (true) {
+                for (FixedNode current : b.getBeginNode().getBlockNodes()) {
                     MicroBlock microBlock = new MicroBlock(nextId++);
-                    entries.put(current, microBlock);
-                    visited.checkAndMarkInc(current);
-
+                    entries.set(current, microBlock);
+                    boolean isNew = visited.checkAndMarkInc(current);
+                    assert isNew;
                     if (startBlock == null) {
                         startBlock = microBlock;
                     }
-
-                    // Process inputs of this fixed node.
-                    for (Node input : current.inputs()) {
-                        if (entries.get(input) == null) {
-                            processStack(input, startBlock, entries, visited, stack);
-                        }
-                    }
-
-                    if (current == b.getEndNode()) {
-                        // Break loop when reaching end node.
-                        break;
-                    }
-
-                    current = ((FixedWithNextNode) current).next();
                 }
             }
 
-            // Now process guards.
-            for (GuardNode guardNode : graph.getNodes(GuardNode.TYPE)) {
-                if (entries.get(guardNode) == null) {
-                    processStack(guardNode, startBlock, entries, visited, stack);
+            if (graph.getGuardsStage().allowsFloatingGuards() && graph.getNodes(GuardNode.TYPE).isNotEmpty()) {
+                // Now process guards.
+                if (GuardPriorities.getValue(graph.getOptions()) && withGuardOrder) {
+                    EnumMap<GuardPriority, List<GuardNode>> guardsByPriority = new EnumMap<>(GuardPriority.class);
+                    for (GuardNode guard : graph.getNodes(GuardNode.TYPE)) {
+                        guardsByPriority.computeIfAbsent(guard.computePriority(), p -> new ArrayList<>()).add(guard);
+                    }
+                    // `EnumMap.values` returns values in "natural" key order
+                    for (List<GuardNode> guards : guardsByPriority.values()) {
+                        processNodes(visited, entries, stack, startBlock, guards);
+                    }
+                    GuardOrder.resortGuards(graph, entries, stack);
+                } else {
+                    processNodes(visited, entries, stack, startBlock, graph.getNodes(GuardNode.TYPE));
                 }
+            } else {
+                assert graph.getNodes(GuardNode.TYPE).isEmpty();
             }
 
             // Now process inputs of fixed nodes.
             for (Block b : cfg.reversePostOrder()) {
-                FixedNode current = b.getBeginNode();
-                while (true) {
-
-                    // Process inputs of this fixed node.
-                    for (Node input : current.inputs()) {
-                        if (entries.get(input) == null) {
-                            processStack(input, startBlock, entries, visited, stack);
-                        }
-                    }
-
-                    if (current == b.getEndNode()) {
-                        // Break loop when reaching end node.
-                        break;
-                    }
-
-                    current = ((FixedWithNextNode) current).next();
+                for (FixedNode current : b.getBeginNode().getBlockNodes()) {
+                    processNodes(visited, entries, stack, startBlock, current.inputs());
                 }
             }
 
             if (visited.getCounter() < graph.getNodeCount()) {
-
                 // Visit back input edges of loop phis.
                 boolean changed;
                 boolean unmarkedPhi;
@@ -829,36 +862,29 @@ public final class SchedulePhase extends Phase {
                 if (fixedNode instanceof ControlSplitNode) {
                     ControlSplitNode controlSplitNode = (ControlSplitNode) fixedNode;
                     MicroBlock endBlock = entries.get(fixedNode);
-                    MicroBlock primarySuccessor = entries.get(controlSplitNode.getPrimarySuccessor());
-                    endBlock.prependChildrenTo(primarySuccessor);
+                    AbstractBeginNode primarySuccessor = controlSplitNode.getPrimarySuccessor();
+                    if (primarySuccessor != null) {
+                        endBlock.prependChildrenTo(entries.get(primarySuccessor));
+                    } else {
+                        assert endBlock.tail == null;
+                    }
                 }
             }
 
-            // Initialize with begin nodes
+            // Create lists for each block
             for (Block b : cfg.reversePostOrder()) {
-
-                FixedNode current = b.getBeginNode();
+                // Count nodes in block
                 int totalCount = 0;
-                while (true) {
-
+                for (FixedNode current : b.getBeginNode().getBlockNodes()) {
                     MicroBlock microBlock = entries.get(current);
                     totalCount += microBlock.getNodeCount() + 1;
-
-                    if (current == b.getEndNode()) {
-                        // Break loop when reaching end node.
-                        break;
-                    }
-
-                    current = ((FixedWithNextNode) current).next();
                 }
 
                 // Initialize with begin node, it is always the first node.
                 ArrayList<Node> nodes = new ArrayList<>(totalCount);
                 blockToNodes.put(b, nodes);
 
-                current = b.getBeginNode();
-                while (true) {
-
+                for (FixedNode current : b.getBeginNode().getBlockNodes()) {
                     MicroBlock microBlock = entries.get(current);
                     nodeToBlock.set(current, b);
                     nodes.add(current);
@@ -869,17 +895,18 @@ public final class SchedulePhase extends Phase {
                         nodes.add(nextNode);
                         next = next.getNext();
                     }
-
-                    if (current == b.getEndNode()) {
-                        // Break loop when reaching end node.
-                        break;
-                    }
-
-                    current = ((FixedWithNextNode) current).next();
                 }
             }
 
-            assert (!Assertions.detailedAssertionsEnabled(cfg.graph.getOptions())) || MemoryScheduleVerification.check(cfg.getStartBlock(), blockToNodes);
+            assert (!Assertions.detailedAssertionsEnabled(cfg.graph.getOptions())) || ScheduleVerification.check(cfg.getStartBlock(), blockToNodes, nodeToBlock);
+        }
+
+        private static void processNodes(NodeBitMap visited, NodeMap<MicroBlock> entries, NodeStack stack, MicroBlock startBlock, Iterable<? extends Node> nodes) {
+            for (Node node : nodes) {
+                if (entries.get(node) == null) {
+                    processStack(node, startBlock, entries, visited, stack);
+                }
+            }
         }
 
         private static void processStackPhi(NodeStack stack, PhiNode phiNode, NodeMap<MicroBlock> nodeToBlock, NodeBitMap visited) {
@@ -944,6 +971,166 @@ public final class SchedulePhase extends Phase {
             }
         }
 
+        private static class GuardOrder {
+            /**
+             * After an earliest schedule, this will re-sort guards to honor their
+             * {@linkplain StaticDeoptimizingNode#computePriority() priority}.
+             *
+             * Note that this only changes the order of nodes within {@linkplain MicroBlock
+             * micro-blocks}, nodes will not be moved from one micro-block to another.
+             */
+            private static void resortGuards(StructuredGraph graph, NodeMap<MicroBlock> entries, NodeStack stack) {
+                assert stack.isEmpty();
+                EconomicSet<MicroBlock> blocksWithGuards = EconomicSet.create(IDENTITY);
+                for (GuardNode guard : graph.getNodes(GuardNode.TYPE)) {
+                    MicroBlock block = entries.get(guard);
+                    assert block != null : guard + "should already be scheduled to a micro-block";
+                    blocksWithGuards.add(block);
+                }
+                assert !blocksWithGuards.isEmpty();
+                NodeMap<GuardPriority> priorities = graph.createNodeMap();
+                NodeBitMap blockNodes = graph.createNodeBitMap();
+                for (MicroBlock block : blocksWithGuards) {
+                    MicroBlock newBlock = resortGuards(block, stack, blockNodes, priorities);
+                    assert stack.isEmpty();
+                    assert blockNodes.isEmpty();
+                    if (newBlock != null) {
+                        assert block.getNodeCount() == newBlock.getNodeCount();
+                        block.head = newBlock.head;
+                        block.tail = newBlock.tail;
+                    }
+                }
+            }
+
+            /**
+             * This resorts guards within one micro-block.
+             *
+             * {@code stack}, {@code blockNodes} and {@code priorities} are just temporary
+             * data-structures which are allocated once by the callers of this method. They should
+             * be in their "initial"/"empty" state when calling this method and when it returns.
+             */
+            private static MicroBlock resortGuards(MicroBlock block, NodeStack stack, NodeBitMap blockNodes, NodeMap<GuardPriority> priorities) {
+                if (!propagatePriority(block, stack, priorities, blockNodes)) {
+                    return null;
+                }
+
+                Function<GuardNode, GuardPriority> transitiveGuardPriorityGetter = priorities::get;
+                Comparator<GuardNode> globalGuardPriorityComparator = Comparator.comparing(transitiveGuardPriorityGetter).thenComparing(GuardNode::computePriority).thenComparingInt(Node::hashCode);
+
+                SortedSet<GuardNode> availableGuards = new TreeSet<>(globalGuardPriorityComparator);
+                MicroBlock newBlock = new MicroBlock(block.getId());
+
+                NodeBitMap sorted = blockNodes;
+                sorted.invert();
+
+                for (NodeEntry e = block.head; e != null; e = e.next) {
+                    checkIfAvailable(e.node, stack, sorted, newBlock, availableGuards, false);
+                }
+                do {
+                    while (!stack.isEmpty()) {
+                        checkIfAvailable(stack.pop(), stack, sorted, newBlock, availableGuards, true);
+                    }
+                    Iterator<GuardNode> iterator = availableGuards.iterator();
+                    if (iterator.hasNext()) {
+                        addNodeToResort(iterator.next(), stack, sorted, newBlock, true);
+                        iterator.remove();
+                    }
+                } while (!stack.isEmpty() || !availableGuards.isEmpty());
+
+                blockNodes.clearAll();
+                return newBlock;
+            }
+
+            /**
+             * This checks if {@code n} can be scheduled, if it is the case, it schedules it now by
+             * calling {@link #addNodeToResort(Node, NodeStack, NodeBitMap, MicroBlock, boolean)}.
+             */
+            private static void checkIfAvailable(Node n, NodeStack stack, NodeBitMap sorted, Instance.MicroBlock newBlock, SortedSet<GuardNode> availableGuardNodes, boolean pushUsages) {
+                if (sorted.isMarked(n)) {
+                    return;
+                }
+                for (Node in : n.inputs()) {
+                    if (!sorted.isMarked(in)) {
+                        return;
+                    }
+                }
+                if (n instanceof GuardNode) {
+                    availableGuardNodes.add((GuardNode) n);
+                } else {
+                    addNodeToResort(n, stack, sorted, newBlock, pushUsages);
+                }
+            }
+
+            /**
+             * Add a node to the re-sorted micro-block. This also pushes nodes that need to be
+             * (re-)examined on the stack.
+             */
+            private static void addNodeToResort(Node n, NodeStack stack, NodeBitMap sorted, MicroBlock newBlock, boolean pushUsages) {
+                sorted.mark(n);
+                newBlock.add(n);
+                if (pushUsages) {
+                    for (Node u : n.usages()) {
+                        if (!sorted.isMarked(u)) {
+                            stack.push(u);
+                        }
+                    }
+                }
+            }
+
+            /**
+             * This fills in a map of transitive priorities ({@code priorities}). It also marks the
+             * nodes from this micro-block in {@code blockNodes}.
+             *
+             * The transitive priority of a guard is the highest of its priority and the priority of
+             * the guards that depend on it (transitively).
+             *
+             * This method returns {@code false} if no re-ordering is necessary in this micro-block.
+             */
+            private static boolean propagatePriority(MicroBlock block, NodeStack stack, NodeMap<GuardPriority> priorities, NodeBitMap blockNodes) {
+                assert stack.isEmpty();
+                assert blockNodes.isEmpty();
+                GuardPriority lowestPriority = GuardPriority.highest();
+                for (NodeEntry e = block.head; e != null; e = e.next) {
+                    blockNodes.mark(e.node);
+                    if (e.node instanceof GuardNode) {
+                        GuardNode guard = (GuardNode) e.node;
+                        GuardPriority priority = guard.computePriority();
+                        if (lowestPriority != null) {
+                            if (priority.isLowerPriorityThan(lowestPriority)) {
+                                lowestPriority = priority;
+                            } else if (priority.isHigherPriorityThan(lowestPriority)) {
+                                lowestPriority = null;
+                            }
+                        }
+                        stack.push(guard);
+                        priorities.set(guard, priority);
+                    }
+                }
+                if (lowestPriority != null) {
+                    stack.clear();
+                    blockNodes.clearAll();
+                    return false;
+                }
+
+                do {
+                    Node current = stack.pop();
+                    assert blockNodes.isMarked(current);
+                    GuardPriority priority = priorities.get(current);
+                    for (Node input : current.inputs()) {
+                        if (!blockNodes.isMarked(input)) {
+                            continue;
+                        }
+                        GuardPriority inputPriority = priorities.get(input);
+                        if (inputPriority == null || inputPriority.isLowerPriorityThan(priority)) {
+                            priorities.set(input, priority);
+                            stack.push(input);
+                        }
+                    }
+                } while (!stack.isEmpty());
+                return true;
+            }
+        }
+
         /**
          * Processes the inputs of given block. Pushes unprocessed inputs onto the stack. Returns
          * null if there were still unprocessed inputs, otherwise returns the earliest block given
@@ -960,7 +1147,7 @@ public final class SchedulePhase extends Phase {
                 if (inputBlock == null) {
                     earliestBlock = null;
                     stack.push(input);
-                } else if (earliestBlock != null && inputBlock.getId() >= earliestBlock.getId()) {
+                } else if (earliestBlock != null && inputBlock.getId() > earliestBlock.getId()) {
                     earliestBlock = inputBlock;
                 }
             }
@@ -997,11 +1184,11 @@ public final class SchedulePhase extends Phase {
         private static void printNode(Node n) {
             Formatter buf = new Formatter();
             buf.format("%s", n);
-            if (n instanceof MemoryCheckpoint.Single) {
-                buf.format(" // kills %s", ((MemoryCheckpoint.Single) n).getLocationIdentity());
-            } else if (n instanceof MemoryCheckpoint.Multi) {
+            if (n instanceof SingleMemoryKill) {
+                buf.format(" // kills %s", ((SingleMemoryKill) n).getKilledLocationIdentity());
+            } else if (n instanceof MultiMemoryKill) {
                 buf.format(" // kills ");
-                for (LocationIdentity locid : ((MemoryCheckpoint.Multi) n).getLocationIdentities()) {
+                for (LocationIdentity locid : ((MultiMemoryKill) n).getKilledLocationIdentities()) {
                     buf.format("%s, ", locid);
                 }
             } else if (n instanceof FloatingReadNode) {

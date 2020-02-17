@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -26,8 +28,11 @@ import java.io.Closeable;
 import java.io.IOException;
 import java.lang.reflect.Array;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import org.graalvm.compiler.api.replacements.SnippetReflectionProvider;
 import org.graalvm.compiler.debug.DebugContext;
@@ -37,15 +42,13 @@ import org.graalvm.compiler.nodes.ConstantNode;
 import org.graalvm.compiler.nodes.StructuredGraph;
 import org.graalvm.compiler.nodes.util.JavaConstantFormatter;
 import org.graalvm.compiler.phases.schedule.SchedulePhase;
-import org.graalvm.compiler.serviceprovider.JDK9Method;
+import org.graalvm.compiler.serviceprovider.GraalServices;
 
 import jdk.vm.ci.meta.JavaConstant;
 import jdk.vm.ci.meta.JavaKind;
 import jdk.vm.ci.meta.JavaType;
 import jdk.vm.ci.meta.MetaUtil;
 import jdk.vm.ci.meta.ResolvedJavaMethod;
-import jdk.vm.ci.runtime.JVMCI;
-import jdk.vm.ci.services.Services;
 
 interface GraphPrinter extends Closeable, JavaConstantFormatter {
 
@@ -72,16 +75,6 @@ interface GraphPrinter extends Closeable, JavaConstantFormatter {
     void close();
 
     /**
-     * A JVMCI package dynamically exported to trusted modules.
-     */
-    String JVMCI_RUNTIME_PACKAGE = JVMCI.class.getPackage().getName();
-
-    /**
-     * {@code jdk.vm.ci} module.
-     */
-    Object JVMCI_MODULE = JDK9Method.JAVA_SPECIFICATION_VERSION < 9 ? null : JDK9Method.getModule.invoke(Services.class);
-
-    /**
      * Classes whose {@link #toString()} method does not run any untrusted code.
      */
     List<Class<?>> TRUSTED_CLASSES = Arrays.asList(
@@ -105,17 +98,8 @@ interface GraphPrinter extends Closeable, JavaConstantFormatter {
         if (TRUSTED_CLASSES.contains(c)) {
             return true;
         }
-        if (JDK9Method.JAVA_SPECIFICATION_VERSION < 9) {
-            if (c.getClassLoader() == Services.class.getClassLoader()) {
-                // Loaded by the JVMCI class loader
-                return true;
-            }
-        } else {
-            Object module = JDK9Method.getModule.invoke(c);
-            if (JVMCI_MODULE == module || (Boolean) JDK9Method.isOpenTo.invoke(JVMCI_MODULE, JVMCI_RUNTIME_PACKAGE, module)) {
-                // Can access non-statically-exported package in JVMCI
-                return true;
-            }
+        if (GraalServices.isToStringTrusted(c)) {
+            return true;
         }
         if (c.getClassLoader() == GraphPrinter.class.getClassLoader()) {
             return true;
@@ -125,16 +109,24 @@ interface GraphPrinter extends Closeable, JavaConstantFormatter {
 
     /**
      * Use the real {@link Object#toString()} method for {@link JavaConstant JavaConstants} that are
-     * wrapping trusted types, other just return the results of {@link JavaConstant#toString()}.
+     * wrapping trusted types, otherwise just return the result of {@link JavaConstant#toString()}.
      */
     @Override
     default String format(JavaConstant constant) {
         SnippetReflectionProvider snippetReflection = getSnippetReflectionProvider();
         if (snippetReflection != null) {
             if (constant.getJavaKind() == JavaKind.Object) {
-                Object obj = snippetReflection.asObject(Object.class, constant);
+                Object obj = null;
+                /*
+                 * Ignore any exceptions on unknown JavaConstant implementations in debugging code.
+                 */
+                try {
+                    obj = snippetReflection.asObject(Object.class, constant);
+                } catch (Throwable ex) {
+                }
                 if (obj != null) {
-                    return GraphPrinter.constantToString(obj);
+                    Set<Object> visited = Collections.newSetFromMap(new IdentityHashMap<>());
+                    return GraphPrinter.constantToString(obj, visited);
                 }
             }
         }
@@ -192,38 +184,61 @@ interface GraphPrinter extends Closeable, JavaConstantFormatter {
         return s;
     }
 
-    static String constantToString(Object value) {
-        Class<?> c = value.getClass();
-        if (c.isArray()) {
-            return constantArrayToString(value);
-        } else if (value instanceof Enum) {
-            return ((Enum<?>) value).name();
-        } else if (isToStringTrusted(c)) {
-            return value.toString();
+    static String constantToString(Object value, Set<Object> visited) {
+        if (!visited.contains(value)) {
+            Class<?> c = value.getClass();
+            String suffix = "";
+            if (c.isArray()) {
+                return constantArrayToString(value, visited);
+            }
+            visited.add(value);
+            if (value instanceof Enum) {
+                return ((Enum<?>) value).name();
+            } else if (isToStringTrusted(c)) {
+                try {
+                    return value.toString();
+                } catch (Throwable t) {
+                    suffix = "[toString error: " + t.getClass().getName() + "]";
+                    if (isToStringTrusted(t.getClass())) {
+                        try {
+                            suffix = "[toString error: " + t + "]";
+                        } catch (Throwable t2) {
+                            // No point in going further
+                        }
+                    }
+                }
+            }
+            return MetaUtil.getSimpleName(c, true) + "@" + Integer.toHexString(System.identityHashCode(value)) + suffix;
+        } else {
+            return "...";
         }
-        return MetaUtil.getSimpleName(c, true) + "@" + Integer.toHexString(System.identityHashCode(value));
 
     }
 
-    static String constantArrayToString(Object array) {
-        Class<?> componentType = array.getClass().getComponentType();
-        assert componentType != null;
-        int arrayLength = Array.getLength(array);
-        StringBuilder buf = new StringBuilder(MetaUtil.getSimpleName(componentType, true)).append('[').append(arrayLength).append("]{");
-        int length = arrayLength;
-        boolean primitive = componentType.isPrimitive();
-        for (int i = 0; i < length; i++) {
-            if (primitive) {
-                buf.append(Array.get(array, i));
-            } else {
-                Object o = ((Object[]) array)[i];
-                buf.append(o == null ? "null" : constantToString(o));
+    static String constantArrayToString(Object array, Set<Object> visited) {
+        if (!visited.contains(array)) {
+            visited.add(array);
+            Class<?> componentType = array.getClass().getComponentType();
+            assert componentType != null;
+            int arrayLength = Array.getLength(array);
+            StringBuilder buf = new StringBuilder(MetaUtil.getSimpleName(componentType, true)).append('[').append(arrayLength).append("]{");
+            int length = arrayLength;
+            boolean primitive = componentType.isPrimitive();
+            for (int i = 0; i < length; i++) {
+                if (primitive) {
+                    buf.append(Array.get(array, i));
+                } else {
+                    Object o = ((Object[]) array)[i];
+                    buf.append(o == null ? "null" : constantToString(o, visited));
+                }
+                if (i != length - 1) {
+                    buf.append(", ");
+                }
             }
-            if (i != length - 1) {
-                buf.append(", ");
-            }
+            return buf.append('}').toString();
+        } else {
+            return "...";
         }
-        return buf.append('}').toString();
     }
 
     @SuppressWarnings("try")

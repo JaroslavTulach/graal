@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2016, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -36,10 +38,12 @@ import org.graalvm.compiler.hotspot.nodes.DeoptimizingStubCall;
 import org.graalvm.compiler.hotspot.word.KlassPointer;
 import org.graalvm.compiler.lir.LIRFrameState;
 import org.graalvm.compiler.nodeinfo.NodeInfo;
+import org.graalvm.compiler.nodes.NodeView;
 import org.graalvm.compiler.nodes.ValueNode;
 import org.graalvm.compiler.nodes.spi.LIRLowerable;
 import org.graalvm.compiler.nodes.spi.NodeLIRBuilderTool;
 import org.graalvm.compiler.nodes.util.GraphUtil;
+import org.graalvm.compiler.word.Word;
 
 import jdk.vm.ci.hotspot.HotSpotMetaspaceConstant;
 import jdk.vm.ci.hotspot.HotSpotObjectConstant;
@@ -59,14 +63,14 @@ public class ResolveConstantStubCall extends DeoptimizingStubCall implements Can
     protected HotSpotConstantLoadAction action;
 
     public ResolveConstantStubCall(ValueNode value, ValueNode string) {
-        super(TYPE, value.stamp());
+        super(TYPE, value.stamp(NodeView.DEFAULT));
         this.value = value;
         this.string = string;
         this.action = HotSpotConstantLoadAction.RESOLVE;
     }
 
     public ResolveConstantStubCall(ValueNode value, ValueNode string, HotSpotConstantLoadAction action) {
-        super(TYPE, value.stamp());
+        super(TYPE, value.stamp(NodeView.DEFAULT));
         this.value = value;
         this.string = string;
         this.action = action;
@@ -76,10 +80,10 @@ public class ResolveConstantStubCall extends DeoptimizingStubCall implements Can
     public static native Object resolveObject(Object value, Object symbol);
 
     @NodeIntrinsic
-    public static native KlassPointer resolveKlass(KlassPointer value, Object symbol);
+    public static native KlassPointer resolveKlass(KlassPointer value, Word symbol);
 
     @NodeIntrinsic
-    public static native KlassPointer resolveKlass(KlassPointer value, Object symbol, @ConstantNodeParameter HotSpotConstantLoadAction action);
+    public static native KlassPointer resolveKlass(KlassPointer value, Word symbol, @ConstantNodeParameter HotSpotConstantLoadAction action);
 
     @Override
     public Node canonical(CanonicalizerTool tool) {

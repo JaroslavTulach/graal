@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2014, 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2014, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -41,6 +43,7 @@ import org.graalvm.compiler.nodes.spi.NodeLIRBuilderTool;
 import org.graalvm.compiler.nodes.type.StampTool;
 
 import jdk.vm.ci.meta.Constant;
+import jdk.vm.ci.meta.JavaConstant;
 import jdk.vm.ci.meta.ConstantReflectionProvider;
 import jdk.vm.ci.meta.Value;
 
@@ -68,13 +71,17 @@ public abstract class CompressionNode extends UnaryNode implements ConvertNode, 
 
     @Override
     public Stamp foldStamp(Stamp newStamp) {
-        assert newStamp.isCompatible(getValue().stamp());
+        assert newStamp.isCompatible(getValue().stamp(NodeView.DEFAULT));
         return mkStamp(newStamp);
     }
 
     protected abstract Constant compress(Constant c);
 
     protected abstract Constant uncompress(Constant c);
+
+    public JavaConstant nullConstant() {
+        return JavaConstant.NULL_POINTER;
+    }
 
     @Override
     public Constant convert(Constant c, ConstantReflectionProvider constantReflection) {
@@ -122,9 +129,10 @@ public abstract class CompressionNode extends UnaryNode implements ConvertNode, 
                 // We always want uncompressed constants
                 return this;
             }
-            int stableDimension = ((ConstantNode) forValue).getStableDimension();
-            boolean isDefaultStable = ((ConstantNode) forValue).isDefaultStable();
-            return ConstantNode.forConstant(stamp(), convert(forValue.asConstant(), tool.getConstantReflection()), stableDimension, isDefaultStable, tool.getMetaAccess());
+
+            ConstantNode constant = (ConstantNode) forValue;
+            return ConstantNode.forConstant(stamp(NodeView.DEFAULT), convert(constant.getValue(), tool.getConstantReflection()), constant.getStableDimension(), constant.isDefaultStable(),
+                            tool.getMetaAccess());
         } else if (forValue instanceof CompressionNode) {
             CompressionNode other = (CompressionNode) forValue;
             if (op != other.op && encoding.equals(other.encoding)) {
@@ -136,22 +144,22 @@ public abstract class CompressionNode extends UnaryNode implements ConvertNode, 
 
     @Override
     public void generate(NodeLIRBuilderTool gen) {
-        LIRGeneratorTool hsGen = gen.getLIRGeneratorTool();
         boolean nonNull;
-        if (getValue().stamp() instanceof AbstractObjectStamp) {
-            nonNull = StampTool.isPointerNonNull(getValue().stamp());
+        if (value.stamp(NodeView.DEFAULT) instanceof AbstractObjectStamp) {
+            nonNull = StampTool.isPointerNonNull(value.stamp(NodeView.DEFAULT));
         } else {
             // metaspace pointers are never null
             nonNull = true;
         }
 
+        LIRGeneratorTool tool = gen.getLIRGeneratorTool();
         Value result;
         switch (op) {
             case Compress:
-                result = hsGen.emitCompress(gen.operand(getValue()), encoding, nonNull);
+                result = tool.emitCompress(gen.operand(value), encoding, nonNull);
                 break;
             case Uncompress:
-                result = hsGen.emitUncompress(gen.operand(getValue()), encoding, nonNull);
+                result = tool.emitUncompress(gen.operand(value), encoding, nonNull);
                 break;
             default:
                 throw GraalError.shouldNotReachHere();

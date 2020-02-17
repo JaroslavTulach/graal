@@ -1,27 +1,45 @@
 /*
- * Copyright (c) 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2017, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
- * This code is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.  Oracle designates this
- * particular file as subject to the "Classpath" exception as provided
- * by Oracle in the LICENSE file that accompanied this code.
+ * The Universal Permissive License (UPL), Version 1.0
  *
- * This code is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
- * version 2 for more details (a copy is included in the LICENSE file that
- * accompanied this code).
+ * Subject to the condition set forth below, permission is hereby granted to any
+ * person obtaining a copy of this software, associated documentation and/or
+ * data (collectively the "Software"), free of charge and under any and all
+ * copyright rights in the Software, and any and all patent rights owned or
+ * freely licensable by each licensor hereunder covering either (i) the
+ * unmodified Software as contributed to or provided by such licensor, or (ii)
+ * the Larger Works (as defined below), to deal in both
  *
- * You should have received a copy of the GNU General Public License version
- * 2 along with this work; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
+ * (a) the Software, and
  *
- * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
- * or visit www.oracle.com if you need additional information or have any
- * questions.
+ * (b) any piece of software and/or hardware listed in the lrgrwrks.txt file if
+ * one is included with the Software each a "Larger Work" to which the Software
+ * is contributed by such licensors),
+ *
+ * without restriction, including without limitation the rights to copy, create
+ * derivative works of, display, perform, and distribute the Software and make,
+ * use, sell, offer for sale, import, export, have made, and have sold the
+ * Software and the Larger Work(s), and to sublicense the foregoing rights on
+ * either these or other terms.
+ *
+ * This license is subject to the following condition:
+ *
+ * The above copyright notice and either this complete permission notice or at a
+ * minimum a reference to the UPL must be included in all copies or substantial
+ * portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
  */
+
+#if !defined(_WIN32)
 
 #define _GNU_SOURCE
 #include <dlfcn.h>
@@ -29,10 +47,9 @@
 #include "native.h"
 
 #include <string.h>
-#include <errno.h>
 #include "internal.h"
 
-JNIEXPORT jlong JNICALL Java_com_oracle_truffle_nfi_NFIContext_loadLibrary(JNIEnv *env, jclass self, jlong context, jstring name, jint flags) {
+JNIEXPORT jlong JNICALL Java_com_oracle_truffle_nfi_impl_NFIContext_loadLibrary(JNIEnv *env, jclass self, jlong context, jstring name, jint flags) {
     const char *utfName = (*env)->GetStringUTFChars(env, name, NULL);
     void *ret = dlopen(utfName, flags);
     if (ret == NULL) {
@@ -44,31 +61,35 @@ JNIEXPORT jlong JNICALL Java_com_oracle_truffle_nfi_NFIContext_loadLibrary(JNIEn
     return (jlong) ret;
 }
 
-JNIEXPORT void JNICALL Java_com_oracle_truffle_nfi_NFIContext_freeLibrary(JNIEnv *env, jclass self, jlong handle) {
+JNIEXPORT void JNICALL Java_com_oracle_truffle_nfi_impl_NFIContext_freeLibrary(JNIEnv *env, jclass self, jlong handle) {
     dlclose((void*) handle);
 }
 
 static jlong lookup(JNIEnv *env, jlong context, void *handle, jstring name) {
+    struct __TruffleContextInternal *ctx = (struct __TruffleContextInternal *) context;
     const char *utfName = (*env)->GetStringUTFChars(env, name, NULL);
+    void *ret;
+
     // clear previous errors
     dlerror();
-    void *ret = dlsym(handle, utfName);
+    ret = dlsym(handle, utfName);
     if (ret == NULL) {
         const char *error = dlerror();
         // if error == NULL, the symbol was found, but really points to NULL
         if (error != NULL) {
-            struct __TruffleContextInternal *ctx = (struct __TruffleContextInternal *) context;
             (*env)->ThrowNew(env, ctx->UnsatisfiedLinkError, error);
         }
     }
     (*env)->ReleaseStringUTFChars(env, name, utfName);
-    return (jlong) ret;
+    return (jlong) check_intrinsify(ctx, ret);
 }
 
-JNIEXPORT jlong JNICALL Java_com_oracle_truffle_nfi_NFIContext_lookup(JNIEnv *env, jclass self, jlong context, jlong library, jstring name) {
+JNIEXPORT jlong JNICALL Java_com_oracle_truffle_nfi_impl_NFIContext_lookup(JNIEnv *env, jclass self, jlong context, jlong library, jstring name) {
     if (library == 0) {
         return lookup(env, context, RTLD_DEFAULT, name);
     } else {
         return lookup(env, context, (void *) library, name);
     }
 }
+
+#endif

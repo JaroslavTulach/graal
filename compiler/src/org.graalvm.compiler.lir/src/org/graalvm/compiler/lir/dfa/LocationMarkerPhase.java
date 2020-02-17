@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2014, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2014, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -35,14 +37,15 @@ import org.graalvm.compiler.lir.framemap.ReferenceMapBuilder;
 import org.graalvm.compiler.lir.gen.LIRGenerationResult;
 import org.graalvm.compiler.lir.phases.AllocationPhase;
 
+import jdk.vm.ci.code.ReferenceMap;
 import jdk.vm.ci.code.Register;
 import jdk.vm.ci.code.RegisterAttributes;
 import jdk.vm.ci.code.TargetDescription;
 import jdk.vm.ci.meta.Value;
 
 /**
- * Mark all live references for a frame state. The frame state use this information to build the OOP
- * maps.
+ * Mark all live references for a frame state. The frame state uses this information to build the
+ * {@link ReferenceMap}s.
  */
 public final class LocationMarkerPhase extends AllocationPhase {
 
@@ -91,7 +94,6 @@ public final class LocationMarkerPhase extends AllocationPhase {
             }
 
             ReferenceMapBuilder refMap = frameMap.newReferenceMapBuilder();
-            frameMap.addLiveValues(refMap);
             values.addLiveValues(refMap);
 
             info.debugInfo().setReferenceMap(refMap.finish(info));

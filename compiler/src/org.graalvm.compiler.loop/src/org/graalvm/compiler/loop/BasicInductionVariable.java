@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2012, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -28,8 +30,10 @@ import static org.graalvm.compiler.loop.MathUtil.sub;
 
 import org.graalvm.compiler.core.common.type.IntegerStamp;
 import org.graalvm.compiler.core.common.type.Stamp;
+import org.graalvm.compiler.core.common.util.UnsignedLong;
 import org.graalvm.compiler.debug.GraalError;
 import org.graalvm.compiler.nodes.ConstantNode;
+import org.graalvm.compiler.nodes.NodeView;
 import org.graalvm.compiler.nodes.StructuredGraph;
 import org.graalvm.compiler.nodes.ValueNode;
 import org.graalvm.compiler.nodes.ValuePhiNode;
@@ -70,7 +74,7 @@ public class BasicInductionVariable extends InductionVariable {
 
     @Override
     public Direction direction() {
-        Stamp stamp = rawStride.stamp();
+        Stamp stamp = rawStride.stamp(NodeView.DEFAULT);
         if (stamp instanceof IntegerStamp) {
             IntegerStamp integerStamp = (IntegerStamp) stamp;
             Direction dir = null;
@@ -139,28 +143,28 @@ public class BasicInductionVariable extends InductionVariable {
     }
 
     @Override
-    public ValueNode extremumNode(boolean assumePositiveTripCount, Stamp stamp) {
-        Stamp fromStamp = phi.stamp();
+    public ValueNode extremumNode(boolean assumeLoopEntered, Stamp stamp) {
+        Stamp fromStamp = phi.stamp(NodeView.DEFAULT);
         StructuredGraph graph = graph();
         ValueNode stride = strideNode();
         ValueNode initNode = this.initNode();
         if (!fromStamp.isCompatible(stamp)) {
-            stride = IntegerConvertNode.convert(stride, stamp, graph());
-            initNode = IntegerConvertNode.convert(initNode, stamp, graph());
+            stride = IntegerConvertNode.convert(stride, stamp, graph(), NodeView.DEFAULT);
+            initNode = IntegerConvertNode.convert(initNode, stamp, graph(), NodeView.DEFAULT);
         }
-        ValueNode maxTripCount = loop.counted().maxTripCountNode(assumePositiveTripCount);
-        if (!maxTripCount.stamp().isCompatible(stamp)) {
-            maxTripCount = IntegerConvertNode.convert(maxTripCount, stamp, graph());
+        ValueNode maxTripCount = loop.counted().maxTripCountNode(assumeLoopEntered);
+        if (!maxTripCount.stamp(NodeView.DEFAULT).isCompatible(stamp)) {
+            maxTripCount = IntegerConvertNode.convert(maxTripCount, stamp, graph(), NodeView.DEFAULT);
         }
         return add(graph, mul(graph, stride, sub(graph, maxTripCount, ConstantNode.forIntegerStamp(stamp, 1, graph))), initNode);
     }
 
     @Override
     public ValueNode exitValueNode() {
-        Stamp stamp = phi.stamp();
-        ValueNode maxTripCount = loop.counted().maxTripCountNode(false);
-        if (!maxTripCount.stamp().isCompatible(stamp)) {
-            maxTripCount = IntegerConvertNode.convert(maxTripCount, stamp, graph());
+        Stamp stamp = phi.stamp(NodeView.DEFAULT);
+        ValueNode maxTripCount = loop.counted().maxTripCountNode();
+        if (!maxTripCount.stamp(NodeView.DEFAULT).isCompatible(stamp)) {
+            maxTripCount = IntegerConvertNode.convert(maxTripCount, stamp, graph(), NodeView.DEFAULT);
         }
         return add(graph(), mul(graph(), strideNode(), maxTripCount), initNode());
     }
@@ -172,7 +176,11 @@ public class BasicInductionVariable extends InductionVariable {
 
     @Override
     public long constantExtremum() {
-        return constantStride() * (loop.counted().constantMaxTripCount() - 1) + constantInit();
+        UnsignedLong tripCount = loop.counted().constantMaxTripCount();
+        if (tripCount.isLessThan(1)) {
+            return constantInit();
+        }
+        return tripCount.minus(1).wrappingTimes(constantStride()).wrappingPlus(constantInit()).asLong();
     }
 
     @Override

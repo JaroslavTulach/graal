@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2012, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -29,8 +31,8 @@ import java.util.EnumMap;
 
 import org.graalvm.compiler.api.replacements.Snippet;
 import org.graalvm.compiler.api.replacements.Snippet.ConstantParameter;
-import org.graalvm.compiler.debug.DebugHandlersFactory;
 import org.graalvm.compiler.api.replacements.SnippetReflectionProvider;
+import org.graalvm.compiler.debug.DebugHandlersFactory;
 import org.graalvm.compiler.nodes.ConstantNode;
 import org.graalvm.compiler.nodes.PiNode;
 import org.graalvm.compiler.nodes.ValueNode;
@@ -207,7 +209,7 @@ public class BoxingSnippets implements Snippets {
                 args.add("value", box.getValue());
                 args.addConst("valueOfCounter", valueOfCounter);
 
-                SnippetTemplate template = template(box.getDebug(), args);
+                SnippetTemplate template = template(box, args);
                 box.getDebug().log("Lowering integerValueOf in %s: node=%s, template=%s, arguments=%s", box.graph(), box, template, args);
                 template.instantiate(providers.getMetaAccess(), box, DEFAULT_REPLACER, args);
             }
@@ -218,7 +220,7 @@ public class BoxingSnippets implements Snippets {
             args.add("value", unbox.getValue());
             args.addConst("valueCounter", valueCounter);
 
-            SnippetTemplate template = template(unbox.getDebug(), args);
+            SnippetTemplate template = template(unbox, args);
             unbox.getDebug().log("Lowering integerValueOf in %s: node=%s, template=%s, arguments=%s", unbox.graph(), unbox, template, args);
             template.instantiate(providers.getMetaAccess(), unbox, DEFAULT_REPLACER, args);
         }

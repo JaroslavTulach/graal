@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2015, 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -26,12 +28,17 @@ import static org.graalvm.compiler.debug.GraalError.unimplemented;
 import static org.graalvm.compiler.nodeinfo.NodeCycles.CYCLES_IGNORED;
 import static org.graalvm.compiler.nodeinfo.NodeSize.SIZE_IGNORED;
 
+import java.net.URI;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Formatter;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import org.graalvm.collections.EconomicMap;
+import org.graalvm.collections.Equivalence;
+import org.graalvm.compiler.api.replacements.Fold;
 import org.graalvm.compiler.bytecode.Bytecode;
 import org.graalvm.compiler.bytecode.BytecodeProvider;
 import org.graalvm.compiler.core.common.PermanentBailoutException;
@@ -44,8 +51,11 @@ import org.graalvm.compiler.debug.DebugCloseable;
 import org.graalvm.compiler.debug.DebugContext;
 import org.graalvm.compiler.debug.GraalError;
 import org.graalvm.compiler.graph.Node;
+import org.graalvm.compiler.graph.Node.NodeIntrinsic;
 import org.graalvm.compiler.graph.NodeClass;
 import org.graalvm.compiler.graph.NodeSourcePosition;
+import org.graalvm.compiler.graph.SourceLanguagePosition;
+import org.graalvm.compiler.graph.SourceLanguagePositionProvider;
 import org.graalvm.compiler.graph.spi.Canonicalizable;
 import org.graalvm.compiler.java.GraphBuilderPhase;
 import org.graalvm.compiler.nodeinfo.NodeInfo;
@@ -63,6 +73,7 @@ import org.graalvm.compiler.nodes.IfNode;
 import org.graalvm.compiler.nodes.Invoke;
 import org.graalvm.compiler.nodes.InvokeWithExceptionNode;
 import org.graalvm.compiler.nodes.MergeNode;
+import org.graalvm.compiler.nodes.NodeView;
 import org.graalvm.compiler.nodes.ParameterNode;
 import org.graalvm.compiler.nodes.ReturnNode;
 import org.graalvm.compiler.nodes.SimplifyingGraphDecoder;
@@ -73,6 +84,7 @@ import org.graalvm.compiler.nodes.ValueNode;
 import org.graalvm.compiler.nodes.cfg.ControlFlowGraph;
 import org.graalvm.compiler.nodes.extended.ForeignCallNode;
 import org.graalvm.compiler.nodes.extended.IntegerSwitchNode;
+import org.graalvm.compiler.nodes.graphbuilderconf.GeneratedInvocationPlugin;
 import org.graalvm.compiler.nodes.graphbuilderconf.GraphBuilderContext;
 import org.graalvm.compiler.nodes.graphbuilderconf.InlineInvokePlugin;
 import org.graalvm.compiler.nodes.graphbuilderconf.InlineInvokePlugin.InlineInfo;
@@ -82,6 +94,7 @@ import org.graalvm.compiler.nodes.graphbuilderconf.InvocationPlugins;
 import org.graalvm.compiler.nodes.graphbuilderconf.InvocationPlugins.InvocationPluginReceiver;
 import org.graalvm.compiler.nodes.graphbuilderconf.LoopExplosionPlugin;
 import org.graalvm.compiler.nodes.graphbuilderconf.LoopExplosionPlugin.LoopExplosionKind;
+import org.graalvm.compiler.nodes.graphbuilderconf.MethodSubstitutionPlugin;
 import org.graalvm.compiler.nodes.graphbuilderconf.NodePlugin;
 import org.graalvm.compiler.nodes.graphbuilderconf.ParameterPlugin;
 import org.graalvm.compiler.nodes.java.LoadFieldNode;
@@ -93,6 +106,8 @@ import org.graalvm.compiler.nodes.java.NewInstanceNode;
 import org.graalvm.compiler.nodes.java.NewMultiArrayNode;
 import org.graalvm.compiler.nodes.java.StoreFieldNode;
 import org.graalvm.compiler.nodes.java.StoreIndexedNode;
+import org.graalvm.compiler.nodes.spi.CoreProviders;
+import org.graalvm.compiler.nodes.spi.Replacements;
 import org.graalvm.compiler.nodes.spi.StampProvider;
 import org.graalvm.compiler.nodes.type.StampTool;
 import org.graalvm.compiler.nodes.util.GraphUtil;
@@ -101,12 +116,11 @@ import org.graalvm.compiler.options.OptionKey;
 import org.graalvm.compiler.options.OptionType;
 import org.graalvm.compiler.options.OptionValues;
 import org.graalvm.compiler.phases.common.inlining.InliningUtil;
-import org.graalvm.util.EconomicMap;
-import org.graalvm.util.Equivalence;
 
 import jdk.vm.ci.code.Architecture;
 import jdk.vm.ci.code.BailoutException;
 import jdk.vm.ci.code.BytecodeFrame;
+import jdk.vm.ci.meta.Assumptions;
 import jdk.vm.ci.meta.ConstantReflectionProvider;
 import jdk.vm.ci.meta.DeoptimizationAction;
 import jdk.vm.ci.meta.DeoptimizationReason;
@@ -141,7 +155,7 @@ public abstract class PEGraphDecoder extends SimplifyingGraphDecoder {
         @Option(help = "Max number of loop explosions per method.", type = OptionType.Debug)//
         public static final OptionKey<Integer> MaximumLoopExplosionCount = new OptionKey<>(10000);
 
-        @Option(help = "Do not bail out but throw an exception on failed loop explosion.", type = OptionType.Debug) //
+        @Option(help = "Do not bail out but throw an exception on failed loop explosion.", type = OptionType.Debug)//
         public static final OptionKey<Boolean> FailedLoopExplosionIsFatal = new OptionKey<>(false);
     }
 
@@ -153,6 +167,7 @@ public abstract class PEGraphDecoder extends SimplifyingGraphDecoder {
         protected final int inliningDepth;
 
         protected final ValueNode[] arguments;
+        private SourceLanguagePosition sourceLanguagePosition = UnresolvedSourceLanguagePosition.INSTANCE;
 
         protected FrameState outerState;
         protected FrameState exceptionState;
@@ -175,17 +190,96 @@ public abstract class PEGraphDecoder extends SimplifyingGraphDecoder {
             return caller != null;
         }
 
-        public NodeSourcePosition getCallerBytecodePosition() {
+        /**
+         * Gets the call stack representing this method scope and its callers.
+         */
+        public StackTraceElement[] getCallStack() {
+            StackTraceElement[] stack = new StackTraceElement[inliningDepth + 1];
+            PEMethodScope frame = this;
+            int index = 0;
+            int bci = -1;
+            while (frame != null) {
+                stack[index++] = frame.method.asStackTraceElement(bci);
+                bci = frame.invokeData == null ? 0 : frame.invokeData.invoke.bci();
+                frame = frame.caller;
+            }
+            assert index == stack.length : index + " != " + stack.length;
+            return stack;
+        }
+
+        @Override
+        public NodeSourcePosition getCallerBytecodePosition(NodeSourcePosition position) {
             if (caller == null) {
-                return null;
+                return position;
             }
             if (callerBytecodePosition == null) {
-                JavaConstant constantReceiver = caller.invokeData == null ? null : caller.invokeData.constantReceiver;
-                NodeSourcePosition callerPosition = caller.getCallerBytecodePosition();
                 NodeSourcePosition invokePosition = invokeData.invoke.asNode().getNodeSourcePosition();
-                callerBytecodePosition = invokePosition != null ? invokePosition.addCaller(constantReceiver, callerPosition) : callerPosition;
+                if (invokePosition == null) {
+                    assert position == null : "should only happen when tracking is disabled";
+                    return null;
+                }
+                callerBytecodePosition = invokePosition;
+            }
+            if (position != null) {
+                return position.addCaller(caller.resolveSourceLanguagePosition(), callerBytecodePosition);
+            }
+            final SourceLanguagePosition pos = caller.resolveSourceLanguagePosition();
+            if (pos != null && callerBytecodePosition != null) {
+                return new NodeSourcePosition(pos, callerBytecodePosition.getCaller(), callerBytecodePosition.getMethod(), callerBytecodePosition.getBCI());
             }
             return callerBytecodePosition;
+        }
+
+        private SourceLanguagePosition resolveSourceLanguagePosition() {
+            SourceLanguagePosition res = sourceLanguagePosition;
+            if (res == UnresolvedSourceLanguagePosition.INSTANCE) {
+                res = null;
+                if (arguments != null && method.hasReceiver() && arguments.length > 0 && arguments[0].isJavaConstant()) {
+                    JavaConstant constantArgument = arguments[0].asJavaConstant();
+                    res = sourceLanguagePositionProvider.getPosition(constantArgument);
+                }
+                sourceLanguagePosition = res;
+            }
+            return res;
+        }
+
+        @Override
+        public String toString() {
+            return getClass().getSimpleName() + '[' + method.format("%H.%n(%p)") + ']';
+        }
+    }
+
+    private static final class UnresolvedSourceLanguagePosition implements SourceLanguagePosition {
+        static final SourceLanguagePosition INSTANCE = new UnresolvedSourceLanguagePosition();
+
+        @Override
+        public String toShortString() {
+            throw new IllegalStateException(getClass().getSimpleName() + " should not be reachable.");
+        }
+
+        @Override
+        public int getOffsetEnd() {
+            throw new IllegalStateException(getClass().getSimpleName() + " should not be reachable.");
+        }
+
+        @Override
+        public int getOffsetStart() {
+            throw new IllegalStateException(getClass().getSimpleName() + " should not be reachable.");
+        }
+
+        @Override
+        public int getLineNumber() {
+            throw new IllegalStateException(getClass().getSimpleName() + " should not be reachable.");
+        }
+
+        @Override
+        public URI getURI() {
+            throw new IllegalStateException(getClass().getSimpleName() + " should not be reachable.");
+        }
+
+        @Override
+        public String getLanguage() {
+            throw new IllegalStateException(getClass().getSimpleName() + " should not be reachable.");
         }
     }
 
@@ -201,7 +295,7 @@ public abstract class PEGraphDecoder extends SimplifyingGraphDecoder {
                     int count = 0;
                     PEGraphDecoder.PEMethodScope scope = methodScope;
                     while (scope != null) {
-                        if (scope.method.equals(callInlinedMethod)) {
+                        if (scope.method.equals(callInlinedMethod) || scope.method.equals(callInlinedAgnosticMethod)) {
                             count++;
                         }
                         scope = scope.caller;
@@ -216,30 +310,50 @@ public abstract class PEGraphDecoder extends SimplifyingGraphDecoder {
             this.invoke = invoke;
         }
 
+        /**
+         * {@link Fold} and {@link NodeIntrinsic} can be deferred during parsing/decoding. Only by
+         * the end of {@linkplain SnippetTemplate#instantiate Snippet instantiation} do they need to
+         * have been processed.
+         *
+         * This is how SVM handles snippets. They are parsed with plugins disabled and then encoded
+         * and stored in the image. When the snippet is needed at runtime the graph is decoded and
+         * the plugins are run during the decoding process. If they aren't handled at this point
+         * then they will never be handled.
+         */
+        @Override
+        public boolean canDeferPlugin(GeneratedInvocationPlugin plugin) {
+            return plugin.isGeneratedFromFoldOrNodeIntrinsic();
+        }
+
         @Override
         public BailoutException bailout(String string) {
             BailoutException bailout = new PermanentBailoutException(string);
-            throw GraphUtil.createBailoutException(string, bailout, GraphUtil.approxSourceStackTraceElement(methodScope.getCallerBytecodePosition()));
+            throw GraphUtil.createBailoutException(string, bailout, methodScope.getCallStack());
         }
 
         @Override
         public StampProvider getStampProvider() {
-            return stampProvider;
+            return providers.getStampProvider();
         }
 
         @Override
         public MetaAccessProvider getMetaAccess() {
-            return metaAccess;
+            return providers.getMetaAccess();
         }
 
         @Override
         public ConstantReflectionProvider getConstantReflection() {
-            return constantReflection;
+            return providers.getConstantReflection();
         }
 
         @Override
         public ConstantFieldProvider getConstantFieldProvider() {
-            return constantFieldProvider;
+            return providers.getConstantFieldProvider();
+        }
+
+        @Override
+        public Replacements getReplacements() {
+            return providers.getReplacements();
         }
 
         @Override
@@ -254,7 +368,7 @@ public abstract class PEGraphDecoder extends SimplifyingGraphDecoder {
 
         @Override
         public IntrinsicContext getIntrinsic() {
-            return null;
+            return PEGraphDecoder.this.getIntrinsic();
         }
 
         @Override
@@ -268,7 +382,7 @@ public abstract class PEGraphDecoder extends SimplifyingGraphDecoder {
         }
 
         @Override
-        public void handleReplacedInvoke(InvokeKind invokeKind, ResolvedJavaMethod targetMethod, ValueNode[] args, boolean inlineEverything) {
+        public Invoke handleReplacedInvoke(InvokeKind invokeKind, ResolvedJavaMethod targetMethod, ValueNode[] args, boolean inlineEverything) {
             throw unimplemented();
         }
 
@@ -279,6 +393,11 @@ public abstract class PEGraphDecoder extends SimplifyingGraphDecoder {
 
         @Override
         public boolean intrinsify(BytecodeProvider bytecodeProvider, ResolvedJavaMethod targetMethod, ResolvedJavaMethod substitute, InvocationPlugin.Receiver receiver, ValueNode[] args) {
+            return false;
+        }
+
+        @Override
+        public boolean intrinsify(ResolvedJavaMethod targetMethod, StructuredGraph substituteGraph, InvocationPlugin.Receiver receiver, ValueNode[] argsIncludingReceiver) {
             return false;
         }
 
@@ -299,12 +418,13 @@ public abstract class PEGraphDecoder extends SimplifyingGraphDecoder {
 
         @Override
         public ResolvedJavaMethod getMethod() {
-            throw unimplemented();
+            return methodScope.method;
         }
 
         @Override
         public int bci() {
-            return invoke.bci();
+            // There is no BCI available when decoding an encoded method
+            return -1;
         }
 
         @Override
@@ -316,16 +436,38 @@ public abstract class PEGraphDecoder extends SimplifyingGraphDecoder {
         public JavaType getInvokeReturnType() {
             throw unimplemented();
         }
+
+        @Override
+        public String toString() {
+            Formatter fmt = new Formatter();
+            fmt.format("Decoding %s", methodScope.method.format("%H.%n(%p)"));
+            for (StackTraceElement e : methodScope.getCallStack()) {
+                fmt.format("%n\tat %s", e);
+            }
+            return fmt.toString();
+        }
+    }
+
+    protected IntrinsicContext getIntrinsic() {
+        return null;
     }
 
     protected class PEAppendGraphBuilderContext extends PENonAppendGraphBuilderContext {
         protected FixedWithNextNode lastInstr;
         protected ValueNode pushedNode;
         protected boolean invokeConsumed;
+        protected final InvokeKind invokeKind;
+        protected final JavaType invokeReturnType;
 
         public PEAppendGraphBuilderContext(PEMethodScope inlineScope, FixedWithNextNode lastInstr) {
+            this(inlineScope, lastInstr, null, null);
+        }
+
+        public PEAppendGraphBuilderContext(PEMethodScope inlineScope, FixedWithNextNode lastInstr, InvokeKind invokeKind, JavaType invokeReturnType) {
             super(inlineScope, inlineScope.invokeData != null ? inlineScope.invokeData.invoke : null);
             this.lastInstr = lastInstr;
+            this.invokeKind = invokeKind;
+            this.invokeReturnType = invokeReturnType;
         }
 
         @Override
@@ -360,8 +502,11 @@ public abstract class PEGraphDecoder extends SimplifyingGraphDecoder {
         }
 
         private DebugCloseable withNodeSoucePosition() {
-            if (getGraph().mayHaveNodeSourcePosition()) {
-                return getGraph().withNodeSourcePosition(methodScope.getCallerBytecodePosition());
+            if (getGraph().trackNodeSourcePosition()) {
+                NodeSourcePosition callerBytecodePosition = methodScope.getCallerBytecodePosition();
+                if (callerBytecodePosition != null) {
+                    return getGraph().withNodeSourcePosition(callerBytecodePosition);
+                }
             }
             return null;
         }
@@ -383,6 +528,22 @@ public abstract class PEGraphDecoder extends SimplifyingGraphDecoder {
         }
 
         @Override
+        public InvokeKind getInvokeKind() {
+            if (invokeKind != null) {
+                return invokeKind;
+            }
+            return super.getInvokeKind();
+        }
+
+        @Override
+        public JavaType getInvokeReturnType() {
+            if (invokeReturnType != null) {
+                return invokeReturnType;
+            }
+            return super.getInvokeReturnType();
+        }
+
+        @Override
         public void handleReplacedInvoke(CallTargetNode callTarget, JavaKind resultType) {
             if (invokeConsumed) {
                 throw unimplemented("handleReplacedInvoke can be called only once");
@@ -391,6 +552,11 @@ public abstract class PEGraphDecoder extends SimplifyingGraphDecoder {
 
             appendInvoke(methodScope.caller, methodScope.callerLoopScope, methodScope.invokeData, callTarget);
             updateLastInstruction(invoke.asNode());
+        }
+
+        @Override
+        public GraphBuilderContext getNonIntrinsicAncestor() {
+            return null;
         }
     }
 
@@ -439,20 +605,24 @@ public abstract class PEGraphDecoder extends SimplifyingGraphDecoder {
     private final EconomicMap<SpecialCallTargetCacheKey, Object> specialCallTargetCache;
     private final EconomicMap<ResolvedJavaMethod, Object> invocationPluginCache;
     private final ResolvedJavaMethod callInlinedMethod;
+    private final ResolvedJavaMethod callInlinedAgnosticMethod;
+    protected final SourceLanguagePositionProvider sourceLanguagePositionProvider;
 
-    public PEGraphDecoder(Architecture architecture, StructuredGraph graph, MetaAccessProvider metaAccess, ConstantReflectionProvider constantReflection, ConstantFieldProvider constantFieldProvider,
-                    StampProvider stampProvider, LoopExplosionPlugin loopExplosionPlugin, InvocationPlugins invocationPlugins, InlineInvokePlugin[] inlineInvokePlugins,
+    public PEGraphDecoder(Architecture architecture, StructuredGraph graph, CoreProviders providers, LoopExplosionPlugin loopExplosionPlugin, InvocationPlugins invocationPlugins,
+                    InlineInvokePlugin[] inlineInvokePlugins,
                     ParameterPlugin parameterPlugin,
-                    NodePlugin[] nodePlugins, ResolvedJavaMethod callInlinedMethod) {
-        super(architecture, graph, metaAccess, constantReflection, constantFieldProvider, stampProvider, true);
+                    NodePlugin[] nodePlugins, ResolvedJavaMethod callInlinedMethod, ResolvedJavaMethod callInlinedAgnosticMethod, SourceLanguagePositionProvider sourceLanguagePositionProvider) {
+        super(architecture, graph, providers, true);
         this.loopExplosionPlugin = loopExplosionPlugin;
         this.invocationPlugins = invocationPlugins;
         this.inlineInvokePlugins = inlineInvokePlugins;
         this.parameterPlugin = parameterPlugin;
         this.nodePlugins = nodePlugins;
+        this.callInlinedAgnosticMethod = callInlinedAgnosticMethod;
         this.specialCallTargetCache = EconomicMap.create(Equivalence.DEFAULT);
         this.invocationPluginCache = EconomicMap.create(Equivalence.DEFAULT);
         this.callInlinedMethod = callInlinedMethod;
+        this.sourceLanguagePositionProvider = sourceLanguagePositionProvider;
     }
 
     protected static LoopExplosionKind loopExplosionKind(ResolvedJavaMethod method, LoopExplosionPlugin loopExplosionPlugin) {
@@ -463,13 +633,19 @@ public abstract class PEGraphDecoder extends SimplifyingGraphDecoder {
         }
     }
 
-    public void decode(ResolvedJavaMethod method) {
-        PEMethodScope methodScope = new PEMethodScope(graph, null, null, lookupEncodedGraph(method, null), method, null, 0, loopExplosionPlugin, null);
-        decode(createInitialLoopScope(methodScope, null));
-        cleanupGraph(methodScope);
+    @SuppressWarnings("try")
+    public void decode(ResolvedJavaMethod method, boolean isSubstitution, boolean trackNodeSourcePosition) {
+        try (DebugContext.Scope scope = debug.scope("PEGraphDecode", graph)) {
+            EncodedGraph encodedGraph = lookupEncodedGraph(method, null, null, isSubstitution, trackNodeSourcePosition);
+            PEMethodScope methodScope = new PEMethodScope(graph, null, null, encodedGraph, method, null, 0, loopExplosionPlugin, null);
+            decode(createInitialLoopScope(methodScope, null));
+            cleanupGraph(methodScope);
 
-        debug.dump(DebugContext.VERBOSE_LEVEL, graph, "After graph cleanup");
-        assert graph.verify();
+            debug.dump(DebugContext.VERBOSE_LEVEL, graph, "After graph cleanup");
+            assert graph.verify();
+        } catch (Throwable t) {
+            throw debug.handle(t);
+        }
 
         try {
             /* Check that the control flow graph can be computed, to catch problems early. */
@@ -515,7 +691,7 @@ public abstract class PEGraphDecoder extends SimplifyingGraphDecoder {
     private static RuntimeException tooManyLoopExplosionIterations(PEMethodScope methodScope, OptionValues options) {
         String message = "too many loop explosion iterations - does the explosion not terminate for method " + methodScope.method + "?";
         RuntimeException bailout = Options.FailedLoopExplosionIsFatal.getValue(options) ? new RuntimeException(message) : new PermanentBailoutException(message);
-        throw GraphUtil.createBailoutException(message, bailout, GraphUtil.approxSourceStackTraceElement(methodScope.getCallerBytecodePosition()));
+        throw GraphUtil.createBailoutException(message, bailout, methodScope.getCallStack());
     }
 
     @Override
@@ -532,6 +708,12 @@ public abstract class PEGraphDecoder extends SimplifyingGraphDecoder {
             MethodCallTargetNode methodCall = (MethodCallTargetNode) callTarget;
             if (methodCall.invokeKind().hasReceiver()) {
                 invokeData.constantReceiver = methodCall.arguments().get(0).asJavaConstant();
+                NodeSourcePosition invokePosition = invokeData.invoke.asNode().getNodeSourcePosition();
+                if (invokeData.constantReceiver != null && invokePosition != null) {
+                    // new NodeSourcePosition(invokeData.constantReceiver,
+                    // invokePosition.getCaller(), invokePosition.getMethod(),
+                    // invokePosition.getBCI());
+                }
             }
             LoopScope inlineLoopScope = trySimplifyInvoke(methodScope, loopScope, invokeData, (MethodCallTargetNode) callTarget);
             if (inlineLoopScope != null) {
@@ -583,7 +765,7 @@ public abstract class PEGraphDecoder extends SimplifyingGraphDecoder {
             return callTarget.targetMethod();
         }
 
-        SpecialCallTargetCacheKey key = new SpecialCallTargetCacheKey(callTarget.invokeKind(), callTarget.targetMethod(), invokeData.contextType, callTarget.receiver().stamp());
+        SpecialCallTargetCacheKey key = new SpecialCallTargetCacheKey(callTarget.invokeKind(), callTarget.targetMethod(), invokeData.contextType, callTarget.receiver().stamp(NodeView.DEFAULT));
         Object specialCallTarget = specialCallTargetCache.get(key);
         if (specialCallTarget == null) {
             specialCallTarget = MethodCallTargetNode.devirtualizeCall(key.invokeKind, key.targetMethod, key.contextType, graph.getAssumptions(),
@@ -605,8 +787,16 @@ public abstract class PEGraphDecoder extends SimplifyingGraphDecoder {
         Invoke invoke = invokeData.invoke;
 
         ResolvedJavaMethod targetMethod = callTarget.targetMethod();
+        if (loopScope.methodScope.encodedGraph.isCallToOriginal(targetMethod)) {
+            return false;
+        }
+
         InvocationPlugin invocationPlugin = getInvocationPlugin(targetMethod);
         if (invocationPlugin == null) {
+            return false;
+        }
+
+        if (loopScope.methodScope.encodedGraph.isCallToOriginal(targetMethod)) {
             return false;
         }
 
@@ -619,7 +809,9 @@ public abstract class PEGraphDecoder extends SimplifyingGraphDecoder {
         invoke.asNode().replaceAtPredecessor(null);
 
         PEMethodScope inlineScope = new PEMethodScope(graph, methodScope, loopScope, null, targetMethod, invokeData, methodScope.inliningDepth + 1, loopExplosionPlugin, arguments);
-        PEAppendGraphBuilderContext graphBuilderContext = new PEAppendGraphBuilderContext(inlineScope, invokePredecessor);
+
+        JavaType returnType = targetMethod.getSignature().getReturnType(methodScope.method.getDeclaringClass());
+        PEAppendGraphBuilderContext graphBuilderContext = new PEAppendGraphBuilderContext(inlineScope, invokePredecessor, callTarget.invokeKind(), returnType);
         InvocationPluginReceiver invocationPluginReceiver = new InvocationPluginReceiver(graphBuilderContext);
 
         if (invocationPlugin.execute(graphBuilderContext, targetMethod, invocationPluginReceiver.init(targetMethod, arguments), arguments)) {
@@ -674,10 +866,10 @@ public abstract class PEGraphDecoder extends SimplifyingGraphDecoder {
         for (InlineInvokePlugin plugin : inlineInvokePlugins) {
             InlineInfo inlineInfo = plugin.shouldInlineInvoke(graphBuilderContext, targetMethod, arguments);
             if (inlineInfo != null) {
-                if (inlineInfo.getMethodToInline() == null) {
-                    return null;
-                } else {
+                if (inlineInfo.allowsInlining()) {
                     return doInline(methodScope, loopScope, invokeData, inlineInfo, arguments);
+                } else {
+                    return null;
                 }
             }
         }
@@ -685,12 +877,16 @@ public abstract class PEGraphDecoder extends SimplifyingGraphDecoder {
     }
 
     protected LoopScope doInline(PEMethodScope methodScope, LoopScope loopScope, InvokeData invokeData, InlineInfo inlineInfo, ValueNode[] arguments) {
+        if (!invokeData.invoke.useForInlining()) {
+            return null;
+        }
         ResolvedJavaMethod inlineMethod = inlineInfo.getMethodToInline();
-        EncodedGraph graphToInline = lookupEncodedGraph(inlineMethod, inlineInfo.getIntrinsicBytecodeProvider());
+        EncodedGraph graphToInline = lookupEncodedGraph(inlineMethod, inlineInfo.getPlugin(), inlineInfo.getIntrinsicBytecodeProvider(), inlineInfo.isSubstitution(), graph.trackNodeSourcePosition());
         if (graphToInline == null) {
             return null;
         }
 
+        assert !graph.trackNodeSourcePosition() || graphToInline.trackNodeSourcePosition() : graph + " " + graphToInline;
         if (methodScope.inliningDepth > Options.InliningDepthError.getValue(options)) {
             throw tooDeepInlining(methodScope);
         }
@@ -737,6 +933,34 @@ public abstract class PEGraphDecoder extends SimplifyingGraphDecoder {
         int firstArgumentNodeId = inlineScope.maxFixedNodeOrderId + 1;
         for (int i = 0; i < arguments.length; i++) {
             inlineLoopScope.createdNodes[firstArgumentNodeId + i] = arguments[i];
+        }
+
+        // Copy assumptions from inlinee to caller
+        Assumptions assumptions = graph.getAssumptions();
+        Assumptions inlinedAssumptions = graphToInline.getAssumptions();
+        if (assumptions != null) {
+            if (inlinedAssumptions != null) {
+                assumptions.record(inlinedAssumptions);
+            }
+        } else {
+            assert inlinedAssumptions == null : String.format("cannot inline graph (%s) which makes assumptions into a graph (%s) that doesn't", inlineMethod, graph);
+        }
+
+        // Copy inlined methods from inlinee to caller
+        List<ResolvedJavaMethod> inlinedMethods = graphToInline.getInlinedMethods();
+        if (inlinedMethods != null) {
+            for (ResolvedJavaMethod other : inlinedMethods) {
+                graph.recordMethod(other);
+            }
+        }
+
+        if (graphToInline.getFields() != null) {
+            for (ResolvedJavaField field : graphToInline.getFields()) {
+                graph.recordField(field);
+            }
+        }
+        if (graphToInline.hasUnsafeAccess()) {
+            graph.markUnsafeAccess();
         }
 
         /*
@@ -926,7 +1150,8 @@ public abstract class PEGraphDecoder extends SimplifyingGraphDecoder {
         }
     }
 
-    protected abstract EncodedGraph lookupEncodedGraph(ResolvedJavaMethod method, BytecodeProvider intrinsicBytecodeProvider);
+    protected abstract EncodedGraph lookupEncodedGraph(ResolvedJavaMethod method, MethodSubstitutionPlugin plugin, BytecodeProvider intrinsicBytecodeProvider, boolean isSubstitution,
+                    boolean trackNodeSourcePosition);
 
     @Override
     protected void handleFixedNode(MethodScope s, LoopScope loopScope, int nodeOrderId, FixedNode node) {
@@ -997,7 +1222,7 @@ public abstract class PEGraphDecoder extends SimplifyingGraphDecoder {
                 ValueNode array = loadIndexedNode.array();
                 ValueNode index = loadIndexedNode.index();
                 for (NodePlugin nodePlugin : nodePlugins) {
-                    if (nodePlugin.handleLoadIndexed(graphBuilderContext, array, index, loadIndexedNode.elementKind())) {
+                    if (nodePlugin.handleLoadIndexed(graphBuilderContext, array, index, loadIndexedNode.getBoundsCheck(), loadIndexedNode.elementKind())) {
                         replacedNode = graphBuilderContext.pushedNode;
                         break;
                     }
@@ -1009,7 +1234,7 @@ public abstract class PEGraphDecoder extends SimplifyingGraphDecoder {
                 ValueNode index = storeIndexedNode.index();
                 ValueNode value = storeIndexedNode.value();
                 for (NodePlugin nodePlugin : nodePlugins) {
-                    if (nodePlugin.handleStoreIndexed(graphBuilderContext, array, index, storeIndexedNode.elementKind(), value)) {
+                    if (nodePlugin.handleStoreIndexed(graphBuilderContext, array, index, storeIndexedNode.getBoundsCheck(), storeIndexedNode.getStoreCheck(), storeIndexedNode.elementKind(), value)) {
                         replacedNode = graphBuilderContext.pushedNode;
                         break;
                     }
@@ -1066,7 +1291,7 @@ public abstract class PEGraphDecoder extends SimplifyingGraphDecoder {
                 assert !methodScope.isInlinedMethod();
                 GraphBuilderContext graphBuilderContext = new PENonAppendGraphBuilderContext(methodScope, null);
                 Node result = parameterPlugin.interceptParameter(graphBuilderContext, param.index(),
-                                StampPair.create(param.stamp(), param.uncheckedStamp()));
+                                StampPair.create(param.stamp(NodeView.DEFAULT), param.uncheckedStamp()));
                 if (result != null) {
                     return result;
                 }
@@ -1120,20 +1345,6 @@ public abstract class PEGraphDecoder extends SimplifyingGraphDecoder {
             }
             methodScope.exceptionState = exceptionState;
         }
-    }
-
-    @Override
-    protected Node addFloatingNode(MethodScope s, Node node) {
-        Node addedNode = super.addFloatingNode(s, node);
-        PEMethodScope methodScope = (PEMethodScope) s;
-        NodeSourcePosition pos = node.getNodeSourcePosition();
-        if (methodScope.isInlinedMethod()) {
-            if (pos != null) {
-                NodeSourcePosition bytecodePosition = methodScope.getCallerBytecodePosition();
-                node.setNodeSourcePosition(pos.addCaller(bytecodePosition));
-            }
-        }
-        return addedNode;
     }
 
     @Override

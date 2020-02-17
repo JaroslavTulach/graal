@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2009, 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2009, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -30,7 +32,7 @@ import org.graalvm.compiler.graph.NodeClass;
 import org.graalvm.compiler.nodeinfo.NodeInfo;
 import org.graalvm.compiler.nodes.ValueNode;
 import org.graalvm.compiler.nodes.extended.MonitorExit;
-import org.graalvm.compiler.nodes.memory.MemoryCheckpoint;
+import org.graalvm.compiler.nodes.memory.SingleMemoryKill;
 import org.graalvm.compiler.nodes.spi.Lowerable;
 import org.graalvm.compiler.nodes.spi.LoweringTool;
 import org.graalvm.compiler.nodes.spi.Virtualizable;
@@ -44,7 +46,7 @@ import org.graalvm.word.LocationIdentity;
  * {@link #escapedReturnValue}, so that it will be materialized before releasing the monitor.
  */
 @NodeInfo(cycles = CYCLES_64, size = SIZE_64)
-public final class MonitorExitNode extends AccessMonitorNode implements Virtualizable, Lowerable, IterableNodeType, MonitorExit, MemoryCheckpoint.Single {
+public final class MonitorExitNode extends AccessMonitorNode implements Virtualizable, Lowerable, IterableNodeType, MonitorExit, SingleMemoryKill {
 
     public static final NodeClass<MonitorExitNode> TYPE = NodeClass.create(MonitorExitNode.class);
 
@@ -54,21 +56,21 @@ public final class MonitorExitNode extends AccessMonitorNode implements Virtuali
      */
     @OptionalInput ValueNode escapedReturnValue;
 
-    public MonitorExitNode(ValueNode object, MonitorIdNode monitorId, ValueNode escapedReturnValue) {
+    public MonitorExitNode(ValueNode object, MonitorIdNode monitorId, ValueNode escapedValue) {
         super(TYPE, object, monitorId);
-        this.escapedReturnValue = escapedReturnValue;
+        this.escapedReturnValue = escapedValue;
     }
 
     /**
      * Return value is cleared when a synchronized method graph is inlined.
      */
-    public void clearEscapedReturnValue() {
+    public void clearEscapedValue() {
         updateUsages(escapedReturnValue, null);
         this.escapedReturnValue = null;
     }
 
     @Override
-    public LocationIdentity getLocationIdentity() {
+    public LocationIdentity getKilledLocationIdentity() {
         return LocationIdentity.any();
     }
 
@@ -89,4 +91,5 @@ public final class MonitorExitNode extends AccessMonitorNode implements Virtuali
             }
         }
     }
+
 }

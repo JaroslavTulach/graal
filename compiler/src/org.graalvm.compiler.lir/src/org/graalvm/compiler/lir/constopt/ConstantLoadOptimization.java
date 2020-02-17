@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2014, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2014, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -33,6 +35,7 @@ import java.util.Deque;
 import java.util.EnumSet;
 import java.util.List;
 
+import org.graalvm.compiler.core.common.LIRKind;
 import org.graalvm.compiler.core.common.cfg.AbstractBlockBase;
 import org.graalvm.compiler.core.common.cfg.BlockMap;
 import org.graalvm.compiler.debug.CounterKey;
@@ -57,14 +60,15 @@ import org.graalvm.compiler.options.Option;
 import org.graalvm.compiler.options.OptionType;
 
 import jdk.vm.ci.code.TargetDescription;
+import jdk.vm.ci.meta.AllocatableValue;
 import jdk.vm.ci.meta.Constant;
 import jdk.vm.ci.meta.Value;
 import jdk.vm.ci.meta.ValueKind;
 
 /**
  * This optimization tries to improve the handling of constants by replacing a single definition of
- * a constant, which is potentially scheduled into a block with high probability, with one or more
- * definitions in blocks with a lower probability.
+ * a constant, which is potentially scheduled into a block with high frequency, with one or more
+ * definitions in blocks with a lower frequency.
  */
 public final class ConstantLoadOptimization extends PreAllocationOptimizationPhase {
 
@@ -85,6 +89,7 @@ public final class ConstantLoadOptimization extends PreAllocationOptimizationPha
     private static final CounterKey phiConstantsSkipped = DebugContext.counter("ConstantLoadOptimization[PhisSkipped]");
     private static final CounterKey singleUsageConstantsSkipped = DebugContext.counter("ConstantLoadOptimization[SingleUsageSkipped]");
     private static final CounterKey usageAtDefinitionSkipped = DebugContext.counter("ConstantLoadOptimization[UsageAtDefinitionSkipped]");
+    private static final CounterKey basePointerUsagesSkipped = DebugContext.counter("ConstantLoadOptimization[BasePointerUsagesSkipped]");
     private static final CounterKey materializeAtDefinitionSkipped = DebugContext.counter("ConstantLoadOptimization[MaterializeAtDefinitionSkipped]");
     private static final CounterKey constantsOptimized = DebugContext.counter("ConstantLoadOptimization[optimized]");
 
@@ -197,7 +202,17 @@ public final class ConstantLoadOptimization extends PreAllocationOptimizationPha
                 InstructionValueConsumer loadConsumer = (instruction, value, mode, flags) -> {
                     if (isVariable(value)) {
                         Variable var = (Variable) value;
-
+                        AllocatableValue base = getBasePointer(var);
+                        if (base != null && base instanceof Variable) {
+                            if (map.remove((Variable) base) != null) {
+                                // We do not want optimize constants which are used as base
+                                // pointer. The reason is that it would require to update all
+                                // the derived Variables (LIRKind and so on)
+                                map.remove(var);
+                                basePointerUsagesSkipped.increment(debug);
+                                debug.log("skip optimizing %s because it is used as base pointer", base);
+                            }
+                        }
                         if (!phiConstants.get(var.index)) {
                             if (!defined.get(var.index)) {
                                 defined.set(var.index);
@@ -247,6 +262,15 @@ public final class ConstantLoadOptimization extends PreAllocationOptimizationPha
             }
         }
 
+        private static AllocatableValue getBasePointer(Value value) {
+            ValueKind<?> kind = value.getValueKind();
+            if (kind instanceof LIRKind) {
+                return ((LIRKind) kind).getDerivedReferenceBase();
+            } else {
+                return null;
+            }
+        }
+
         /**
          * Creates the dominator tree and searches for an solution.
          */
@@ -269,14 +293,15 @@ public final class ConstantLoadOptimization extends PreAllocationOptimizationPha
             assert usageCount == tree.usageCount() : "Usage count differs: " + usageCount + " vs. " + tree.usageCount();
 
             if (debug.isLogEnabled()) {
-                try (Indent i = debug.logAndIndent("Variable: %s, Block: %s, prob.: %f", tree.getVariable(), tree.getBlock(), tree.getBlock().probability())) {
+                try (Indent i = debug.logAndIndent("Variable: %s, Block: %s, freq.: %f", tree.getVariable(), tree.getBlock(), tree.getBlock().getRelativeFrequency())) {
                     debug.log("Usages result: %s", cost);
                 }
 
             }
 
-            if (cost.getNumMaterializations() > 1 || cost.getBestCost() < tree.getBlock().probability()) {
-                try (DebugContext.Scope s = debug.scope("CLOmodify", constTree); Indent i = debug.logAndIndent("Replacing %s = %s", tree.getVariable(), tree.getConstant().toValueString())) {
+            if (cost.getNumMaterializations() > 1 || cost.getBestCost() < tree.getBlock().getRelativeFrequency()) {
+                try (DebugContext.Scope s = debug.scope("CLOmodify", constTree);
+                                Indent i = debug.isLogEnabled() ? debug.logAndIndent("Replacing %s = %s", tree.getVariable(), tree.getConstant().toValueString()) : null) {
                     // mark original load for removal
                     deleteInstruction(tree);
                     constantsOptimized.increment(debug);

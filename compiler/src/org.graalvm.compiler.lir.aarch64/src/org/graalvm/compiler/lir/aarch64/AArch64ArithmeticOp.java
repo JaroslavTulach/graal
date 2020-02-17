@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2013, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2013, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -52,9 +54,17 @@ public enum AArch64ArithmeticOp {
     SUBS(ARITHMETIC),
     MUL,
     MULVS,
+    MNEG,
     DIV,
     SMULH,
     UMULH,
+    SMULL,
+    SMNEGL,
+    MADD,
+    MSUB,
+    FMADD,
+    SMADDL,
+    SMSUBL,
     REM,
     UDIV,
     UREM,
@@ -62,11 +72,15 @@ public enum AArch64ArithmeticOp {
     ANDS(LOGICAL),
     OR(LOGICAL),
     XOR(LOGICAL),
+    BIC,
+    ORN,
+    EON,
     SHL(SHIFT),
     LSHR(SHIFT),
     ASHR(SHIFT),
+    ROR(SHIFT),
+    RORV(SHIFT),
     ABS,
-
     FADD,
     FSUB,
     FMUL,
@@ -74,6 +88,9 @@ public enum AArch64ArithmeticOp {
     FREM,
     FNEG,
     FABS,
+    FRINTM,
+    FRINTN,
+    FRINTP,
     SQRT;
 
     /**
@@ -132,6 +149,15 @@ public enum AArch64ArithmeticOp {
                     break;
                 case FABS:
                     masm.fabs(size, dst, src);
+                    break;
+                case FRINTM:
+                    masm.frintm(size, dst, src);
+                    break;
+                case FRINTN:
+                    masm.frintn(size, dst, src);
+                    break;
+                case FRINTP:
+                    masm.frintp(size, dst, src);
                     break;
                 case SQRT:
                     masm.fsqrt(size, dst, src);
@@ -211,6 +237,9 @@ public enum AArch64ArithmeticOp {
                 case ASHR:
                     masm.ashr(size, dst, src, b.asLong());
                     break;
+                case ROR:
+                    masm.ror(size, dst, src, (int) b.asLong());
+                    break;
                 default:
                     throw GraalError.shouldNotReachHere("op=" + op.name());
             }
@@ -261,6 +290,15 @@ public enum AArch64ArithmeticOp {
                 case SMULH:
                     masm.smulh(size, dst, src1, src2);
                     break;
+                case MNEG:
+                    masm.mneg(size, dst, src1, src2);
+                    break;
+                case SMULL:
+                    masm.smull(size, dst, src1, src2);
+                    break;
+                case SMNEGL:
+                    masm.smnegl(size, dst, src1, src2);
+                    break;
                 case DIV:
                     masm.sdiv(size, dst, src1, src2);
                     break;
@@ -279,6 +317,15 @@ public enum AArch64ArithmeticOp {
                 case XOR:
                     masm.eor(size, dst, src1, src2);
                     break;
+                case BIC:
+                    masm.bic(size, dst, src1, src2);
+                    break;
+                case ORN:
+                    masm.orn(size, dst, src1, src2);
+                    break;
+                case EON:
+                    masm.eon(size, dst, src1, src2);
+                    break;
                 case SHL:
                     masm.shl(size, dst, src1, src2);
                     break;
@@ -287,6 +334,9 @@ public enum AArch64ArithmeticOp {
                     break;
                 case ASHR:
                     masm.ashr(size, dst, src1, src2);
+                    break;
+                case RORV:
+                    masm.rorv(size, dst, src1, src2);
                     break;
                 case FADD:
                     masm.fadd(size, dst, src1, src2);
@@ -353,8 +403,8 @@ public enum AArch64ArithmeticOp {
         }
     }
 
-    public static class AddSubShiftOp extends AArch64LIRInstruction {
-        private static final LIRInstructionClass<AddSubShiftOp> TYPE = LIRInstructionClass.create(AddSubShiftOp.class);
+    public static class BinaryShiftOp extends AArch64LIRInstruction {
+        private static final LIRInstructionClass<BinaryShiftOp> TYPE = LIRInstructionClass.create(BinaryShiftOp.class);
 
         @Opcode private final AArch64ArithmeticOp op;
         @Def(REG) protected AllocatableValue result;
@@ -364,11 +414,11 @@ public enum AArch64ArithmeticOp {
         private final int shiftAmt;
 
         /**
-         * Computes <code>result = src1 <op> src2 <shiftType> <shiftAmt></code>.
+         * <code>result = src1 <op> src2 <shiftType> <shiftAmt></code>.
          */
-        public AddSubShiftOp(AArch64ArithmeticOp op, AllocatableValue result, AllocatableValue src1, AllocatableValue src2, AArch64MacroAssembler.ShiftType shiftType, int shiftAmt) {
+        public BinaryShiftOp(AArch64ArithmeticOp op, AllocatableValue result, AllocatableValue src1, AllocatableValue src2,
+                        AArch64MacroAssembler.ShiftType shiftType, int shiftAmt) {
             super(TYPE);
-            assert op == ADD || op == SUB;
             this.op = op;
             this.result = result;
             this.src1 = src1;
@@ -387,8 +437,26 @@ public enum AArch64ArithmeticOp {
                 case SUB:
                     masm.sub(size, asRegister(result), asRegister(src1), asRegister(src2), shiftType, shiftAmt);
                     break;
+                case AND:
+                    masm.and(size, asRegister(result), asRegister(src1), asRegister(src2), shiftType, shiftAmt);
+                    break;
+                case OR:
+                    masm.or(size, asRegister(result), asRegister(src1), asRegister(src2), shiftType, shiftAmt);
+                    break;
+                case XOR:
+                    masm.eor(size, asRegister(result), asRegister(src1), asRegister(src2), shiftType, shiftAmt);
+                    break;
+                case BIC:
+                    masm.bic(size, asRegister(result), asRegister(src1), asRegister(src2), shiftType, shiftAmt);
+                    break;
+                case ORN:
+                    masm.orn(size, asRegister(result), asRegister(src1), asRegister(src2), shiftType, shiftAmt);
+                    break;
+                case EON:
+                    masm.eon(size, asRegister(result), asRegister(src1), asRegister(src2), shiftType, shiftAmt);
+                    break;
                 default:
-                    throw GraalError.shouldNotReachHere();
+                    throw GraalError.shouldNotReachHere("op=" + op.name());
             }
         }
     }
@@ -420,6 +488,54 @@ public enum AArch64ArithmeticOp {
         public void emitCode(CompilationResultBuilder crb, AArch64MacroAssembler masm) {
             int size = result.getPlatformKind().getSizeInBytes() * Byte.SIZE;
             masm.add(size, asRegister(result), asRegister(src1), asRegister(src2), extendType, shiftAmt);
+        }
+    }
+
+    public static class MultiplyAddSubOp extends AArch64LIRInstruction {
+        private static final LIRInstructionClass<MultiplyAddSubOp> TYPE = LIRInstructionClass.create(MultiplyAddSubOp.class);
+
+        @Opcode private final AArch64ArithmeticOp op;
+        @Def(REG) protected AllocatableValue result;
+        @Use(REG) protected AllocatableValue src1;
+        @Use(REG) protected AllocatableValue src2;
+        @Use(REG) protected AllocatableValue src3;
+
+        /**
+         * Computes <code>result = src3 +/- src1 * src2</code>.
+         */
+        public MultiplyAddSubOp(AArch64ArithmeticOp op, AllocatableValue result, AllocatableValue src1, AllocatableValue src2, AllocatableValue src3) {
+            super(TYPE);
+            this.op = op;
+            this.result = result;
+            this.src1 = src1;
+            this.src2 = src2;
+            this.src3 = src3;
+        }
+
+        @Override
+        public void emitCode(CompilationResultBuilder crb, AArch64MacroAssembler masm) {
+            int size = result.getPlatformKind().getSizeInBytes() * Byte.SIZE;
+            switch (op) {
+                case MADD:
+                    masm.madd(size, asRegister(result), asRegister(src1), asRegister(src2), asRegister(src3));
+                    break;
+                case MSUB:
+                    masm.msub(size, asRegister(result), asRegister(src1), asRegister(src2), asRegister(src3));
+                    break;
+                case FMADD:
+                    masm.fmadd(size, asRegister(result), asRegister(src1), asRegister(src2), asRegister(src3));
+                    break;
+                case SMADDL:
+                    assert size == 64;
+                    masm.smaddl(size, asRegister(result), asRegister(src1), asRegister(src2), asRegister(src3));
+                    break;
+                case SMSUBL:
+                    assert size == 64;
+                    masm.smsubl(size, asRegister(result), asRegister(src1), asRegister(src2), asRegister(src3));
+                    break;
+                default:
+                    throw GraalError.shouldNotReachHere();
+            }
         }
     }
 

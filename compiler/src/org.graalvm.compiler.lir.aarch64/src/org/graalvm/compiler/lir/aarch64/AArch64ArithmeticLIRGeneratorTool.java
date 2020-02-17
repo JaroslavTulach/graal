@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -22,10 +24,8 @@
  */
 package org.graalvm.compiler.lir.aarch64;
 
-import org.graalvm.compiler.lir.Variable;
 import org.graalvm.compiler.lir.gen.ArithmeticLIRGeneratorTool;
 
-import jdk.vm.ci.aarch64.AArch64Kind;
 import jdk.vm.ci.meta.Value;
 
 /**
@@ -37,5 +37,18 @@ public interface AArch64ArithmeticLIRGeneratorTool extends ArithmeticLIRGenerato
 
     Value emitCountTrailingZeros(Value value);
 
-    void emitCompareOp(AArch64Kind cmpKind, Variable left, Value right);
+    enum RoundingMode {
+        NEAREST(0),
+        DOWN(1),
+        UP(2),
+        TRUNCATE(3);
+
+        public final int encoding;
+
+        RoundingMode(int encoding) {
+            this.encoding = encoding;
+        }
+    }
+
+    Value emitRound(Value value, RoundingMode mode);
 }

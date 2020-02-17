@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2013, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2013, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -31,12 +33,21 @@ import com.oracle.truffle.api.nodes.RootNode;
 public class RootTestNode extends RootNode {
 
     private final String name;
-    @Child AbstractTestNode node;
+    private final boolean internal;
+    private final boolean captureFramesForTrace;
+
+    @Child private AbstractTestNode node;
 
     public RootTestNode(FrameDescriptor descriptor, String name, AbstractTestNode node) {
+        this(descriptor, name, node, false, false);
+    }
+
+    public RootTestNode(FrameDescriptor descriptor, String name, AbstractTestNode node, boolean internal, boolean captureFramesForTrace) {
         super(null, descriptor);
         this.name = name;
         this.node = node;
+        this.internal = internal;
+        this.captureFramesForTrace = captureFramesForTrace;
     }
 
     @Override
@@ -47,5 +58,15 @@ public class RootTestNode extends RootNode {
     @Override
     public String toString() {
         return name;
+    }
+
+    @Override
+    public boolean isInternal() {
+        return internal;
+    }
+
+    @Override
+    public boolean isCaptureFramesForTrace() {
+        return captureFramesForTrace;
     }
 }

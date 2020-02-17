@@ -1,12 +1,14 @@
 #
 # ----------------------------------------------------------------------------------------------------
 #
-# Copyright (c) 2007, 2016, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 2018, 2019, Oracle and/or its affiliates. All rights reserved.
 # DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
 #
 # This code is free software; you can redistribute it and/or modify it
 # under the terms of the GNU General Public License version 2 only, as
-# published by the Free Software Foundation.
+# published by the Free Software Foundation.  Oracle designates this
+# particular file as subject to the "Classpath" exception as provided
+# by Oracle in the LICENSE file that accompanied this code.
 #
 # This code is distributed in the hope that it will be useful, but WITHOUT
 # ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -24,68 +26,71 @@
 #
 # ----------------------------------------------------------------------------------------------------
 
-import os, shutil, zipfile, re
+from __future__ import print_function
+
+import os, shutil, re
 from os.path import join, exists
 from argparse import ArgumentParser, REMAINDER
 
 import mx
 
+import sys
+
+if sys.version_info[0] < 3:
+    _long = long # pylint: disable=undefined-variable
+else:
+    _long = int
+
 _suite = mx.suite('compiler')
 
-def _run_netbeans_app(app_name, env=None, args=None):
+def run_netbeans_app(app_name, env=None, args=None):
     args = [] if args is None else args
     dist = app_name.upper() + '_DIST'
     name = app_name.lower()
-    extractPath = join(_suite.get_output_root())
+    res = mx.library(dist)
+
+    assert res.isPackedResourceLibrary(), name + " should be a PackedResourceLibrary"
+    extractPath = res.get_path(resolve=True)
+
     if mx.get_os() == 'windows':
         executable = join(extractPath, name, 'bin', name + '.exe')
     else:
         executable = join(extractPath, name, 'bin', name)
-
-    # Check whether the current installation is up-to-date
-    versionFile = join(extractPath, name, mx.library(dist).sha1)
-    if exists(executable) and not exists(versionFile):
-        mx.log('Updating ' + app_name)
-        shutil.rmtree(join(extractPath, name))
-
-    archive = mx.library(dist).get_path(resolve=True)
-
-    if not exists(executable):
-        zf = zipfile.ZipFile(archive, 'r')
-        zf.extractall(extractPath)
-        with open(versionFile, 'a'):
-            os.utime(versionFile, None)
 
     if not exists(executable):
         mx.abort(app_name + ' binary does not exist: ' + executable)
 
     if mx.get_os() != 'windows':
         # Make sure that execution is allowed. The zip file does not always specfiy that correctly
-        os.chmod(executable, 0777)
-    mx.run([executable]+args, env=env)
+        os.chmod(executable, 0o777)
+    launch = [executable]
+    if not mx.get_opts().verbose:
+        launch.append('-J-Dnetbeans.logger.console=false')
+    mx.run(launch+args, env=env)
 
-def _igvJdk():
+def netbeans_jdk(appName):
     v8u20 = mx.VersionSpec("1.8.0_20")
     v8u40 = mx.VersionSpec("1.8.0_40")
-    v9 = mx.VersionSpec("1.9")
+    v11 = mx.VersionSpec("11") # IGV requires java.xml.bind which has been removed in 11 (JEP320)
     def _igvJdkVersionCheck(version):
-        # Remove v9 check once GR-3187 is resolved
-        return version < v9 and (version < v8u20 or version >= v8u40)
-    return mx.get_jdk(_igvJdkVersionCheck, versionDescription='>= 1.8 and < 1.8.0u20 or >= 1.8.0u40', purpose="running IGV").home
+        return (version < v8u20 or version >= v8u40) and version < v11
+    return mx.get_jdk(_igvJdkVersionCheck, versionDescription='(< 1.8.0u20 or >= 1.8.0u40) and < 11', purpose="running " + appName).home
 
 def igv(args):
-    """run the Ideal Graph Visualizer"""
-    env = dict(os.environ)
-    # make the jar for Batik 1.7 available.
-    env['IGV_BATIK_JAR'] = mx.library('BATIK').get_path(True)
-    env['jdkhome'] = _igvJdk()
-    _run_netbeans_app('IdealGraphVisualizer', env, args)
+    """(obsolete) informs about IGV"""
+    mx.warn(
+        """IGV (idealgraphvisualizer) is available from
+    https://www.oracle.com/technetwork/graalvm/downloads/index.html
+Please download the distribution and run
+    bin/idealgraphvisualizer
+from the GraalVM EE installation.
+""")
 
 def c1visualizer(args):
     """run the C1 Compiler Visualizer"""
     env = dict(os.environ)
-    env['jdkhome'] = _igvJdk()
-    _run_netbeans_app('C1Visualizer', env, args)
+    env['jdkhome'] = netbeans_jdk("C1 Visualizer")
+    run_netbeans_app('C1Visualizer', env, args)
 
 def hsdis(args, copyToDir=None):
     """download the hsdis library
@@ -103,18 +108,19 @@ def hsdis(args, copyToDir=None):
     libpattern = mx.add_lib_suffix('hsdis-' + mx.get_arch() + '-' + mx.get_os() + '-%s')
 
     sha1s = {
-        'att/hsdis-amd64-windows-%s.dll' : 'bcbd535a9568b5075ab41e96205e26a2bac64f72',
-        'att/hsdis-amd64-linux-%s.so' : '36a0b8e30fc370727920cc089f104bfb9cd508a0',
-        'att/hsdis-amd64-darwin-%s.dylib' : 'c1865e9a58ca773fdc1c5eea0a4dfda213420ffb',
-        'intel/hsdis-amd64-windows-%s.dll' : '6a388372cdd5fe905c1a26ced614334e405d1f30',
-        'intel/hsdis-amd64-linux-%s.so' : '0d031013db9a80d6c88330c42c983fbfa7053193',
-        'intel/hsdis-amd64-darwin-%s.dylib' : '67f6d23cbebd8998450a88b5bef362171f66f11a',
-        'hsdis-sparcv9-solaris-%s.so': '970640a9af0bd63641f9063c11275b371a59ee60',
-        'hsdis-sparcv9-linux-%s.so': '0c375986d727651dee1819308fbbc0de4927d5d9',
+        r'att\hsdis-amd64-windows-%s.dll' : 'bcbd535a9568b5075ab41e96205e26a2bac64f72',
+        r'att/hsdis-amd64-linux-%s.so' : '36a0b8e30fc370727920cc089f104bfb9cd508a0',
+        r'att/hsdis-amd64-darwin-%s.dylib' : 'c1865e9a58ca773fdc1c5eea0a4dfda213420ffb',
+        r'intel\hsdis-amd64-windows-%s.dll' : '6a388372cdd5fe905c1a26ced614334e405d1f30',
+        r'intel/hsdis-amd64-linux-%s.so' : '0d031013db9a80d6c88330c42c983fbfa7053193',
+        r'intel/hsdis-amd64-darwin-%s.dylib' : '67f6d23cbebd8998450a88b5bef362171f66f11a',
+        r'hsdis-sparcv9-solaris-%s.so': '970640a9af0bd63641f9063c11275b371a59ee60',
+        r'hsdis-sparcv9-linux-%s.so': '0c375986d727651dee1819308fbbc0de4927d5d9',
+        r'hsdis-aarch64-linux-%s.so': 'fcc9b70ac91c00db8a50b0d4345490a68e3743e1',
     }
 
     if flavor:
-        flavoredLib = flavor + "/" + libpattern
+        flavoredLib = join(flavor, libpattern)
     else:
         flavoredLib = libpattern
     if flavoredLib not in sha1s:
@@ -126,24 +132,32 @@ def hsdis(args, copyToDir=None):
     path = join(_suite.get_output_root(), lib)
     if not exists(path):
         sha1path = path + '.sha1'
-        mx.download_file_with_sha1('hsdis', path, ['https://lafo.ssw.uni-linz.ac.at/pub/hsdis/' + lib], sha1, sha1path, True, True, sources=False)
+        mx.download_file_with_sha1('hsdis', path, ['https://lafo.ssw.uni-linz.ac.at/pub/graal-external-deps/hsdis/' + lib.replace(os.sep, '/')], sha1, sha1path, True, True, sources=False)
 
     overwrite = True
     if copyToDir is None:
         # Try install hsdis into JAVA_HOME
         overwrite = False
-        base = mx.get_jdk().home
+        jdk = mx.get_jdk()
+        base = jdk.home
         if exists(join(base, 'jre')):
-            copyToDir = join(base, 'jre', 'lib')
-        else:
+            base = join(base, 'jre')
+        if mx.get_os() == 'darwin':
             copyToDir = join(base, 'lib')
+        elif mx.get_os() == 'windows':
+            copyToDir = join(base, 'bin')
+        else:
+            if jdk.javaCompliance >= '11':
+                copyToDir = join(base, 'lib')
+            else:
+                copyToDir = join(base, 'lib', mx.get_arch())
 
     if exists(copyToDir):
         dest = join(copyToDir, mx.add_lib_suffix('hsdis-' + mx.get_arch()))
         if exists(dest) and not overwrite:
             import filecmp
             # Only issue warning if existing lib is different
-            if filecmp.cmp(path, dest) == False:
+            if filecmp.cmp(path, dest) is False:
                 mx.warn('Not overwriting existing {} with {}'.format(dest, path))
         else:
             try:
@@ -177,7 +191,7 @@ def hcfdis(args):
             if len(addressAndSymbol) == 2:
                 address, symbol = addressAndSymbol
                 if address.startswith('0x'):
-                    address = long(address, 16)
+                    address = _long(address, 16)
                     symbols[address] = symbol
         for f in args.files:
             with open(f) as fp:
@@ -187,7 +201,7 @@ def hcfdis(args):
                 l = lines[i]
                 for m in addressRE.finditer(l):
                     sval = m.group(0)
-                    val = long(sval, 16)
+                    val = _long(sval, 16)
                     sym = symbols.get(val)
                     if sym:
                         l = l.replace(sval, sym)
@@ -197,7 +211,7 @@ def hcfdis(args):
                 mx.log('updating ' + f)
                 with open('new_' + f, "w") as fp:
                     for l in lines:
-                        print >> fp, l
+                        print(l, file=fp)
 
 def jol(args):
     """Java Object Layout"""

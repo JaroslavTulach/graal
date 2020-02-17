@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2017, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * The Universal Permissive License (UPL), Version 1.0
@@ -40,11 +40,9 @@
  */
 package com.oracle.truffle.sl.test;
 
-import java.io.IOException;
 import org.graalvm.polyglot.Context;
 import org.graalvm.polyglot.Source;
 import org.graalvm.polyglot.Value;
-import org.graalvm.polyglot.proxy.ProxyPrimitive;
 import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
@@ -64,24 +62,20 @@ public class SLInteropOperatorTest {
     }
 
     @Test
-    public void testAdd() throws IOException {
-        final Source src = Source.newBuilder("sl", "function testAdd(a,b) {return a + b;} function main() {return testAdd;}", "testAdd.sl").build();
+    public void testAdd() {
+        final Source src = Source.newBuilder("sl", "function testAdd(a,b) {return a + b;} function main() {return testAdd;}", "testAdd.sl").buildLiteral();
         final Value fnc = context.eval(src);
         Assert.assertTrue(fnc.canExecute());
-        final ProxyPrimitive left = () -> 1;
-        final ProxyPrimitive right = () -> 2;
-        final Value res = fnc.execute(left, right);
+        final Value res = fnc.execute(1, 2);
         Assert.assertTrue(res.isNumber());
         Assert.assertEquals(3, res.asInt());
     }
 
     @Test
-    public void testSub() throws IOException {
-        final Source src = Source.newBuilder("sl", "function testSub(a,b) {return a - b;} function main() {return testSub;}", "testSub.sl").build();
+    public void testSub() {
+        final Source src = Source.newBuilder("sl", "function testSub(a,b) {return a - b;} function main() {return testSub;}", "testSub.sl").buildLiteral();
         final Value fnc = context.eval(src);
-        final ProxyPrimitive left = () -> 1;
-        final ProxyPrimitive right = () -> 2;
-        final Value res = fnc.execute(left, right);
+        final Value res = fnc.execute(1, 2);
         Assert.assertTrue(res.isNumber());
         Assert.assertEquals(-1, res.asInt());
     }

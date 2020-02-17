@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2016, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -22,10 +24,8 @@
  */
 package org.graalvm.compiler.truffle.test;
 
-import static org.graalvm.compiler.truffle.TruffleCompilerOptions.TruffleBackgroundCompilation;
-import static org.graalvm.compiler.truffle.TruffleCompilerOptions.TruffleCompileImmediately;
-
-import org.graalvm.compiler.truffle.TruffleCompilerOptions;
+import org.graalvm.compiler.truffle.runtime.TruffleRuntimeOptions;
+import org.graalvm.compiler.truffle.runtime.SharedTruffleRuntimeOptions;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -39,12 +39,11 @@ import com.oracle.truffle.sl.test.SLTestSuite;
 @SLTestSuite(value = {"tests"}, testCaseDirectory = SLSimpleTestSuite.class)
 public class SLCompileImmediatelyTestSuite {
 
-    private static TruffleCompilerOptions.TruffleOptionsOverrideScope overrideScope;
+    private static TruffleRuntimeOptions.TruffleRuntimeOptionsOverrideScope overrideScope;
 
     @BeforeClass
     public static void beforeClass() {
         assert overrideScope == null;
-
         /*
          * We turn on the flag to compile every Truffle function immediately, on its first execution
          * in the interpreter. And we wait until compilation finishes so that we really execute the
@@ -53,7 +52,8 @@ public class SLCompileImmediatelyTestSuite {
          * it has all nodes in the uninitialized specialization. This means that most methods are
          * compiled multiple times, in different specialization states.
          */
-        overrideScope = TruffleCompilerOptions.overrideOptions(TruffleCompileImmediately, true, TruffleBackgroundCompilation, false);
+        overrideScope = TruffleRuntimeOptions.overrideOptions(SharedTruffleRuntimeOptions.TruffleCompileImmediately, true, SharedTruffleRuntimeOptions.TruffleBackgroundCompilation, false);
+
     }
 
     @AfterClass

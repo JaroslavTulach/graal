@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * The Universal Permissive License (UPL), Version 1.0
@@ -44,7 +44,6 @@ import com.oracle.truffle.api.Truffle;
 import com.oracle.truffle.api.frame.VirtualFrame;
 import com.oracle.truffle.api.nodes.LoopNode;
 import com.oracle.truffle.api.nodes.NodeInfo;
-import com.oracle.truffle.api.source.SourceSection;
 import com.oracle.truffle.sl.nodes.SLExpressionNode;
 import com.oracle.truffle.sl.nodes.SLStatementNode;
 
@@ -58,15 +57,8 @@ public final class SLWhileNode extends SLStatementNode {
     }
 
     @Override
-    public void setSourceSection(SourceSection section) {
-        super.setSourceSection(section);
-        /* Propagate the SourceSection also to the repeated loop body node. */
-        ((SLWhileRepeatingNode) loopNode.getRepeatingNode()).setSourceSection(section);
-    }
-
-    @Override
     public void executeVoid(VirtualFrame frame) {
-        loopNode.executeLoop(frame);
+        loopNode.execute(frame);
     }
 
 }

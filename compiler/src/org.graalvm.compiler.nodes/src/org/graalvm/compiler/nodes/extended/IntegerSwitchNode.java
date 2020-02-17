@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2009, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2009, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -24,6 +26,7 @@ package org.graalvm.compiler.nodes.extended;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -33,6 +36,7 @@ import org.graalvm.compiler.core.common.type.IntegerStamp;
 import org.graalvm.compiler.core.common.type.PrimitiveStamp;
 import org.graalvm.compiler.core.common.type.Stamp;
 import org.graalvm.compiler.core.common.type.StampFactory;
+import org.graalvm.compiler.graph.Node;
 import org.graalvm.compiler.graph.NodeClass;
 import org.graalvm.compiler.graph.spi.Simplifiable;
 import org.graalvm.compiler.graph.spi.SimplifierTool;
@@ -40,14 +44,15 @@ import org.graalvm.compiler.nodeinfo.NodeInfo;
 import org.graalvm.compiler.nodes.AbstractBeginNode;
 import org.graalvm.compiler.nodes.ConstantNode;
 import org.graalvm.compiler.nodes.FixedGuardNode;
-import org.graalvm.compiler.nodes.FixedNode;
 import org.graalvm.compiler.nodes.FixedWithNextNode;
 import org.graalvm.compiler.nodes.LogicNode;
+import org.graalvm.compiler.nodes.NodeView;
 import org.graalvm.compiler.nodes.ValueNode;
 import org.graalvm.compiler.nodes.calc.IntegerBelowNode;
 import org.graalvm.compiler.nodes.java.LoadIndexedNode;
 import org.graalvm.compiler.nodes.spi.LIRLowerable;
 import org.graalvm.compiler.nodes.spi.NodeLIRBuilderTool;
+import org.graalvm.compiler.nodes.spi.SwitchFoldable;
 import org.graalvm.compiler.nodes.util.GraphUtil;
 
 import jdk.vm.ci.meta.DeoptimizationAction;
@@ -60,7 +65,7 @@ import jdk.vm.ci.meta.JavaKind;
  * values. The actual implementation of the switch will be decided by the backend.
  */
 @NodeInfo
-public final class IntegerSwitchNode extends SwitchNode implements LIRLowerable, Simplifiable {
+public final class IntegerSwitchNode extends SwitchNode implements LIRLowerable, Simplifiable, SwitchFoldable {
     public static final NodeClass<IntegerSwitchNode> TYPE = NodeClass.create(IntegerSwitchNode.class);
 
     protected final int[] keys;
@@ -70,13 +75,26 @@ public final class IntegerSwitchNode extends SwitchNode implements LIRLowerable,
         assert keySuccessors.length == keys.length + 1;
         assert keySuccessors.length == keyProbabilities.length;
         this.keys = keys;
-        assert value.stamp() instanceof PrimitiveStamp && value.stamp().getStackKind().isNumericInteger();
+        assert value.stamp(NodeView.DEFAULT) instanceof PrimitiveStamp && value.stamp(NodeView.DEFAULT).getStackKind().isNumericInteger();
         assert assertSorted();
+        assert assertNoUntargettedSuccessor();
     }
 
     private boolean assertSorted() {
         for (int i = 1; i < keys.length; i++) {
             assert keys[i - 1] < keys[i];
+        }
+        return true;
+    }
+
+    private boolean assertNoUntargettedSuccessor() {
+        boolean[] checker = new boolean[successors.size()];
+        for (int successorIndex : keySuccessors) {
+            checker[successorIndex] = true;
+        }
+        checker[defaultSuccessorIndex()] = true;
+        for (boolean b : checker) {
+            assert b;
         }
         return true;
     }
@@ -99,6 +117,14 @@ public final class IntegerSwitchNode extends SwitchNode implements LIRLowerable,
     @Override
     public JavaConstant keyAt(int i) {
         return JavaConstant.forInt(keys[i]);
+    }
+
+    /**
+     * Gets the key at the specified index, as a java int.
+     */
+    @Override
+    public int intKeyAt(int i) {
+        return keys[i];
     }
 
     @Override
@@ -135,6 +161,7 @@ public final class IntegerSwitchNode extends SwitchNode implements LIRLowerable,
 
     @Override
     public void simplify(SimplifierTool tool) {
+        NodeView view = NodeView.from(tool);
         if (blockSuccessorCount() == 1) {
             tool.addToWorkList(defaultSuccessor());
             graph().removeSplitPropagate(this, defaultSuccessor());
@@ -142,9 +169,63 @@ public final class IntegerSwitchNode extends SwitchNode implements LIRLowerable,
             killOtherSuccessors(tool, successorIndexAtKey(value().asJavaConstant().asInt()));
         } else if (tryOptimizeEnumSwitch(tool)) {
             return;
-        } else if (tryRemoveUnreachableKeys(tool, value().stamp())) {
+        } else if (tryRemoveUnreachableKeys(tool, value().stamp(view))) {
+            return;
+        } else if (switchTransformationOptimization(tool)) {
             return;
         }
+    }
+
+    private void addSuccessorForDeletion(AbstractBeginNode defaultNode) {
+        successors.add(defaultNode);
+    }
+
+    @Override
+    public Node getNextSwitchFoldableBranch() {
+        return defaultSuccessor();
+    }
+
+    @Override
+    public boolean isInSwitch(ValueNode switchValue) {
+        return value == switchValue;
+    }
+
+    @Override
+    public void cutOffCascadeNode() {
+        AbstractBeginNode toKill = defaultSuccessor();
+        clearSuccessors();
+        addSuccessorForDeletion(toKill);
+    }
+
+    @Override
+    public void cutOffLowestCascadeNode() {
+        clearSuccessors();
+    }
+
+    @Override
+    public AbstractBeginNode getDefault() {
+        return defaultSuccessor();
+    }
+
+    @Override
+    public ValueNode switchValue() {
+        return value();
+    }
+
+    @Override
+    public boolean isNonInitializedProfile() {
+        int nbSuccessors = getSuccessorCount();
+        double prob = 0.0d;
+        for (int i = 0; i < nbSuccessors; i++) {
+            if (keyProbabilities[i] > 0.0d) {
+                if (prob == 0.0d) {
+                    prob = keyProbabilities[i];
+                } else if (keyProbabilities[i] != prob) {
+                    return false;
+                }
+            }
+        }
+        return true;
     }
 
     static final class KeyData {
@@ -204,7 +285,7 @@ public final class IntegerSwitchNode extends SwitchNode implements LIRLowerable,
      * because {@link Enum#ordinal()} can change when recompiling an enum, it cannot be used
      * directly as the value that is switched on. An intermediate int[] array, which is initialized
      * once at run time based on the actual {@link Enum#ordinal()} values, is used.
-     *
+     * <p>
      * The {@link ConstantFieldProvider} of Graal already detects the int[] arrays and marks them as
      * {@link ConstantNode#isDefaultStable() stable}, i.e., the array elements are constant. The
      * code in this method detects array loads from such a stable array and re-wires the switch to
@@ -216,7 +297,7 @@ public final class IntegerSwitchNode extends SwitchNode implements LIRLowerable,
             return false;
         }
         LoadIndexedNode loadIndexed = (LoadIndexedNode) value();
-        if (loadIndexed.usages().count() > 1) {
+        if (loadIndexed.hasMoreThanOneUsage()) {
             /*
              * The array load is necessary for other reasons too, so there is no benefit optimizing
              * the switch.
@@ -314,7 +395,7 @@ public final class IntegerSwitchNode extends SwitchNode implements LIRLowerable,
 
     private void doReplace(ValueNode newValue, List<KeyData> newKeyDatas, ArrayList<AbstractBeginNode> newSuccessors, int newDefaultSuccessor, double newDefaultProbability) {
         /* Sort the new keys (invariant of the IntegerSwitchNode). */
-        newKeyDatas.sort((k1, k2) -> k1.key - k2.key);
+        newKeyDatas.sort(Comparator.comparingInt(k -> k.key));
 
         /* Create the final data arrays. */
         int newKeyCount = newKeyDatas.size();
@@ -347,22 +428,29 @@ public final class IntegerSwitchNode extends SwitchNode implements LIRLowerable,
             }
         }
 
-        /* Remove dead successors. */
-        for (int i = 0; i < blockSuccessorCount(); i++) {
-            AbstractBeginNode successor = blockSuccessor(i);
-            if (!newSuccessors.contains(successor)) {
-                FixedNode fixedBranch = successor;
-                fixedBranch.predecessor().replaceFirstSuccessor(fixedBranch, null);
-                GraphUtil.killCFG(fixedBranch);
+        /*
+         * Surviving successors have to be cleaned before adding the new node to the graph. Keep the
+         * dead ones attached to the old node for later cleanup.
+         */
+        for (int i = 0; i < successors.size(); i++) {
+            if (newSuccessors.contains(successors.get(i))) {
+                successors.set(i, null);
             }
-            setBlockSuccessor(i, null);
         }
 
-        /* Create the new switch node and replace ourself with it. */
+        /*
+         * Create the new switch node. This is done before removing dead successors as `killCFG`
+         * could edit some of the inputs (e.g., if `newValue` is a loop-phi of the loop that dies
+         * while removing successors).
+         */
         AbstractBeginNode[] successorsArray = newSuccessors.toArray(new AbstractBeginNode[newSuccessors.size()]);
         SwitchNode newSwitch = graph().add(new IntegerSwitchNode(newValue, successorsArray, newKeys, newKeyProbabilities, newKeySuccessors));
+
+        /* Replace ourselves with the new switch */
         ((FixedWithNextNode) predecessor()).setNext(newSwitch);
-        GraphUtil.killWithUnusedFloatingInputs(this);
+
+        // Remove the old switch and the dead successors.
+        GraphUtil.killCFG(this);
     }
 
     @Override

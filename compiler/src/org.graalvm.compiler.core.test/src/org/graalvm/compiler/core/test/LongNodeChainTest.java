@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -33,9 +35,8 @@ import org.graalvm.compiler.nodes.ReturnNode;
 import org.graalvm.compiler.nodes.StructuredGraph;
 import org.graalvm.compiler.nodes.ValueNode;
 import org.graalvm.compiler.nodes.calc.AddNode;
-import org.graalvm.compiler.nodes.debug.OpaqueNode;
+import org.graalvm.compiler.nodes.extended.OpaqueNode;
 import org.graalvm.compiler.options.OptionValues;
-import org.graalvm.compiler.phases.common.CanonicalizerPhase;
 import org.graalvm.compiler.phases.schedule.SchedulePhase;
 import org.graalvm.compiler.phases.schedule.SchedulePhase.SchedulingStrategy;
 import org.graalvm.compiler.phases.tiers.HighTierContext;
@@ -44,7 +45,7 @@ public class LongNodeChainTest extends GraalCompilerTest {
 
     public static final int N = 10000;
 
-    private static final SchedulingStrategy[] Strategies = new SchedulingStrategy[]{SchedulingStrategy.EARLIEST};
+    private static final SchedulingStrategy[] Strategies = new SchedulingStrategy[]{SchedulingStrategy.EARLIEST_WITH_GUARD_ORDER};
 
     @Test
     public void testLongAddChain() {
@@ -69,7 +70,7 @@ public class LongNodeChainTest extends GraalCompilerTest {
                 addNode.setY(newAddNode);
                 addNode = newAddNode;
             }
-            opaque.replaceAndDelete(opaque.getValue());
+            opaque.remove();
         } else {
             value = constant;
             for (int i = 0; i < N; ++i) {
@@ -83,7 +84,7 @@ public class LongNodeChainTest extends GraalCompilerTest {
             new SchedulePhase(s).apply(graph);
         }
 
-        new CanonicalizerPhase().apply(graph, context);
+        this.createCanonicalizerPhase().apply(graph, context);
         JavaConstant asConstant = (JavaConstant) returnNode.result().asConstant();
         Assert.assertEquals(N + 1, asConstant.asInt());
     }

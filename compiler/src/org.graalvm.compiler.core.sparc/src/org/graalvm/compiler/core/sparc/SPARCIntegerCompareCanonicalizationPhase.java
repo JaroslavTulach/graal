@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2015, 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -27,6 +29,7 @@ import org.graalvm.compiler.core.common.type.Stamp;
 import org.graalvm.compiler.debug.GraalError;
 import org.graalvm.compiler.graph.Node;
 import org.graalvm.compiler.nodes.ConstantNode;
+import org.graalvm.compiler.nodes.NodeView;
 import org.graalvm.compiler.nodes.StructuredGraph;
 import org.graalvm.compiler.nodes.ValueNode;
 import org.graalvm.compiler.nodes.calc.CompareNode;
@@ -43,7 +46,7 @@ import jdk.vm.ci.meta.JavaConstant;
  * is not 32 or 64 bit into either a 32 or 64 bit compare by sign extending the input values.
  *
  * Why we do this in the HIR instead in the LIR? This enables the pattern matcher
- * {@link SPARCNodeMatchRules#signExtend(SignExtendNode, org.graalvm.compiler.nodes.memory.Access)}
+ * {@link SPARCNodeMatchRules#signExtend(SignExtendNode, org.graalvm.compiler.nodes.memory.AddressableMemoryAccess)}
  * to do it's job and replace loads with sign extending ones.
  */
 public class SPARCIntegerCompareCanonicalizationPhase extends Phase {
@@ -59,7 +62,7 @@ public class SPARCIntegerCompareCanonicalizationPhase extends Phase {
     }
 
     private static void min32(CompareNode enode, ValueNode v) {
-        Stamp s = v.stamp();
+        Stamp s = v.stamp(NodeView.DEFAULT);
         if (s instanceof IntegerStamp) {
             int bits = ((IntegerStamp) s).getBits();
             if (bits != 32 && bits != 64) {

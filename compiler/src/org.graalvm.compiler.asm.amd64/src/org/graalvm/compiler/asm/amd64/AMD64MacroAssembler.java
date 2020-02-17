@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2009, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2009, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -22,17 +24,26 @@
  */
 package org.graalvm.compiler.asm.amd64;
 
-import static jdk.vm.ci.amd64.AMD64.rax;
-import static jdk.vm.ci.amd64.AMD64.rcx;
-import static jdk.vm.ci.amd64.AMD64.rdx;
-import static jdk.vm.ci.amd64.AMD64.rsp;
 import static org.graalvm.compiler.asm.amd64.AMD64AsmOptions.UseIncDec;
 import static org.graalvm.compiler.asm.amd64.AMD64AsmOptions.UseXmmLoadAndClearUpper;
 import static org.graalvm.compiler.asm.amd64.AMD64AsmOptions.UseXmmRegToRegMoveAll;
+import static org.graalvm.compiler.asm.amd64.AMD64Assembler.AMD64BinaryArithmetic.ADD;
+import static org.graalvm.compiler.asm.amd64.AMD64Assembler.AMD64BinaryArithmetic.AND;
+import static org.graalvm.compiler.asm.amd64.AMD64Assembler.AMD64BinaryArithmetic.CMP;
+import static org.graalvm.compiler.asm.amd64.AMD64Assembler.AMD64BinaryArithmetic.SUB;
+import static org.graalvm.compiler.asm.amd64.AMD64Assembler.AMD64MOp.DEC;
+import static org.graalvm.compiler.asm.amd64.AMD64Assembler.AMD64MOp.INC;
+import static org.graalvm.compiler.asm.amd64.AMD64BaseAssembler.OperandSize.DWORD;
+import static org.graalvm.compiler.asm.amd64.AMD64BaseAssembler.OperandSize.QWORD;
+import static org.graalvm.compiler.core.common.NumUtil.isByte;
+
+import java.util.function.IntConsumer;
+import java.util.function.Supplier;
 
 import org.graalvm.compiler.asm.Label;
+import org.graalvm.compiler.asm.amd64.AVXKind.AVXSize;
 import org.graalvm.compiler.core.common.NumUtil;
-import org.graalvm.compiler.asm.amd64.AMD64Address.Scale;
+import org.graalvm.compiler.options.OptionValues;
 
 import jdk.vm.ci.amd64.AMD64;
 import jdk.vm.ci.amd64.AMD64Kind;
@@ -46,6 +57,10 @@ public class AMD64MacroAssembler extends AMD64Assembler {
 
     public AMD64MacroAssembler(TargetDescription target) {
         super(target);
+    }
+
+    public AMD64MacroAssembler(TargetDescription target, OptionValues optionValues) {
+        super(target, optionValues);
     }
 
     public final void decrementq(Register reg, int value) {
@@ -227,43 +242,76 @@ public class AMD64MacroAssembler extends AMD64Assembler {
     public void movflt(Register dst, Register src) {
         assert dst.getRegisterCategory().equals(AMD64.XMM) && src.getRegisterCategory().equals(AMD64.XMM);
         if (UseXmmRegToRegMoveAll) {
-            movaps(dst, src);
+            if (isAVX512Register(dst) || isAVX512Register(src)) {
+                VexMoveOp.VMOVAPS.emit(this, AVXSize.XMM, dst, src);
+            } else {
+                movaps(dst, src);
+            }
         } else {
-            movss(dst, src);
+            if (isAVX512Register(dst) || isAVX512Register(src)) {
+                VexMoveOp.VMOVSS.emit(this, AVXSize.XMM, dst, src);
+            } else {
+                movss(dst, src);
+            }
         }
     }
 
     public void movflt(Register dst, AMD64Address src) {
         assert dst.getRegisterCategory().equals(AMD64.XMM);
-        movss(dst, src);
+        if (isAVX512Register(dst)) {
+            VexMoveOp.VMOVSS.emit(this, AVXSize.XMM, dst, src);
+        } else {
+            movss(dst, src);
+        }
     }
 
     public void movflt(AMD64Address dst, Register src) {
         assert src.getRegisterCategory().equals(AMD64.XMM);
-        movss(dst, src);
+        if (isAVX512Register(src)) {
+            VexMoveOp.VMOVSS.emit(this, AVXSize.XMM, dst, src);
+        } else {
+            movss(dst, src);
+        }
     }
 
     public void movdbl(Register dst, Register src) {
         assert dst.getRegisterCategory().equals(AMD64.XMM) && src.getRegisterCategory().equals(AMD64.XMM);
         if (UseXmmRegToRegMoveAll) {
-            movapd(dst, src);
+            if (isAVX512Register(dst) || isAVX512Register(src)) {
+                VexMoveOp.VMOVAPD.emit(this, AVXSize.XMM, dst, src);
+            } else {
+                movapd(dst, src);
+            }
         } else {
-            movsd(dst, src);
+            if (isAVX512Register(dst) || isAVX512Register(src)) {
+                VexMoveOp.VMOVSD.emit(this, AVXSize.XMM, dst, src);
+            } else {
+                movsd(dst, src);
+            }
         }
     }
 
     public void movdbl(Register dst, AMD64Address src) {
         assert dst.getRegisterCategory().equals(AMD64.XMM);
         if (UseXmmLoadAndClearUpper) {
-            movsd(dst, src);
+            if (isAVX512Register(dst)) {
+                VexMoveOp.VMOVSD.emit(this, AVXSize.XMM, dst, src);
+            } else {
+                movsd(dst, src);
+            }
         } else {
+            assert !isAVX512Register(dst);
             movlpd(dst, src);
         }
     }
 
     public void movdbl(AMD64Address dst, Register src) {
         assert src.getRegisterCategory().equals(AMD64.XMM);
-        movsd(dst, src);
+        if (isAVX512Register(src)) {
+            VexMoveOp.VMOVSD.emit(this, AVXSize.XMM, dst, src);
+        } else {
+            movsd(dst, src);
+        }
     }
 
     /**
@@ -278,7 +326,16 @@ public class AMD64MacroAssembler extends AMD64Assembler {
             movl(dst, (int) (src & 0xFFFFFFFF));
             movl(high, (int) (src >> 32));
         }
+    }
 
+    public final void setl(ConditionFlag cc, Register dst) {
+        setb(cc, dst);
+        movzbl(dst, dst);
+    }
+
+    public final void setq(ConditionFlag cc, Register dst) {
+        setb(cc, dst);
+        movzbq(dst, dst);
     }
 
     public final void flog(Register dest, Register value, boolean base10) {
@@ -332,433 +389,275 @@ public class AMD64MacroAssembler extends AMD64Assembler {
         addq(AMD64.rsp, AMD64Kind.DOUBLE.getSizeInBytes());
     }
 
-    // IndexOf for constant substrings with size >= 8 chars
-    // which don't need to be loaded through stack.
-    public void stringIndexofC8(Register str1, Register str2,
-                    Register cnt1, Register cnt2,
-                    int intCnt2, Register result,
-                    Register vec, Register tmp) {
-        // assert(UseSSE42Intrinsics, "SSE4.2 is required");
-
-        // This method uses pcmpestri inxtruction with bound registers
-        // inputs:
-        // xmm - substring
-        // rax - substring length (elements count)
-        // mem - scanned string
-        // rdx - string length (elements count)
-        // 0xd - mode: 1100 (substring search) + 01 (unsigned shorts)
-        // outputs:
-        // rcx - matched index in string
-        assert cnt1.equals(rdx) && cnt2.equals(rax) && tmp.equals(rcx) : "pcmpestri";
-
-        Label reloadSubstr = new Label();
-        Label scanToSubstr = new Label();
-        Label scanSubstr = new Label();
-        Label retFound = new Label();
-        Label retNotFound = new Label();
-        Label exit = new Label();
-        Label foundSubstr = new Label();
-        Label matchSubstrHead = new Label();
-        Label reloadStr = new Label();
-        Label foundCandidate = new Label();
-
-        // Note, inline_string_indexOf() generates checks:
-        // if (substr.count > string.count) return -1;
-        // if (substr.count == 0) return 0;
-        assert intCnt2 >= 8 : "this code isused only for cnt2 >= 8 chars";
-
-        // Load substring.
-        movdqu(vec, new AMD64Address(str2, 0));
-        movl(cnt2, intCnt2);
-        movq(result, str1); // string addr
-
-        if (intCnt2 > 8) {
-            jmpb(scanToSubstr);
-
-            // Reload substr for rescan, this code
-            // is executed only for large substrings (> 8 chars)
-            bind(reloadSubstr);
-            movdqu(vec, new AMD64Address(str2, 0));
-            negq(cnt2); // Jumped here with negative cnt2, convert to positive
-
-            bind(reloadStr);
-            // We came here after the beginning of the substring was
-            // matched but the rest of it was not so we need to search
-            // again. Start from the next element after the previous match.
-
-            // cnt2 is number of substring reminding elements and
-            // cnt1 is number of string reminding elements when cmp failed.
-            // Restored cnt1 = cnt1 - cnt2 + int_cnt2
-            subl(cnt1, cnt2);
-            addl(cnt1, intCnt2);
-            movl(cnt2, intCnt2); // Now restore cnt2
-
-            decrementl(cnt1, 1);     // Shift to next element
-            cmpl(cnt1, cnt2);
-            jccb(ConditionFlag.Negative, retNotFound);  // Left less then substring
-
-            addq(result, 2);
-
-        } // (int_cnt2 > 8)
-
-        // Scan string for start of substr in 16-byte vectors
-        bind(scanToSubstr);
-        pcmpestri(vec, new AMD64Address(result, 0), 0x0d);
-        jccb(ConditionFlag.Below, foundCandidate);   // CF == 1
-        subl(cnt1, 8);
-        jccb(ConditionFlag.LessEqual, retNotFound); // Scanned full string
-        cmpl(cnt1, cnt2);
-        jccb(ConditionFlag.Negative, retNotFound);  // Left less then substring
-        addq(result, 16);
-        jmpb(scanToSubstr);
-
-        // Found a potential substr
-        bind(foundCandidate);
-        // Matched whole vector if first element matched (tmp(rcx) == 0).
-        if (intCnt2 == 8) {
-            jccb(ConditionFlag.Overflow, retFound);    // OF == 1
-        } else { // int_cnt2 > 8
-            jccb(ConditionFlag.Overflow, foundSubstr);
-        }
-        // After pcmpestri tmp(rcx) contains matched element index
-        // Compute start addr of substr
-        leaq(result, new AMD64Address(result, tmp, Scale.Times2, 0));
-
-        // Make sure string is still long enough
-        subl(cnt1, tmp);
-        cmpl(cnt1, cnt2);
-        if (intCnt2 == 8) {
-            jccb(ConditionFlag.GreaterEqual, scanToSubstr);
-        } else { // int_cnt2 > 8
-            jccb(ConditionFlag.GreaterEqual, matchSubstrHead);
-        }
-        // Left less then substring.
-
-        bind(retNotFound);
-        movl(result, -1);
-        jmpb(exit);
-
-        if (intCnt2 > 8) {
-            // This code is optimized for the case when whole substring
-            // is matched if its head is matched.
-            bind(matchSubstrHead);
-            pcmpestri(vec, new AMD64Address(result, 0), 0x0d);
-            // Reload only string if does not match
-            jccb(ConditionFlag.NoOverflow, reloadStr); // OF == 0
-
-            Label contScanSubstr = new Label();
-            // Compare the rest of substring (> 8 chars).
-            bind(foundSubstr);
-            // First 8 chars are already matched.
-            negq(cnt2);
-            addq(cnt2, 8);
-
-            bind(scanSubstr);
-            subl(cnt1, 8);
-            cmpl(cnt2, -8); // Do not read beyond substring
-            jccb(ConditionFlag.LessEqual, contScanSubstr);
-            // Back-up strings to avoid reading beyond substring:
-            // cnt1 = cnt1 - cnt2 + 8
-            addl(cnt1, cnt2); // cnt2 is negative
-            addl(cnt1, 8);
-            movl(cnt2, 8);
-            negq(cnt2);
-            bind(contScanSubstr);
-            if (intCnt2 < 1024 * 1024 * 1024) {
-                movdqu(vec, new AMD64Address(str2, cnt2, Scale.Times2, intCnt2 * 2));
-                pcmpestri(vec, new AMD64Address(result, cnt2, Scale.Times2, intCnt2 * 2), 0x0d);
-            } else {
-                // calculate index in register to avoid integer overflow (int_cnt2*2)
-                movl(tmp, intCnt2);
-                addq(tmp, cnt2);
-                movdqu(vec, new AMD64Address(str2, tmp, Scale.Times2, 0));
-                pcmpestri(vec, new AMD64Address(result, tmp, Scale.Times2, 0), 0x0d);
-            }
-            // Need to reload strings pointers if not matched whole vector
-            jcc(ConditionFlag.NoOverflow, reloadSubstr); // OF == 0
-            addq(cnt2, 8);
-            jcc(ConditionFlag.Negative, scanSubstr);
-            // Fall through if found full substring
-
-        } // (int_cnt2 > 8)
-
-        bind(retFound);
-        // Found result if we matched full small substring.
-        // Compute substr offset
-        subq(result, str1);
-        shrl(result, 1); // index
-        bind(exit);
-
-    } // string_indexofC8
-
-    // Small strings are loaded through stack if they cross page boundary.
-    public void stringIndexOf(Register str1, Register str2,
-                    Register cnt1, Register cnt2,
-                    int intCnt2, Register result,
-                    Register vec, Register tmp, int vmPageSize) {
-        //
-        // int_cnt2 is length of small (< 8 chars) constant substring
-        // or (-1) for non constant substring in which case its length
-        // is in cnt2 register.
-        //
-        // Note, inline_string_indexOf() generates checks:
-        // if (substr.count > string.count) return -1;
-        // if (substr.count == 0) return 0;
-        //
-        assert intCnt2 == -1 || (0 < intCnt2 && intCnt2 < 8) : "should be != 0";
-
-        // This method uses pcmpestri instruction with bound registers
-        // inputs:
-        // xmm - substring
-        // rax - substring length (elements count)
-        // mem - scanned string
-        // rdx - string length (elements count)
-        // 0xd - mode: 1100 (substring search) + 01 (unsigned shorts)
-        // outputs:
-        // rcx - matched index in string
-        assert cnt1.equals(rdx) && cnt2.equals(rax) && tmp.equals(rcx) : "pcmpestri";
-
-        Label reloadSubstr = new Label();
-        Label scanToSubstr = new Label();
-        Label scanSubstr = new Label();
-        Label adjustStr = new Label();
-        Label retFound = new Label();
-        Label retNotFound = new Label();
-        Label cleanup = new Label();
-        Label foundSubstr = new Label();
-        Label foundCandidate = new Label();
-
-        int wordSize = 8;
-        // We don't know where these strings are located
-        // and we can't read beyond them. Load them through stack.
-        Label bigStrings = new Label();
-        Label checkStr = new Label();
-        Label copySubstr = new Label();
-        Label copyStr = new Label();
-
-        movq(tmp, rsp); // save old SP
-
-        if (intCnt2 > 0) {     // small (< 8 chars) constant substring
-            if (intCnt2 == 1) {  // One char
-                movzwl(result, new AMD64Address(str2, 0));
-                movdl(vec, result); // move 32 bits
-            } else if (intCnt2 == 2) { // Two chars
-                movdl(vec, new AMD64Address(str2, 0)); // move 32 bits
-            } else if (intCnt2 == 4) { // Four chars
-                movq(vec, new AMD64Address(str2, 0));  // move 64 bits
-            } else { // cnt2 = { 3, 5, 6, 7 }
-                // Array header size is 12 bytes in 32-bit VM
-                // + 6 bytes for 3 chars == 18 bytes,
-                // enough space to load vec and shift.
-                movdqu(vec, new AMD64Address(str2, (intCnt2 * 2) - 16));
-                psrldq(vec, 16 - (intCnt2 * 2));
-            }
-        } else { // not constant substring
-            cmpl(cnt2, 8);
-            jccb(ConditionFlag.AboveEqual, bigStrings); // Both strings are big enough
-
-            // We can read beyond string if str+16 does not cross page boundary
-            // since heaps are aligned and mapped by pages.
-            assert vmPageSize < 1024 * 1024 * 1024 : "default page should be small";
-            movl(result, str2); // We need only low 32 bits
-            andl(result, (vmPageSize - 1));
-            cmpl(result, (vmPageSize - 16));
-            jccb(ConditionFlag.BelowEqual, checkStr);
-
-            // Move small strings to stack to allow load 16 bytes into vec.
-            subq(rsp, 16);
-            int stackOffset = wordSize - 2;
-            push(cnt2);
-
-            bind(copySubstr);
-            movzwl(result, new AMD64Address(str2, cnt2, Scale.Times2, -2));
-            movw(new AMD64Address(rsp, cnt2, Scale.Times2, stackOffset), result);
-            decrementl(cnt2, 1);
-            jccb(ConditionFlag.NotZero, copySubstr);
-
-            pop(cnt2);
-            movq(str2, rsp);  // New substring address
-        } // non constant
-
-        bind(checkStr);
-        cmpl(cnt1, 8);
-        jccb(ConditionFlag.AboveEqual, bigStrings);
-
-        // Check cross page boundary.
-        movl(result, str1); // We need only low 32 bits
-        andl(result, (vmPageSize - 1));
-        cmpl(result, (vmPageSize - 16));
-        jccb(ConditionFlag.BelowEqual, bigStrings);
-
-        subq(rsp, 16);
-        int stackOffset = -2;
-        if (intCnt2 < 0) { // not constant
-            push(cnt2);
-            stackOffset += wordSize;
-        }
-        movl(cnt2, cnt1);
-
-        bind(copyStr);
-        movzwl(result, new AMD64Address(str1, cnt2, Scale.Times2, -2));
-        movw(new AMD64Address(rsp, cnt2, Scale.Times2, stackOffset), result);
-        decrementl(cnt2, 1);
-        jccb(ConditionFlag.NotZero, copyStr);
-
-        if (intCnt2 < 0) { // not constant
-            pop(cnt2);
-        }
-        movq(str1, rsp);  // New string address
-
-        bind(bigStrings);
-        // Load substring.
-        if (intCnt2 < 0) { // -1
-            movdqu(vec, new AMD64Address(str2, 0));
-            push(cnt2);       // substr count
-            push(str2);       // substr addr
-            push(str1);       // string addr
-        } else {
-            // Small (< 8 chars) constant substrings are loaded already.
-            movl(cnt2, intCnt2);
-        }
-        push(tmp);  // original SP
-        // Finished loading
-
-        // ========================================================
-        // Start search
-        //
-
-        movq(result, str1); // string addr
-
-        if (intCnt2 < 0) {  // Only for non constant substring
-            jmpb(scanToSubstr);
-
-            // SP saved at sp+0
-            // String saved at sp+1*wordSize
-            // Substr saved at sp+2*wordSize
-            // Substr count saved at sp+3*wordSize
-
-            // Reload substr for rescan, this code
-            // is executed only for large substrings (> 8 chars)
-            bind(reloadSubstr);
-            movq(str2, new AMD64Address(rsp, 2 * wordSize));
-            movl(cnt2, new AMD64Address(rsp, 3 * wordSize));
-            movdqu(vec, new AMD64Address(str2, 0));
-            // We came here after the beginning of the substring was
-            // matched but the rest of it was not so we need to search
-            // again. Start from the next element after the previous match.
-            subq(str1, result); // Restore counter
-            shrl(str1, 1);
-            addl(cnt1, str1);
-            decrementl(cnt1);   // Shift to next element
-            cmpl(cnt1, cnt2);
-            jccb(ConditionFlag.Negative, retNotFound);  // Left less then substring
-
-            addq(result, 2);
-        } // non constant
-
-        // Scan string for start of substr in 16-byte vectors
-        bind(scanToSubstr);
-        assert cnt1.equals(rdx) && cnt2.equals(rax) && tmp.equals(rcx) : "pcmpestri";
-        pcmpestri(vec, new AMD64Address(result, 0), 0x0d);
-        jccb(ConditionFlag.Below, foundCandidate);   // CF == 1
-        subl(cnt1, 8);
-        jccb(ConditionFlag.LessEqual, retNotFound); // Scanned full string
-        cmpl(cnt1, cnt2);
-        jccb(ConditionFlag.Negative, retNotFound);  // Left less then substring
-        addq(result, 16);
-
-        bind(adjustStr);
-        cmpl(cnt1, 8); // Do not read beyond string
-        jccb(ConditionFlag.GreaterEqual, scanToSubstr);
-        // Back-up string to avoid reading beyond string.
-        leaq(result, new AMD64Address(result, cnt1, Scale.Times2, -16));
-        movl(cnt1, 8);
-        jmpb(scanToSubstr);
-
-        // Found a potential substr
-        bind(foundCandidate);
-        // After pcmpestri tmp(rcx) contains matched element index
-
-        // Make sure string is still long enough
-        subl(cnt1, tmp);
-        cmpl(cnt1, cnt2);
-        jccb(ConditionFlag.GreaterEqual, foundSubstr);
-        // Left less then substring.
-
-        bind(retNotFound);
-        movl(result, -1);
-        jmpb(cleanup);
-
-        bind(foundSubstr);
-        // Compute start addr of substr
-        leaq(result, new AMD64Address(result, tmp, Scale.Times2));
-
-        if (intCnt2 > 0) { // Constant substring
-            // Repeat search for small substring (< 8 chars)
-            // from new point without reloading substring.
-            // Have to check that we don't read beyond string.
-            cmpl(tmp, 8 - intCnt2);
-            jccb(ConditionFlag.Greater, adjustStr);
-            // Fall through if matched whole substring.
-        } else { // non constant
-            assert intCnt2 == -1 : "should be != 0";
-
-            addl(tmp, cnt2);
-            // Found result if we matched whole substring.
-            cmpl(tmp, 8);
-            jccb(ConditionFlag.LessEqual, retFound);
-
-            // Repeat search for small substring (<= 8 chars)
-            // from new point 'str1' without reloading substring.
-            cmpl(cnt2, 8);
-            // Have to check that we don't read beyond string.
-            jccb(ConditionFlag.LessEqual, adjustStr);
-
-            Label checkNext = new Label();
-            Label contScanSubstr = new Label();
-            Label retFoundLong = new Label();
-            // Compare the rest of substring (> 8 chars).
-            movq(str1, result);
-
-            cmpl(tmp, cnt2);
-            // First 8 chars are already matched.
-            jccb(ConditionFlag.Equal, checkNext);
-
-            bind(scanSubstr);
-            pcmpestri(vec, new AMD64Address(str1, 0), 0x0d);
-            // Need to reload strings pointers if not matched whole vector
-            jcc(ConditionFlag.NoOverflow, reloadSubstr); // OF == 0
-
-            bind(checkNext);
-            subl(cnt2, 8);
-            jccb(ConditionFlag.LessEqual, retFoundLong); // Found full substring
-            addq(str1, 16);
-            addq(str2, 16);
-            subl(cnt1, 8);
-            cmpl(cnt2, 8); // Do not read beyond substring
-            jccb(ConditionFlag.GreaterEqual, contScanSubstr);
-            // Back-up strings to avoid reading beyond substring.
-            leaq(str2, new AMD64Address(str2, cnt2, Scale.Times2, -16));
-            leaq(str1, new AMD64Address(str1, cnt2, Scale.Times2, -16));
-            subl(cnt1, cnt2);
-            movl(cnt2, 8);
-            addl(cnt1, 8);
-            bind(contScanSubstr);
-            movdqu(vec, new AMD64Address(str2, 0));
-            jmpb(scanSubstr);
-
-            bind(retFoundLong);
-            movq(str1, new AMD64Address(rsp, wordSize));
-        } // non constant
-
-        bind(retFound);
-        // Compute substr offset
-        subq(result, str1);
-        shrl(result, 1); // index
-
-        bind(cleanup);
-        pop(rsp); // restore SP
-
+    /**
+     * Emit a direct call to a fixed address, which will be patched later during code installation.
+     *
+     * @param align indicates whether the displacement bytes (offset by
+     *            {@code callDisplacementOffset}) of this call instruction should be aligned to
+     *            {@code wordSize}.
+     * @return where the actual call instruction starts.
+     */
+    public final int directCall(boolean align, int callDisplacementOffset, int wordSize) {
+        emitAlignmentForDirectCall(align, callDisplacementOffset, wordSize);
+        testAndAlign(5);
+        // After padding to mitigate JCC erratum, the displacement may be unaligned again. The
+        // previous pass is essential because JCC erratum padding may not trigger without the
+        // displacement alignment.
+        emitAlignmentForDirectCall(align, callDisplacementOffset, wordSize);
+        int beforeCall = position();
+        call();
+        return beforeCall;
     }
 
+    private void emitAlignmentForDirectCall(boolean align, int callDisplacementOffset, int wordSize) {
+        if (align) {
+            // make sure that the displacement word of the call ends up word aligned
+            int offset = position();
+            offset += callDisplacementOffset;
+            int modulus = wordSize;
+            if (offset % modulus != 0) {
+                nop(modulus - offset % modulus);
+            }
+        }
+    }
+
+    public final int indirectCall(Register callReg) {
+        int bytesToEmit = needsRex(callReg) ? 3 : 2;
+        testAndAlign(bytesToEmit);
+        int beforeCall = position();
+        call(callReg);
+        assert beforeCall + bytesToEmit == position();
+        return beforeCall;
+    }
+
+    public final int directCall(long address, Register scratch) {
+        int bytesToEmit = needsRex(scratch) ? 13 : 12;
+        testAndAlign(bytesToEmit);
+        int beforeCall = position();
+        movq(scratch, address);
+        call(scratch);
+        assert beforeCall + bytesToEmit == position();
+        return beforeCall;
+    }
+
+    public final int directJmp(long address, Register scratch) {
+        int bytesToEmit = needsRex(scratch) ? 13 : 12;
+        testAndAlign(bytesToEmit);
+        int beforeJmp = position();
+        movq(scratch, address);
+        jmpWithoutAlignment(scratch);
+        assert beforeJmp + bytesToEmit == position();
+        return beforeJmp;
+    }
+
+    // This should guarantee that the alignment in AMD64Assembler.jcc methods will be not triggered.
+    private void alignFusedPair(Label branchTarget, boolean isShortJmp, int prevOpInBytes) {
+        assert prevOpInBytes < 26 : "Fused pair may be longer than 0x20 bytes.";
+        if (branchTarget == null) {
+            testAndAlign(prevOpInBytes + 6);
+        } else if (isShortJmp) {
+            testAndAlign(prevOpInBytes + 2);
+        } else if (!branchTarget.isBound()) {
+            testAndAlign(prevOpInBytes + 6);
+        } else {
+            long disp = branchTarget.position() - (position() + prevOpInBytes);
+            // assuming short jump first
+            if (isByte(disp - 2)) {
+                testAndAlign(prevOpInBytes + 2);
+                // After alignment, isByte(disp - shortSize) might not hold. Need to check
+                // again.
+                disp = branchTarget.position() - (position() + prevOpInBytes);
+                if (isByte(disp - 2)) {
+                    return;
+                }
+            }
+            testAndAlign(prevOpInBytes + 6);
+        }
+    }
+
+    private void applyMIOpAndJcc(AMD64MIOp op, OperandSize size, Register src, int imm32, ConditionFlag cc, Label branchTarget, boolean isShortJmp, boolean annotateImm,
+                    IntConsumer applyBeforeFusedPair) {
+        final int bytesToEmit = getPrefixInBytes(size, src, op.srcIsByte) + OPCODE_IN_BYTES + MODRM_IN_BYTES + op.immediateSize(size);
+        alignFusedPair(branchTarget, isShortJmp, bytesToEmit);
+        final int beforeFusedPair = position();
+        if (applyBeforeFusedPair != null) {
+            applyBeforeFusedPair.accept(beforeFusedPair);
+        }
+        op.emit(this, size, src, imm32, annotateImm);
+        assert beforeFusedPair + bytesToEmit == position();
+        jcc(cc, branchTarget, isShortJmp);
+        assert ensureWithinBoundary(beforeFusedPair);
+    }
+
+    private void applyMIOpAndJcc(AMD64MIOp op, OperandSize size, AMD64Address src, int imm32, ConditionFlag cc, Label branchTarget, boolean isShortJmp, boolean annotateImm,
+                    IntConsumer applyBeforeFusedPair) {
+        final int bytesToEmit = getPrefixInBytes(size, src) + OPCODE_IN_BYTES + addressInBytes(src) + op.immediateSize(size);
+        alignFusedPair(branchTarget, isShortJmp, bytesToEmit);
+        final int beforeFusedPair = position();
+        if (applyBeforeFusedPair != null) {
+            applyBeforeFusedPair.accept(beforeFusedPair);
+        }
+        op.emit(this, size, src, imm32, annotateImm);
+        assert beforeFusedPair + bytesToEmit == position();
+        jcc(cc, branchTarget, isShortJmp);
+        assert ensureWithinBoundary(beforeFusedPair);
+    }
+
+    private int applyRMOpAndJcc(AMD64RMOp op, OperandSize size, Register src1, Register src2, ConditionFlag cc, Label branchTarget, boolean isShortJmp) {
+        final int bytesToEmit = getPrefixInBytes(size, src1, op.dstIsByte, src2, op.srcIsByte) + OPCODE_IN_BYTES + MODRM_IN_BYTES;
+        alignFusedPair(branchTarget, isShortJmp, bytesToEmit);
+        final int beforeFusedPair = position();
+        op.emit(this, size, src1, src2);
+        final int beforeJcc = position();
+        assert beforeFusedPair + bytesToEmit == beforeJcc;
+        jcc(cc, branchTarget, isShortJmp);
+        assert ensureWithinBoundary(beforeFusedPair);
+        return beforeJcc;
+    }
+
+    private int applyRMOpAndJcc(AMD64RMOp op, OperandSize size, Register src1, AMD64Address src2, ConditionFlag cc, Label branchTarget, boolean isShortJmp, IntConsumer applyBeforeFusedPair) {
+        final int bytesToEmit = getPrefixInBytes(size, src1, op.dstIsByte, src2) + OPCODE_IN_BYTES + addressInBytes(src2);
+        alignFusedPair(branchTarget, isShortJmp, bytesToEmit);
+        final int beforeFusedPair = position();
+        if (applyBeforeFusedPair != null) {
+            applyBeforeFusedPair.accept(beforeFusedPair);
+        }
+        op.emit(this, size, src1, src2);
+        final int beforeJcc = position();
+        assert beforeFusedPair + bytesToEmit == beforeJcc;
+        jcc(cc, branchTarget, isShortJmp);
+        assert ensureWithinBoundary(beforeFusedPair);
+        return beforeJcc;
+    }
+
+    public void applyMOpAndJcc(AMD64MOp op, OperandSize size, Register dst, ConditionFlag cc, Label branchTarget, boolean isShortJmp) {
+        final int bytesToEmit = getPrefixInBytes(size, dst, op.srcIsByte) + OPCODE_IN_BYTES + MODRM_IN_BYTES;
+        alignFusedPair(branchTarget, isShortJmp, bytesToEmit);
+        final int beforeFusedPair = position();
+        op.emit(this, size, dst);
+        assert beforeFusedPair + bytesToEmit == position();
+        jcc(cc, branchTarget, isShortJmp);
+        assert ensureWithinBoundary(beforeFusedPair);
+    }
+
+    public final void testAndJcc(OperandSize size, Register src, int imm32, ConditionFlag cc, Label branchTarget, boolean isShortJmp) {
+        applyMIOpAndJcc(AMD64MIOp.TEST, size, src, imm32, cc, branchTarget, isShortJmp, false, null);
+    }
+
+    public final void testlAndJcc(Register src, int imm32, ConditionFlag cc, Label branchTarget, boolean isShortJmp) {
+        applyMIOpAndJcc(AMD64MIOp.TEST, DWORD, src, imm32, cc, branchTarget, isShortJmp, false, null);
+    }
+
+    public final void testAndJcc(OperandSize size, AMD64Address src, int imm32, ConditionFlag cc, Label branchTarget, boolean isShortJmp, IntConsumer applyBeforeFusedPair) {
+        applyMIOpAndJcc(AMD64MIOp.TEST, size, src, imm32, cc, branchTarget, isShortJmp, false, applyBeforeFusedPair);
+    }
+
+    public final void testAndJcc(OperandSize size, Register src1, Register src2, ConditionFlag cc, Label branchTarget, boolean isShortJmp) {
+        applyRMOpAndJcc(AMD64RMOp.TEST, size, src1, src2, cc, branchTarget, isShortJmp);
+    }
+
+    public final void testlAndJcc(Register src1, Register src2, ConditionFlag cc, Label branchTarget, boolean isShortJmp) {
+        applyRMOpAndJcc(AMD64RMOp.TEST, DWORD, src1, src2, cc, branchTarget, isShortJmp);
+    }
+
+    public final int testqAndJcc(Register src1, Register src2, ConditionFlag cc, Label branchTarget, boolean isShortJmp) {
+        return applyRMOpAndJcc(AMD64RMOp.TEST, QWORD, src1, src2, cc, branchTarget, isShortJmp);
+    }
+
+    public final void testAndJcc(OperandSize size, Register src1, AMD64Address src2, ConditionFlag cc, Label branchTarget, boolean isShortJmp, IntConsumer applyBeforeFusedPair) {
+        applyRMOpAndJcc(AMD64RMOp.TEST, size, src1, src2, cc, branchTarget, isShortJmp, applyBeforeFusedPair);
+    }
+
+    public final void testbAndJcc(Register src1, Register src2, ConditionFlag cc, Label branchTarget, boolean isShortJmp) {
+        applyRMOpAndJcc(AMD64RMOp.TESTB, OperandSize.BYTE, src1, src2, cc, branchTarget, isShortJmp);
+    }
+
+    public final void testbAndJcc(Register src1, AMD64Address src2, ConditionFlag cc, Label branchTarget, boolean isShortJmp) {
+        applyRMOpAndJcc(AMD64RMOp.TESTB, OperandSize.BYTE, src1, src2, cc, branchTarget, isShortJmp, null);
+    }
+
+    public final void cmpAndJcc(OperandSize size, Register src, int imm32, ConditionFlag cc, Label branchTarget, boolean isShortJmp, boolean annotateImm, IntConsumer applyBeforeFusedPair) {
+        applyMIOpAndJcc(CMP.getMIOpcode(size, isByte(imm32)), size, src, imm32, cc, branchTarget, isShortJmp, annotateImm, applyBeforeFusedPair);
+    }
+
+    public final void cmplAndJcc(Register src, int imm32, ConditionFlag cc, Label branchTarget, boolean isShortJmp) {
+        applyMIOpAndJcc(CMP.getMIOpcode(DWORD, isByte(imm32)), DWORD, src, imm32, cc, branchTarget, isShortJmp, false, null);
+    }
+
+    public final void cmpqAndJcc(Register src, int imm32, ConditionFlag cc, Label branchTarget, boolean isShortJmp) {
+        applyMIOpAndJcc(CMP.getMIOpcode(QWORD, isByte(imm32)), QWORD, src, imm32, cc, branchTarget, isShortJmp, false, null);
+    }
+
+    public final void cmpAndJcc(OperandSize size, AMD64Address src, int imm32, ConditionFlag cc, Label branchTarget, boolean isShortJmp, boolean annotateImm, IntConsumer applyBeforeFusedPair) {
+        applyMIOpAndJcc(CMP.getMIOpcode(size, NumUtil.isByte(imm32)), size, src, imm32, cc, branchTarget, isShortJmp, annotateImm, applyBeforeFusedPair);
+    }
+
+    public final void cmpAndJcc(OperandSize size, Register src1, Register src2, ConditionFlag cc, Label branchTarget, boolean isShortJmp) {
+        applyRMOpAndJcc(CMP.getRMOpcode(size), size, src1, src2, cc, branchTarget, isShortJmp);
+    }
+
+    public final void cmplAndJcc(Register src1, Register src2, ConditionFlag cc, Label branchTarget, boolean isShortJmp) {
+        applyRMOpAndJcc(CMP.getRMOpcode(DWORD), DWORD, src1, src2, cc, branchTarget, isShortJmp);
+    }
+
+    public final int cmpqAndJcc(Register src1, Register src2, ConditionFlag cc, Label branchTarget, boolean isShortJmp) {
+        return applyRMOpAndJcc(CMP.getRMOpcode(QWORD), QWORD, src1, src2, cc, branchTarget, isShortJmp);
+    }
+
+    public final void cmpAndJcc(OperandSize size, Register src1, AMD64Address src2, ConditionFlag cc, Label branchTarget, boolean isShortJmp, IntConsumer applyBeforeFusedPair) {
+        applyRMOpAndJcc(CMP.getRMOpcode(size), size, src1, src2, cc, branchTarget, isShortJmp, applyBeforeFusedPair);
+    }
+
+    public final void cmplAndJcc(Register src1, AMD64Address src2, ConditionFlag cc, Label branchTarget, boolean isShortJmp) {
+        applyRMOpAndJcc(CMP.getRMOpcode(DWORD), DWORD, src1, src2, cc, branchTarget, isShortJmp, null);
+    }
+
+    public final int cmpqAndJcc(Register src1, AMD64Address src2, ConditionFlag cc, Label branchTarget, boolean isShortJmp) {
+        return applyRMOpAndJcc(CMP.getRMOpcode(QWORD), QWORD, src1, src2, cc, branchTarget, isShortJmp, null);
+    }
+
+    public final void cmpAndJcc(OperandSize size, Register src1, Supplier<AMD64Address> src2, ConditionFlag cc, Label branchTarget) {
+        AMD64Address placeHolder = getPlaceholder(position());
+        final AMD64RMOp op = CMP.getRMOpcode(size);
+        final int bytesToEmit = getPrefixInBytes(size, src1, op.dstIsByte, placeHolder) + OPCODE_IN_BYTES + addressInBytes(placeHolder);
+        alignFusedPair(branchTarget, false, bytesToEmit);
+        final int beforeFusedPair = position();
+        AMD64Address src2AsAddress = src2.get();
+        op.emit(this, size, src1, src2AsAddress);
+        assert beforeFusedPair + bytesToEmit == position();
+        jcc(cc, branchTarget, false);
+        assert ensureWithinBoundary(beforeFusedPair);
+    }
+
+    public final void andlAndJcc(Register dst, int imm32, ConditionFlag cc, Label branchTarget, boolean isShortJmp) {
+        applyMIOpAndJcc(AND.getMIOpcode(DWORD, isByte(imm32)), DWORD, dst, imm32, cc, branchTarget, isShortJmp, false, null);
+    }
+
+    public final void addqAndJcc(Register dst, int imm32, ConditionFlag cc, Label branchTarget, boolean isShortJmp) {
+        applyMIOpAndJcc(ADD.getMIOpcode(QWORD, isByte(imm32)), QWORD, dst, imm32, cc, branchTarget, isShortJmp, false, null);
+    }
+
+    public final void sublAndJcc(Register dst, Register src, ConditionFlag cc, Label branchTarget, boolean isShortJmp) {
+        applyRMOpAndJcc(SUB.getRMOpcode(DWORD), DWORD, dst, src, cc, branchTarget, isShortJmp);
+    }
+
+    public final void subqAndJcc(Register dst, Register src, ConditionFlag cc, Label branchTarget, boolean isShortJmp) {
+        applyRMOpAndJcc(SUB.getRMOpcode(QWORD), QWORD, dst, src, cc, branchTarget, isShortJmp);
+    }
+
+    public final void sublAndJcc(Register dst, int imm32, ConditionFlag cc, Label branchTarget, boolean isShortJmp) {
+        applyMIOpAndJcc(SUB.getMIOpcode(DWORD, isByte(imm32)), DWORD, dst, imm32, cc, branchTarget, isShortJmp, false, null);
+    }
+
+    public final void subqAndJcc(Register dst, int imm32, ConditionFlag cc, Label branchTarget, boolean isShortJmp) {
+        applyMIOpAndJcc(SUB.getMIOpcode(QWORD, isByte(imm32)), QWORD, dst, imm32, cc, branchTarget, isShortJmp, false, null);
+    }
+
+    public final void incqAndJcc(Register dst, ConditionFlag cc, Label branchTarget, boolean isShortJmp) {
+        applyMOpAndJcc(INC, QWORD, dst, cc, branchTarget, isShortJmp);
+    }
+
+    public final void decqAndJcc(Register dst, ConditionFlag cc, Label branchTarget, boolean isShortJmp) {
+        applyMOpAndJcc(DEC, QWORD, dst, cc, branchTarget, isShortJmp);
+    }
 }

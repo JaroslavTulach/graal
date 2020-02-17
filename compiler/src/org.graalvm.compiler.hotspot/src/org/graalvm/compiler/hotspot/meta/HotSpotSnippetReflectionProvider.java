@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2014, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2014, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -22,9 +24,11 @@
  */
 package org.graalvm.compiler.hotspot.meta;
 
+import static jdk.vm.ci.hotspot.HotSpotJVMCIRuntime.runtime;
+
 import org.graalvm.compiler.api.replacements.SnippetReflectionProvider;
-import org.graalvm.compiler.hotspot.HotSpotGraalRuntimeProvider;
 import org.graalvm.compiler.hotspot.GraalHotSpotVMConfig;
+import org.graalvm.compiler.hotspot.HotSpotGraalRuntimeProvider;
 import org.graalvm.compiler.word.WordTypes;
 
 import jdk.vm.ci.hotspot.HotSpotConstantReflectionProvider;
@@ -51,21 +55,15 @@ public class HotSpotSnippetReflectionProvider implements SnippetReflectionProvid
     }
 
     @Override
-    public Object asObject(ResolvedJavaType type, JavaConstant constant) {
-        if (constant.isNull()) {
-            return null;
-        }
-        HotSpotObjectConstant hsConstant = (HotSpotObjectConstant) constant;
-        return hsConstant.asObject(type);
-    }
-
-    @Override
     public <T> T asObject(Class<T> type, JavaConstant constant) {
         if (constant.isNull()) {
             return null;
         }
-        HotSpotObjectConstant hsConstant = (HotSpotObjectConstant) constant;
-        return hsConstant.asObject(type);
+        if (constant instanceof HotSpotObjectConstant) {
+            HotSpotObjectConstant hsConstant = (HotSpotObjectConstant) constant;
+            return hsConstant.asObject(type);
+        }
+        return null;
     }
 
     @Override
@@ -87,7 +85,7 @@ public class HotSpotSnippetReflectionProvider implements SnippetReflectionProvid
         // Need to test all fields since there no guarantee under the JMM
         // about the order in which these fields are written.
         GraalHotSpotVMConfig config = runtime.getVMConfig();
-        if (configType == null || wordTypesType == null || configType == null) {
+        if (configType == null || wordTypesType == null || runtimeType == null) {
             wordTypesType = wordTypes.getClass();
             runtimeType = runtime.getClass();
             configType = config.getClass();
@@ -103,5 +101,10 @@ public class HotSpotSnippetReflectionProvider implements SnippetReflectionProvid
             return type.cast(config);
         }
         return null;
+    }
+
+    @Override
+    public Class<?> originalClass(ResolvedJavaType type) {
+        return runtime().getMirror(type);
     }
 }

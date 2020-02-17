@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2011, 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -35,6 +37,7 @@ import org.graalvm.compiler.graph.NodeClass;
 import org.graalvm.compiler.graph.spi.Canonicalizable;
 import org.graalvm.compiler.graph.spi.CanonicalizerTool;
 import org.graalvm.compiler.nodeinfo.NodeInfo;
+import org.graalvm.compiler.nodes.NodeView;
 import org.graalvm.compiler.nodes.ValueNodeUtil;
 import org.graalvm.compiler.nodes.ValuePhiNode;
 import org.graalvm.compiler.nodes.extended.GuardingNode;
@@ -65,8 +68,8 @@ public final class FloatingReadNode extends FloatingAccessNode implements LIRLow
         this.lastLocationAccess = lastLocationAccess;
 
         // The input to floating reads must be always non-null or have at least a guard.
-        assert guard != null || !(address.getBase().stamp() instanceof ObjectStamp) || address.getBase() instanceof ValuePhiNode ||
-                        ((ObjectStamp) address.getBase().stamp()).nonNull() : address.getBase();
+        assert guard != null || !(address.getBase().stamp(NodeView.DEFAULT) instanceof ObjectStamp) || address.getBase() instanceof ValuePhiNode ||
+                        ((ObjectStamp) address.getBase().stamp(NodeView.DEFAULT)).nonNull() : address.getBase();
     }
 
     @Override
@@ -82,7 +85,7 @@ public final class FloatingReadNode extends FloatingAccessNode implements LIRLow
 
     @Override
     public void generate(NodeLIRBuilderTool gen) {
-        LIRKind readKind = gen.getLIRGeneratorTool().getLIRKind(stamp());
+        LIRKind readKind = gen.getLIRGeneratorTool().getLIRKind(stamp(NodeView.DEFAULT));
         gen.setResult(this, gen.getLIRGeneratorTool().getArithmetic().emitLoad(readKind, gen.operand(address), null));
     }
 
@@ -94,7 +97,7 @@ public final class FloatingReadNode extends FloatingAccessNode implements LIRLow
         }
         if (tool.canonicalizeReads() && getAddress().hasMoreThanOneUsage() && lastLocationAccess instanceof WriteNode) {
             WriteNode write = (WriteNode) lastLocationAccess;
-            if (write.getAddress() == getAddress() && write.getAccessStamp().isCompatible(getAccessStamp())) {
+            if (write.getAddress() == getAddress() && write.getAccessStamp(NodeView.DEFAULT).isCompatible(getAccessStamp(NodeView.DEFAULT))) {
                 // Same memory location with no intervening write
                 return write.value();
             }
@@ -106,7 +109,7 @@ public final class FloatingReadNode extends FloatingAccessNode implements LIRLow
     @Override
     public FixedAccessNode asFixedNode() {
         try (DebugCloseable position = withNodeSourcePosition()) {
-            ReadNode result = graph().add(new ReadNode(getAddress(), getLocationIdentity(), stamp(), getBarrierType()));
+            ReadNode result = graph().add(new ReadNode(getAddress(), getLocationIdentity(), stamp(NodeView.DEFAULT), getBarrierType()));
             result.setGuard(getGuard());
             return result;
         }
@@ -120,7 +123,7 @@ public final class FloatingReadNode extends FloatingAccessNode implements LIRLow
     }
 
     @Override
-    public Stamp getAccessStamp() {
-        return stamp();
+    public Stamp getAccessStamp(NodeView view) {
+        return stamp(view);
     }
 }

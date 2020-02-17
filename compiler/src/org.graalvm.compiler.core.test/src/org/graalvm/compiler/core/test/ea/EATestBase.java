@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2011, 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -22,6 +24,8 @@
  */
 package org.graalvm.compiler.core.test.ea;
 
+import static org.graalvm.compiler.graph.iterators.NodePredicates.isA;
+
 import java.util.List;
 
 import org.graalvm.compiler.core.test.GraalCompilerTest;
@@ -31,10 +35,9 @@ import org.graalvm.compiler.nodes.StructuredGraph;
 import org.graalvm.compiler.nodes.StructuredGraph.AllowAssumptions;
 import org.graalvm.compiler.nodes.java.NewArrayNode;
 import org.graalvm.compiler.nodes.java.NewInstanceNode;
+import org.graalvm.compiler.nodes.virtual.AllocatedObjectNode;
 import org.graalvm.compiler.nodes.virtual.CommitAllocationNode;
-import org.graalvm.compiler.phases.common.CanonicalizerPhase;
 import org.graalvm.compiler.phases.common.DeadCodeEliminationPhase;
-import org.graalvm.compiler.phases.common.inlining.InliningPhase;
 import org.graalvm.compiler.phases.tiers.HighTierContext;
 import org.graalvm.compiler.virtual.phases.ea.PartialEscapePhase;
 import org.junit.Assert;
@@ -83,6 +86,46 @@ public class EATestBase extends GraalCompilerTest {
         @Override
         public int hashCode() {
             return x + 13 * y;
+        }
+
+        public static final long fieldOffset1;
+        public static final long fieldOffset2;
+        public static final boolean firstFieldIsX;
+
+        static {
+            try {
+                long localFieldOffset1 = UNSAFE.objectFieldOffset(EATestBase.TestClassInt.class.getField("x"));
+                // Make the fields 8 byte aligned (Required for testing setLong on Architectures
+                // which does not support unaligned memory access
+                if (localFieldOffset1 % 8 == 0) {
+                    fieldOffset1 = localFieldOffset1;
+                    fieldOffset2 = UNSAFE.objectFieldOffset(EATestBase.TestClassInt.class.getField("y"));
+                    firstFieldIsX = true;
+                } else {
+                    fieldOffset1 = UNSAFE.objectFieldOffset(EATestBase.TestClassInt.class.getField("y"));
+                    fieldOffset2 = UNSAFE.objectFieldOffset(EATestBase.TestClassInt.class.getField("z"));
+                    firstFieldIsX = false;
+                }
+                assert fieldOffset2 == fieldOffset1 + 4;
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+        }
+
+        public void setFirstField(int v) {
+            if (firstFieldIsX) {
+                x = v;
+            } else {
+                y = v;
+            }
+        }
+
+        public void setSecondField(int v) {
+            if (firstFieldIsX) {
+                y = v;
+            } else {
+                z = v;
+            }
         }
     }
 
@@ -137,6 +180,10 @@ public class EATestBase extends GraalCompilerTest {
      *            iteration
      */
     protected void testEscapeAnalysis(String snippet, JavaConstant expectedConstantResult, boolean iterativeEscapeAnalysis) {
+        testEscapeAnalysis(snippet, expectedConstantResult, iterativeEscapeAnalysis, 0);
+    }
+
+    protected void testEscapeAnalysis(String snippet, JavaConstant expectedConstantResult, boolean iterativeEscapeAnalysis, int expectedAllocationCount) {
         prepareGraph(snippet, iterativeEscapeAnalysis);
         if (expectedConstantResult != null) {
             for (ReturnNode returnNode : returnNodes) {
@@ -144,9 +191,15 @@ public class EATestBase extends GraalCompilerTest {
                 Assert.assertEquals(expectedConstantResult, returnNode.result().asConstant());
             }
         }
-        int newInstanceCount = graph.getNodes().filter(NewInstanceNode.class).count() + graph.getNodes().filter(NewArrayNode.class).count() +
-                        graph.getNodes().filter(CommitAllocationNode.class).count();
-        Assert.assertEquals(0, newInstanceCount);
+        int newInstanceCount = getAllocationCount();
+        Assert.assertEquals("Expected allocation count does not match", expectedAllocationCount, newInstanceCount);
+        if (expectedAllocationCount == 0) {
+            Assert.assertTrue("Unexpected CommitAllocationNode", graph.getNodes().filter(CommitAllocationNode.class).isEmpty());
+        }
+    }
+
+    protected int getAllocationCount() {
+        return graph.getNodes().filter(isA(NewInstanceNode.class).or(NewArrayNode.class).or(AllocatedObjectNode.class)).count();
     }
 
     @SuppressWarnings("try")
@@ -156,10 +209,10 @@ public class EATestBase extends GraalCompilerTest {
         try (DebugContext.Scope s = debug.scope(getClass(), method, getCodeCache())) {
             graph = parseEager(method, AllowAssumptions.YES, debug);
             context = getDefaultHighTierContext();
-            new InliningPhase(new CanonicalizerPhase()).apply(graph, context);
+            createInliningPhase().apply(graph, context);
             new DeadCodeEliminationPhase().apply(graph);
             canonicalizeGraph();
-            new PartialEscapePhase(iterativeEscapeAnalysis, false, new CanonicalizerPhase(), null, graph.getOptions()).apply(graph, context);
+            new PartialEscapePhase(iterativeEscapeAnalysis, false, createCanonicalizerPhase(), null, graph.getOptions()).apply(graph, context);
             postEACanonicalizeGraph();
             returnNodes = graph.getNodes(ReturnNode.TYPE).snapshot();
         } catch (Throwable e) {
@@ -171,6 +224,6 @@ public class EATestBase extends GraalCompilerTest {
     }
 
     protected void canonicalizeGraph() {
-        new CanonicalizerPhase().apply(graph, context);
+        this.createCanonicalizerPhase().apply(graph, context);
     }
 }

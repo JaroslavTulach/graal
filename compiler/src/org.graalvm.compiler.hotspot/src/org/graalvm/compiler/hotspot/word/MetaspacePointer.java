@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2014, 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2014, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -25,12 +27,11 @@ package org.graalvm.compiler.hotspot.word;
 import static org.graalvm.compiler.hotspot.word.HotSpotOperation.HotspotOpcode.FROM_POINTER;
 import static org.graalvm.compiler.hotspot.word.HotSpotOperation.HotspotOpcode.IS_NULL;
 
-import org.graalvm.compiler.nodes.memory.HeapAccess.BarrierType;
+import org.graalvm.compiler.nodes.memory.OnHeapMemoryAccess.BarrierType;
 import org.graalvm.compiler.word.Word;
 import org.graalvm.compiler.word.Word.Opcode;
 import org.graalvm.compiler.word.Word.Operation;
 import org.graalvm.word.LocationIdentity;
-import org.graalvm.word.Pointer;
 import org.graalvm.word.SignedWord;
 import org.graalvm.word.UnsignedWord;
 import org.graalvm.word.WordBase;
@@ -44,7 +45,7 @@ public abstract class MetaspacePointer {
     public abstract boolean isNull();
 
     @HotSpotOperation(opcode = FROM_POINTER)
-    public abstract Pointer asWord();
+    public abstract Word asWord();
 
     /**
      * Reads the memory at address {@code (this + offset)}. Both the base address and offset are in

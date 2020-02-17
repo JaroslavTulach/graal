@@ -1,5 +1,5 @@
 suite = {
-  "mxversion" : "5.90.02",
+  "mxversion" : "5.223.0",
   "name" : "examples",
   "url" : "https://github.com/graalvm/graal",
   "developer" : {

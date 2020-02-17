@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2014, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -25,11 +27,11 @@ package org.graalvm.compiler.truffle.test.builtins;
 import java.util.HashSet;
 import java.util.Set;
 
-import org.graalvm.compiler.truffle.GraalTruffleRuntime;
-import org.graalvm.compiler.truffle.OptimizedCallTarget;
+import org.graalvm.compiler.truffle.runtime.GraalTruffleRuntime;
+import org.graalvm.compiler.truffle.runtime.OptimizedCallTarget;
+
 import com.oracle.truffle.api.CallTarget;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
-import com.oracle.truffle.api.RootCallTarget;
 import com.oracle.truffle.api.Truffle;
 import com.oracle.truffle.api.frame.FrameInstance;
 import com.oracle.truffle.api.nodes.DirectCallNode;
@@ -44,26 +46,6 @@ public abstract class SLGraalRuntimeBuiltin extends SLBuiltinNode {
         if (!(Truffle.getRuntime() instanceof GraalTruffleRuntime)) {
             throw new AssertionError("Graal runtime builtins can only be used inside of a Graal runtime.");
         }
-    }
-
-    /**
-     * Finds all call targets available for the same original call target. This might be useful if a
-     * {@link CallTarget} got duplicated due to splitting.
-     */
-    @SuppressWarnings("deprecation")
-    @TruffleBoundary
-    protected static final Set<OptimizedCallTarget> findDuplicateCallTargets(OptimizedCallTarget originalCallTarget) {
-        final Set<OptimizedCallTarget> allCallTargets = new HashSet<>();
-        allCallTargets.add(originalCallTarget);
-        for (RootCallTarget target : Truffle.getRuntime().getCallTargets()) {
-            if (target instanceof OptimizedCallTarget) {
-                OptimizedCallTarget oct = (OptimizedCallTarget) target;
-                if (oct.getSourceCallTarget() == originalCallTarget) {
-                    allCallTargets.add(oct);
-                }
-            }
-        }
-        return allCallTargets;
     }
 
     /**

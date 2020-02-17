@@ -1,26 +1,42 @@
 /*
- * Copyright (c) 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2017, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
- * This code is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.  Oracle designates this
- * particular file as subject to the "Classpath" exception as provided
- * by Oracle in the LICENSE file that accompanied this code.
+ * The Universal Permissive License (UPL), Version 1.0
  *
- * This code is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
- * version 2 for more details (a copy is included in the LICENSE file that
- * accompanied this code).
+ * Subject to the condition set forth below, permission is hereby granted to any
+ * person obtaining a copy of this software, associated documentation and/or
+ * data (collectively the "Software"), free of charge and under any and all
+ * copyright rights in the Software, and any and all patent rights owned or
+ * freely licensable by each licensor hereunder covering either (i) the
+ * unmodified Software as contributed to or provided by such licensor, or (ii)
+ * the Larger Works (as defined below), to deal in both
  *
- * You should have received a copy of the GNU General Public License version
- * 2 along with this work; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
+ * (a) the Software, and
  *
- * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
- * or visit www.oracle.com if you need additional information or have any
- * questions.
+ * (b) any piece of software and/or hardware listed in the lrgrwrks.txt file if
+ * one is included with the Software each a "Larger Work" to which the Software
+ * is contributed by such licensors),
+ *
+ * without restriction, including without limitation the rights to copy, create
+ * derivative works of, display, perform, and distribute the Software and make,
+ * use, sell, offer for sale, import, export, have made, and have sold the
+ * Software and the Larger Work(s), and to sublicense the foregoing rights on
+ * either these or other terms.
+ *
+ * This license is subject to the following condition:
+ *
+ * The above copyright notice and either this complete permission notice or at a
+ * minimum a reference to the UPL must be included in all copies or substantial
+ * portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
  */
 package org.graalvm.options;
 
@@ -29,28 +45,30 @@ import java.util.Objects;
 /**
  * Represents metadata for a single option.
  *
- * @since 1.0
+ * @since 19.0
  */
 public final class OptionDescriptor {
 
     private final OptionKey<?> key;
     private final String name;
     private final String help;
-    private final OptionCategory kind;
+    private final OptionCategory category;
+    private final OptionStability stability;
     private final boolean deprecated;
 
-    OptionDescriptor(OptionKey<?> key, String name, String help, OptionCategory kind, boolean deprecated) {
+    OptionDescriptor(OptionKey<?> key, String name, String help, OptionCategory category, OptionStability stability, boolean deprecated) {
         this.key = key;
         this.name = name;
         this.help = help;
-        this.kind = kind;
+        this.category = category;
+        this.stability = stability;
         this.deprecated = deprecated;
     }
 
     /**
      * Returns the name of the option that this descriptor represents.
      *
-     * @since 1.0
+     * @since 19.0
      */
     public String getName() {
         return name;
@@ -59,7 +77,7 @@ public final class OptionDescriptor {
     /**
      * Returns the key for this option.
      *
-     * @since 1.0
+     * @since 19.0
      */
     public OptionKey<?> getKey() {
         return key;
@@ -69,25 +87,44 @@ public final class OptionDescriptor {
      * Returns <code>true</code> if this option was marked deprecated. This indicates that the
      * option is going to be removed in a future release or its use is not recommended.
      *
-     * @since 1.0
+     * @since 19.0
      */
     public boolean isDeprecated() {
         return deprecated;
     }
 
     /**
+     * Returns <code>true</code> if this option is an option map. Options maps allow to collect
+     * key=value pairs whose keys are unknown beforehand e.g. user defined properties.
+     *
+     * @since 19.2
+     */
+    public boolean isOptionMap() {
+        return getKey().getType().isOptionMap();
+    }
+
+    /**
      * Returns the user category of this option.
      *
-     * @since 1.0
+     * @since 19.0
      */
     public OptionCategory getCategory() {
-        return kind;
+        return category;
+    }
+
+    /**
+     * Returns the stability of this option.
+     *
+     * @since 19.0
+     */
+    public OptionStability getStability() {
+        return stability;
     }
 
     /**
      * Returns a human-readable description on how to use the option.
      *
-     * @since 1.0
+     * @since 19.0
      */
     public String getHelp() {
         return help;
@@ -96,17 +133,17 @@ public final class OptionDescriptor {
     /**
      * {@inheritDoc}
      *
-     * @since 1.0
+     * @since 19.0
      */
     @Override
     public String toString() {
-        return "OptionDescriptor [key=" + key + ", help=" + help + ", kind=" + kind + ", deprecated=" + deprecated + "]";
+        return "OptionDescriptor [key=" + key + ", help=" + help + ", category=" + category + ", deprecated=" + deprecated + ", optionMap=" + isOptionMap() + "]";
     }
 
     /**
      * {@inheritDoc}
      *
-     * @since 1.0
+     * @since 19.0
      */
     @Override
     public int hashCode() {
@@ -115,7 +152,7 @@ public final class OptionDescriptor {
         result = prime * result + (deprecated ? 1231 : 1237);
         result = prime * result + ((help == null) ? 0 : help.hashCode());
         result = prime * result + ((key == null) ? 0 : key.hashCode());
-        result = prime * result + ((kind == null) ? 0 : kind.hashCode());
+        result = prime * result + ((category == null) ? 0 : category.hashCode());
         result = prime * result + ((name == null) ? 0 : name.hashCode());
         return result;
     }
@@ -123,7 +160,7 @@ public final class OptionDescriptor {
     /**
      * {@inheritDoc}
      *
-     * @since 1.0
+     * @since 19.0
      */
     @Override
     public boolean equals(Object obj) {
@@ -139,14 +176,14 @@ public final class OptionDescriptor {
                         Objects.equals(deprecated, other.deprecated) &&
                         Objects.equals(help, other.help) &&
                         Objects.equals(key, other.key) &&
-                        Objects.equals(kind, other.kind);
+                        Objects.equals(category, other.category);
     }
 
     /**
      * Creates a new option descriptor builder by key. The option group and name is inferred by the
      * key.
      *
-     * @since 1.0
+     * @since 19.0
      */
     public static <T> Builder newBuilder(OptionKey<T> key, String name) {
         Objects.requireNonNull(key);
@@ -154,20 +191,21 @@ public final class OptionDescriptor {
         return EMPTY.new Builder(key, name);
     }
 
-    private static final OptionDescriptor EMPTY = new OptionDescriptor(null, null, null, null, false);
+    private static final OptionDescriptor EMPTY = new OptionDescriptor(null, null, null, null, null, false);
 
     /**
      * Represents an option descriptor builder.
      *
-     * @since 1.0
+     * @since 19.0
      */
     public final class Builder {
 
         private final OptionKey<?> key;
         private final String name;
-        private boolean deprecated;
-        private OptionCategory category;
-        private String help;
+        private boolean deprecated = false;
+        private OptionCategory category = OptionCategory.INTERNAL;
+        private OptionStability stability = OptionStability.EXPERIMENTAL;
+        private String help = "";
 
         Builder(OptionKey<?> key, String name) {
             this.key = key;
@@ -176,9 +214,9 @@ public final class OptionDescriptor {
 
         /**
          * Defines the user category for this option. The default value is
-         * {@link OptionCategory#DEBUG}.
+         * {@link OptionCategory#INTERNAL}.
          *
-         * @since 1.0
+         * @since 19.0
          */
         public Builder category(@SuppressWarnings("hiding") OptionCategory category) {
             Objects.requireNonNull(category);
@@ -187,10 +225,22 @@ public final class OptionDescriptor {
         }
 
         /**
+         * Defines the stability of this option. The default value is
+         * {@link OptionStability#EXPERIMENTAL}.
+         *
+         * @since 19.0
+         */
+        public Builder stability(@SuppressWarnings("hiding") OptionStability stability) {
+            Objects.requireNonNull(stability);
+            this.stability = stability;
+            return this;
+        }
+
+        /**
          * Defines if this option is deprecated. The default value for deprecated is
          * <code>false</code>. This can be used to evolve options between releases.
          *
-         * @since 1.0
+         * @since 19.0
          */
         public Builder deprecated(@SuppressWarnings("hiding") boolean deprecated) {
             this.deprecated = deprecated;
@@ -200,7 +250,7 @@ public final class OptionDescriptor {
         /**
          * Specifies a human-readable description on how to use the option.
          *
-         * @since 1.0
+         * @since 19.0
          */
         public Builder help(@SuppressWarnings("hiding") String help) {
             Objects.requireNonNull(help);
@@ -211,12 +261,11 @@ public final class OptionDescriptor {
         /**
          * Builds and returns a new option descriptor.
          *
-         * @since 1.0
+         * @since 19.0
          */
         public OptionDescriptor build() {
-            return new OptionDescriptor(key, name, help == null ? "" : help, category == null ? OptionCategory.DEBUG : category, deprecated);
+            return new OptionDescriptor(key, name, help, category, stability, deprecated);
         }
-
     }
 
 }

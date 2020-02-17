@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -22,8 +24,6 @@
  */
 package org.graalvm.compiler.hotspot;
 
-import static java.lang.Thread.currentThread;
-
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.PrintStream;
@@ -35,20 +35,20 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Date;
 import java.util.Deque;
 import java.util.Locale;
 import java.util.concurrent.ConcurrentLinkedDeque;
 
 import org.graalvm.compiler.debug.CSVUtil;
-import org.graalvm.compiler.debug.Management;
 import org.graalvm.compiler.options.Option;
 import org.graalvm.compiler.options.OptionKey;
 import org.graalvm.compiler.options.OptionValues;
+import org.graalvm.compiler.serviceprovider.GraalServices;
 
 import jdk.vm.ci.hotspot.HotSpotInstalledCode;
 import jdk.vm.ci.hotspot.HotSpotResolvedJavaMethod;
+import jdk.vm.ci.services.Services;
 
 @SuppressWarnings("unused")
 public final class CompilationStatistics {
@@ -87,8 +87,7 @@ public final class CompilationStatistics {
     private static long zeroTime = System.nanoTime();
 
     private static long getThreadAllocatedBytes() {
-        com.sun.management.ThreadMXBean thread = (com.sun.management.ThreadMXBean) Management.getThreadMXBean();
-        return thread.getThreadAllocatedBytes(currentThread().getId());
+        return GraalServices.getCurrentThreadAllocatedBytes();
     }
 
     @NotReported private final long startTime;
@@ -191,7 +190,7 @@ public final class CompilationStatistics {
                         timeLeft = RESOLUTION;
                     }
                 }
-                String timelineName = System.getProperty("stats.timeline.name");
+                String timelineName = Services.getSavedProperties().get("stats.timeline.name");
                 if (timelineName != null && !timelineName.isEmpty()) {
                     out.printf("%s%c", CSVUtil.Escape.escape(timelineName), CSVUtil.SEPARATOR);
                 }

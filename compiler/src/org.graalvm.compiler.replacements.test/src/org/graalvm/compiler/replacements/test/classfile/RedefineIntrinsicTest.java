@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -52,6 +54,8 @@ import org.graalvm.compiler.bytecode.BytecodeProvider;
 import org.graalvm.compiler.nodes.graphbuilderconf.InvocationPlugins;
 import org.graalvm.compiler.nodes.graphbuilderconf.InvocationPlugins.Registration;
 import org.graalvm.compiler.replacements.test.ReplacementsTest;
+import org.graalvm.compiler.serviceprovider.JavaVersionUtil;
+import org.graalvm.compiler.test.SubprocessUtil;
 import org.graalvm.compiler.test.SubprocessUtil.Subprocess;
 import org.junit.Assert;
 import org.junit.Test;
@@ -83,7 +87,7 @@ public class RedefineIntrinsicTest extends ReplacementsTest {
     @Override
     protected void registerInvocationPlugins(InvocationPlugins invocationPlugins) {
         BytecodeProvider replacementBytecodeProvider = getSystemClassLoaderBytecodeProvider();
-        Registration r = new Registration(invocationPlugins, Original.class, replacementBytecodeProvider);
+        Registration r = new Registration(invocationPlugins, Original.class, getReplacements(), replacementBytecodeProvider);
         r.registerMethodSubstitution(Intrinsic.class, "getValue");
         super.registerInvocationPlugins(invocationPlugins);
     }
@@ -100,6 +104,7 @@ public class RedefineIntrinsicTest extends ReplacementsTest {
 
     @Test
     public void test() throws Throwable {
+        assumeManagementLibraryIsLoadable();
         try {
             Class.forName("java.lang.instrument.Instrumentation");
         } catch (ClassNotFoundException ex) {
@@ -107,11 +112,12 @@ public class RedefineIntrinsicTest extends ReplacementsTest {
             return;
         }
         String recursionPropName = getClass().getName() + ".recursion";
-        if (Java8OrEarlier || Boolean.getBoolean(recursionPropName)) {
+        if (JavaVersionUtil.JAVA_SPEC <= 8 || Boolean.getBoolean(recursionPropName)) {
             testHelper();
         } else {
             List<String> vmArgs = withoutDebuggerArguments(getVMCommandLine());
             vmArgs.add("-D" + recursionPropName + "=true");
+            vmArgs.add(SubprocessUtil.PACKAGE_OPENING_OPTIONS);
             vmArgs.add("-Djdk.attach.allowAttachSelf=true");
             Subprocess proc = java(vmArgs, "com.oracle.mxtool.junit.MxJUnitWrapper", getClass().getName());
             if (proc.exitCode != 0) {
@@ -196,13 +202,14 @@ public class RedefineIntrinsicTest extends ReplacementsTest {
         }
     }
 
+    @SuppressWarnings({"deprecation", "unused"})
     public static boolean loadAgent(Path agent) throws Exception {
         String vmName = ManagementFactory.getRuntimeMXBean().getName();
         int p = vmName.indexOf('@');
         assumeTrue("VM name not in <pid>@<host> format: " + vmName, p != -1);
         String pid = vmName.substring(0, p);
         Class<?> c;
-        if (Java8OrEarlier) {
+        if (JavaVersionUtil.JAVA_SPEC <= 8) {
             ClassLoader cl = ToolProvider.getSystemToolClassLoader();
             c = Class.forName("com.sun.tools.attach.VirtualMachine", true, cl);
         } else {

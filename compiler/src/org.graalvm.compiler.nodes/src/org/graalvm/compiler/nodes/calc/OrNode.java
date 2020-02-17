@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2011, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -25,7 +27,7 @@ package org.graalvm.compiler.nodes.calc;
 import org.graalvm.compiler.core.common.type.ArithmeticOpTable;
 import org.graalvm.compiler.core.common.type.ArithmeticOpTable.BinaryOp;
 import org.graalvm.compiler.core.common.type.ArithmeticOpTable.BinaryOp.Or;
-import org.graalvm.compiler.core.common.type.PrimitiveStamp;
+import org.graalvm.compiler.core.common.type.IntegerStamp;
 import org.graalvm.compiler.core.common.type.Stamp;
 import org.graalvm.compiler.graph.NodeClass;
 import org.graalvm.compiler.graph.spi.Canonicalizable.BinaryCommutative;
@@ -33,13 +35,12 @@ import org.graalvm.compiler.graph.spi.CanonicalizerTool;
 import org.graalvm.compiler.lir.gen.ArithmeticLIRGeneratorTool;
 import org.graalvm.compiler.nodeinfo.NodeInfo;
 import org.graalvm.compiler.nodes.ConstantNode;
+import org.graalvm.compiler.nodes.NodeView;
 import org.graalvm.compiler.nodes.ValueNode;
 import org.graalvm.compiler.nodes.spi.NodeLIRBuilderTool;
 import org.graalvm.compiler.nodes.util.GraphUtil;
 
-import jdk.vm.ci.code.CodeUtil;
 import jdk.vm.ci.meta.Constant;
-import jdk.vm.ci.meta.PrimitiveConstant;
 
 @NodeInfo(shortName = "|")
 public final class OrNode extends BinaryArithmeticNode<Or> implements BinaryCommutative<ValueNode>, NarrowableArithmeticNode {
@@ -47,54 +48,80 @@ public final class OrNode extends BinaryArithmeticNode<Or> implements BinaryComm
     public static final NodeClass<OrNode> TYPE = NodeClass.create(OrNode.class);
 
     public OrNode(ValueNode x, ValueNode y) {
-        super(TYPE, ArithmeticOpTable::getOr, x, y);
+        super(TYPE, getArithmeticOpTable(x).getOr(), x, y);
     }
 
-    public static ValueNode create(ValueNode x, ValueNode y) {
-        BinaryOp<Or> op = ArithmeticOpTable.forStamp(x.stamp()).getOr();
-        Stamp stamp = op.foldStamp(x.stamp(), y.stamp());
-        ConstantNode tryConstantFold = tryConstantFold(op, x, y, stamp);
+    private OrNode(ValueNode x, ValueNode y, Stamp forcedStamp) {
+        super(TYPE, forcedStamp, x, y);
+    }
+
+    /**
+     * Create a new XorNode with a forced stamp, without eager folding. This should only be used in
+     * snippet code, where native-image may assign wrong stamps during graph generation.
+     */
+    public static ValueNode createForSnippet(ValueNode x, ValueNode y, Stamp forcedStamp) {
+        return new OrNode(x, y, forcedStamp);
+    }
+
+    public static ValueNode create(ValueNode x, ValueNode y, NodeView view) {
+        BinaryOp<Or> op = ArithmeticOpTable.forStamp(x.stamp(view)).getOr();
+        Stamp stamp = op.foldStamp(x.stamp(view), y.stamp(view));
+        ConstantNode tryConstantFold = tryConstantFold(op, x, y, stamp, view);
         if (tryConstantFold != null) {
             return tryConstantFold;
         }
-        return canonical(null, op, stamp, x, y);
+        return canonical(null, op, x, y, view);
+    }
+
+    @Override
+    protected BinaryOp<Or> getOp(ArithmeticOpTable table) {
+        return table.getOr();
     }
 
     @Override
     public ValueNode canonical(CanonicalizerTool tool, ValueNode forX, ValueNode forY) {
+        NodeView view = NodeView.from(tool);
         ValueNode ret = super.canonical(tool, forX, forY);
         if (ret != this) {
             return ret;
         }
 
-        return canonical(this, getOp(forX, forY), stamp(), forX, forY);
+        return canonical(this, getOp(forX, forY), forX, forY, view);
     }
 
-    private static ValueNode canonical(OrNode self, BinaryOp<Or> op, Stamp stamp, ValueNode forX, ValueNode forY) {
+    private static ValueNode canonical(OrNode self, BinaryOp<Or> op, ValueNode forX, ValueNode forY, NodeView view) {
         if (GraphUtil.unproxify(forX) == GraphUtil.unproxify(forY)) {
             return forX;
         }
         if (forX.isConstant() && !forY.isConstant()) {
             return new OrNode(forY, forX);
         }
+
+        Stamp rawXStamp = forX.stamp(view);
+        Stamp rawYStamp = forY.stamp(view);
+        if (rawXStamp instanceof IntegerStamp && rawYStamp instanceof IntegerStamp) {
+            IntegerStamp xStamp = (IntegerStamp) rawXStamp;
+            IntegerStamp yStamp = (IntegerStamp) rawYStamp;
+            if (((~xStamp.downMask()) & yStamp.upMask()) == 0) {
+                return forX;
+            } else if (((~yStamp.downMask()) & xStamp.upMask()) == 0) {
+                return forY;
+            }
+        }
+
         if (forY.isConstant()) {
             Constant c = forY.asConstant();
             if (op.isNeutral(c)) {
                 return forX;
             }
 
-            if (c instanceof PrimitiveConstant && ((PrimitiveConstant) c).getJavaKind().isNumericInteger()) {
-                long rawY = ((PrimitiveConstant) c).asLong();
-                long mask = CodeUtil.mask(PrimitiveStamp.getBits(stamp));
-                if ((rawY & mask) == mask) {
-                    return ConstantNode.forIntegerStamp(stamp, mask);
-                }
-            }
-            return reassociate(self != null ? self : (OrNode) new OrNode(forX, forY).maybeCommuteInputs(), ValueNode.isConstantPredicate(), forX, forY);
+            return reassociate(self != null ? self : (OrNode) new OrNode(forX, forY).maybeCommuteInputs(), ValueNode.isConstantPredicate(), forX, forY, view);
         }
+
         if (forX instanceof NotNode && forY instanceof NotNode) {
-            return new NotNode(AndNode.create(((NotNode) forX).getValue(), ((NotNode) forY).getValue()));
+            return new NotNode(AndNode.create(((NotNode) forX).getValue(), ((NotNode) forY).getValue(), view));
         }
+
         return self != null ? self : new OrNode(forX, forY).maybeCommuteInputs();
     }
 

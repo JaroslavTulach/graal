@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * The Universal Permissive License (UPL), Version 1.0
@@ -40,31 +40,35 @@
  */
 package com.oracle.truffle.sl.builtins;
 
-import com.oracle.truffle.api.dsl.Cached;
+import com.oracle.truffle.api.dsl.CachedContext;
 import com.oracle.truffle.api.dsl.Specialization;
+import com.oracle.truffle.api.interop.InteropLibrary;
+import com.oracle.truffle.api.interop.UnknownIdentifierException;
+import com.oracle.truffle.api.interop.UnsupportedMessageException;
+import com.oracle.truffle.api.library.CachedLibrary;
 import com.oracle.truffle.api.nodes.NodeInfo;
+import com.oracle.truffle.sl.SLException;
+import com.oracle.truffle.sl.SLLanguage;
+import com.oracle.truffle.sl.runtime.SLContext;
+import com.oracle.truffle.sl.runtime.SLNull;
 
 /**
- * Built-in function that goes through the other registered languages to find an exported global
- * symbol of the specified name. See <link>SLContext#import(String)</link>.
+ * Built-in function that goes through to import a symbol from the polyglot bindings.
  */
 @NodeInfo(shortName = "import")
-@SuppressWarnings("unused")
 public abstract class SLImportBuiltin extends SLBuiltinNode {
 
-    @Specialization(guards = "stringsEqual(cachedName, name)")
-    public Object importSymbol(String name,
-                    @Cached("name") String cachedName,
-                    @Cached("doImport(name)") Object symbol) {
-        return symbol;
+    @Specialization
+    public Object importSymbol(String symbol,
+                    @CachedLibrary(limit = "3") InteropLibrary arrays,
+                    @CachedContext(SLLanguage.class) SLContext context) {
+        try {
+            return arrays.readMember(context.getPolyglotBindings(), symbol);
+        } catch (UnsupportedMessageException | UnknownIdentifierException e) {
+            return SLNull.SINGLETON;
+        } catch (SecurityException e) {
+            throw new SLException("No polyglot access allowed.", this);
+        }
     }
 
-    protected Object doImport(String name) {
-        return getContext().importSymbol(name);
-    }
-
-    /* Work around findbugs warning in generate code. */
-    protected static boolean stringsEqual(String a, String b) {
-        return a.equals(b);
-    }
 }

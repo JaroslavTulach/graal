@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2013, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2013, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -25,6 +27,8 @@ package org.graalvm.compiler.phases.common.inlining.info;
 import java.util.ArrayList;
 import java.util.List;
 
+import org.graalvm.collections.EconomicSet;
+import org.graalvm.collections.Equivalence;
 import org.graalvm.compiler.core.common.type.StampFactory;
 import org.graalvm.compiler.graph.Node;
 import org.graalvm.compiler.nodes.AbstractBeginNode;
@@ -39,6 +43,7 @@ import org.graalvm.compiler.nodes.FrameState;
 import org.graalvm.compiler.nodes.Invoke;
 import org.graalvm.compiler.nodes.InvokeWithExceptionNode;
 import org.graalvm.compiler.nodes.MergeNode;
+import org.graalvm.compiler.nodes.NodeView;
 import org.graalvm.compiler.nodes.PhiNode;
 import org.graalvm.compiler.nodes.PiNode;
 import org.graalvm.compiler.nodes.StructuredGraph;
@@ -53,8 +58,6 @@ import org.graalvm.compiler.nodes.util.GraphUtil;
 import org.graalvm.compiler.phases.common.inlining.InliningUtil;
 import org.graalvm.compiler.phases.common.inlining.info.elem.Inlineable;
 import org.graalvm.compiler.phases.util.Providers;
-import org.graalvm.util.EconomicSet;
-import org.graalvm.util.Equivalence;
 
 import jdk.vm.ci.meta.ConstantReflectionProvider;
 import jdk.vm.ci.meta.DeoptimizationAction;
@@ -155,11 +158,11 @@ public class MultiTypeGuardInlineInfo extends AbstractInlineInfo {
     }
 
     @Override
-    public EconomicSet<Node> inline(Providers providers) {
+    public EconomicSet<Node> inline(Providers providers, String reason) {
         if (hasSingleMethod()) {
-            return inlineSingleMethod(graph(), providers.getStampProvider(), providers.getConstantReflection());
+            return inlineSingleMethod(graph(), providers.getStampProvider(), providers.getConstantReflection(), reason);
         } else {
-            return inlineMultipleMethods(graph(), providers);
+            return inlineMultipleMethods(graph(), providers, reason);
         }
     }
 
@@ -181,7 +184,7 @@ public class MultiTypeGuardInlineInfo extends AbstractInlineInfo {
         return notRecordedTypeProbability > 0;
     }
 
-    private EconomicSet<Node> inlineMultipleMethods(StructuredGraph graph, Providers providers) {
+    private EconomicSet<Node> inlineMultipleMethods(StructuredGraph graph, Providers providers, String reason) {
         int numberOfMethods = concretes.size();
         FixedNode continuation = invoke.next();
 
@@ -191,7 +194,7 @@ public class MultiTypeGuardInlineInfo extends AbstractInlineInfo {
 
         PhiNode returnValuePhi = null;
         if (invoke.asNode().getStackKind() != JavaKind.Void) {
-            returnValuePhi = graph.addWithoutUnique(new ValuePhiNode(invoke.asNode().stamp().unrestricted(), returnMerge));
+            returnValuePhi = graph.addWithoutUnique(new ValuePhiNode(invoke.asNode().stamp(NodeView.DEFAULT).unrestricted(), returnMerge));
         }
 
         AbstractMergeNode exceptionMerge = null;
@@ -205,8 +208,10 @@ public class MultiTypeGuardInlineInfo extends AbstractInlineInfo {
             FixedNode exceptionSux = exceptionEdge.next();
             graph.addBeforeFixed(exceptionSux, exceptionMerge);
             exceptionObjectPhi = graph.addWithoutUnique(new ValuePhiNode(StampFactory.forKind(JavaKind.Object), exceptionMerge));
-            exceptionMerge.setStateAfter(exceptionEdge.stateAfter().duplicateModified(invoke.stateAfter().bci, true, JavaKind.Object, new JavaKind[]{JavaKind.Object},
-                            new ValueNode[]{exceptionObjectPhi}));
+
+            assert exceptionEdge.stateAfter().bci == invoke.bci();
+            assert exceptionEdge.stateAfter().rethrowException();
+            exceptionMerge.setStateAfter(exceptionEdge.stateAfter().duplicateModified(JavaKind.Object, JavaKind.Object, exceptionObjectPhi));
         }
 
         // create one separate block for each invoked method
@@ -276,7 +281,7 @@ public class MultiTypeGuardInlineInfo extends AbstractInlineInfo {
         // do the actual inlining for every invoke
         for (int i = 0; i < numberOfMethods; i++) {
             Invoke invokeForInlining = (Invoke) successors[i].next();
-            canonicalizeNodes.addAll(doInline(i, invokeForInlining));
+            canonicalizeNodes.addAll(doInline(i, invokeForInlining, reason));
         }
         if (returnValuePhi != null) {
             canonicalizeNodes.add(returnValuePhi);
@@ -284,8 +289,8 @@ public class MultiTypeGuardInlineInfo extends AbstractInlineInfo {
         return canonicalizeNodes;
     }
 
-    protected EconomicSet<Node> doInline(int index, Invoke invokeForInlining) {
-        return inline(invokeForInlining, methodAt(index), inlineableElementAt(index), false);
+    protected EconomicSet<Node> doInline(int index, Invoke invokeForInlining, String reason) {
+        return inline(invokeForInlining, methodAt(index), inlineableElementAt(index), false, reason);
     }
 
     private int getTypeCount(int concreteMethodIndex) {
@@ -321,7 +326,7 @@ public class MultiTypeGuardInlineInfo extends AbstractInlineInfo {
         return result;
     }
 
-    private EconomicSet<Node> inlineSingleMethod(StructuredGraph graph, StampProvider stampProvider, ConstantReflectionProvider constantReflection) {
+    private EconomicSet<Node> inlineSingleMethod(StructuredGraph graph, StampProvider stampProvider, ConstantReflectionProvider constantReflection, String reason) {
         assert concretes.size() == 1 && inlineableElements.length == 1 && ptypes.size() > 1 && !shouldFallbackToInvoke() && notRecordedTypeProbability == 0;
 
         AbstractBeginNode calleeEntryNode = graph.add(new BeginNode());
@@ -332,7 +337,7 @@ public class MultiTypeGuardInlineInfo extends AbstractInlineInfo {
 
         calleeEntryNode.setNext(invoke.asNode());
 
-        return inline(invoke, methodAt(0), inlineableElementAt(0), false);
+        return inline(invoke, methodAt(0), inlineableElementAt(0), false, reason);
     }
 
     private boolean createDispatchOnTypeBeforeInvoke(StructuredGraph graph, AbstractBeginNode[] successors, boolean invokeIsOnlySuccessor, StampProvider stampProvider,
@@ -393,7 +398,7 @@ public class MultiTypeGuardInlineInfo extends AbstractInlineInfo {
         JavaKind kind = invoke.asNode().getStackKind();
         if (kind != JavaKind.Void) {
             FrameState stateAfter = invoke.stateAfter();
-            stateAfter = stateAfter.duplicate(stateAfter.bci);
+            stateAfter = stateAfter.duplicate();
             stateAfter.replaceFirstInput(invoke.asNode(), result.asNode());
             result.setStateAfter(stateAfter);
         }

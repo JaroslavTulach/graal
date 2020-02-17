@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2014, 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2014, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -23,7 +25,7 @@
 package org.graalvm.compiler.jtt.except;
 
 import org.graalvm.compiler.jtt.JTTTest;
-import org.graalvm.compiler.test.ExportingClassLoader;
+import org.graalvm.compiler.api.test.ExportingClassLoader;
 import org.junit.BeforeClass;
 import org.junit.Test;
 import org.objectweb.asm.ClassWriter;
@@ -149,8 +151,8 @@ public class UntrustedInterfaces extends JTTTest {
 
     // Checkstyle: stop
     @BeforeClass
-    public static void setUp() throws InstantiationException, IllegalAccessException, ClassNotFoundException {
-        poisonPill = (Pill) new PoisonLoader().findClass(PoisonLoader.POISON_IMPL_NAME).newInstance();
+    public static void setUp() throws Exception {
+        poisonPill = (Pill) new PoisonLoader().findClass(PoisonLoader.POISON_IMPL_NAME).getDeclaredConstructor().newInstance();
     }
 
     // Checkstyle: resume

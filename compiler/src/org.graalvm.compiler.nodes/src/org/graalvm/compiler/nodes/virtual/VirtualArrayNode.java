@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2011, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -24,6 +26,8 @@ package org.graalvm.compiler.nodes.virtual;
 
 import java.nio.ByteOrder;
 
+import org.graalvm.compiler.core.common.type.PrimitiveStamp;
+import org.graalvm.compiler.core.common.type.Stamp;
 import org.graalvm.compiler.graph.NodeClass;
 import org.graalvm.compiler.nodeinfo.NodeInfo;
 import org.graalvm.compiler.nodeinfo.Verbosity;
@@ -33,9 +37,11 @@ import org.graalvm.compiler.nodes.ValueNode;
 import org.graalvm.compiler.nodes.spi.ArrayLengthProvider;
 import org.graalvm.compiler.nodes.spi.NodeLIRBuilderTool;
 
+import jdk.vm.ci.meta.ConstantReflectionProvider;
 import jdk.vm.ci.meta.JavaKind;
+import jdk.vm.ci.meta.MetaAccessProvider;
 import jdk.vm.ci.meta.ResolvedJavaType;
-import sun.misc.Unsafe;
+import org.graalvm.compiler.nodes.spi.VirtualizerTool;
 
 @NodeInfo(nameTemplate = "VirtualArray({p#objectId}) {p#componentType/s}[{p#length}]")
 public class VirtualArrayNode extends VirtualObjectNode implements ArrayLengthProvider {
@@ -88,53 +94,14 @@ public class VirtualArrayNode extends VirtualObjectNode implements ArrayLengthPr
     }
 
     @Override
-    public int entryIndexForOffset(long constantOffset, JavaKind expectedEntryKind) {
-        return entryIndexForOffset(constantOffset, expectedEntryKind, componentType, length);
+    public int entryIndexForOffset(MetaAccessProvider metaAccess, long constantOffset, JavaKind expectedEntryKind) {
+        return entryIndexForOffset(metaAccess, constantOffset, expectedEntryKind, componentType, length);
     }
 
-    public static int entryIndexForOffset(long constantOffset, JavaKind expectedEntryKind, ResolvedJavaType componentType, int length) {
-        int baseOffset;
-        int indexScale;
-        switch (componentType.getJavaKind()) {
-            case Boolean:
-                baseOffset = Unsafe.ARRAY_BOOLEAN_BASE_OFFSET;
-                indexScale = Unsafe.ARRAY_BOOLEAN_INDEX_SCALE;
-                break;
-            case Byte:
-                baseOffset = Unsafe.ARRAY_BYTE_BASE_OFFSET;
-                indexScale = Unsafe.ARRAY_BYTE_INDEX_SCALE;
-                break;
-            case Short:
-                baseOffset = Unsafe.ARRAY_SHORT_BASE_OFFSET;
-                indexScale = Unsafe.ARRAY_SHORT_INDEX_SCALE;
-                break;
-            case Char:
-                baseOffset = Unsafe.ARRAY_CHAR_BASE_OFFSET;
-                indexScale = Unsafe.ARRAY_CHAR_INDEX_SCALE;
-                break;
-            case Int:
-                baseOffset = Unsafe.ARRAY_INT_BASE_OFFSET;
-                indexScale = Unsafe.ARRAY_INT_INDEX_SCALE;
-                break;
-            case Long:
-                baseOffset = Unsafe.ARRAY_LONG_BASE_OFFSET;
-                indexScale = Unsafe.ARRAY_LONG_INDEX_SCALE;
-                break;
-            case Float:
-                baseOffset = Unsafe.ARRAY_FLOAT_BASE_OFFSET;
-                indexScale = Unsafe.ARRAY_FLOAT_INDEX_SCALE;
-                break;
-            case Double:
-                baseOffset = Unsafe.ARRAY_DOUBLE_BASE_OFFSET;
-                indexScale = Unsafe.ARRAY_DOUBLE_INDEX_SCALE;
-                break;
-            case Object:
-                baseOffset = Unsafe.ARRAY_OBJECT_BASE_OFFSET;
-                indexScale = Unsafe.ARRAY_OBJECT_INDEX_SCALE;
-                break;
-            default:
-                return -1;
-        }
+    public static int entryIndexForOffset(MetaAccessProvider metaAccess, long constantOffset, JavaKind expectedEntryKind, ResolvedJavaType componentType, int length) {
+        int baseOffset = metaAccess.getArrayBaseOffset(componentType.getJavaKind());
+        int indexScale = metaAccess.getArrayIndexScale(componentType.getJavaKind());
+
         long offset;
         if (ByteOrder.nativeOrder() == ByteOrder.BIG_ENDIAN && componentType.isPrimitive()) {
             // On big endian, we expect the value to be correctly aligned in memory
@@ -162,16 +129,41 @@ public class VirtualArrayNode extends VirtualObjectNode implements ArrayLengthPr
 
     @Override
     public VirtualArrayNode duplicate() {
-        return new VirtualArrayNode(componentType, length);
+        VirtualArrayNode node = new VirtualArrayNode(componentType, length);
+        node.setNodeSourcePosition(this.getNodeSourcePosition());
+        return node;
     }
 
     @Override
     public ValueNode getMaterializedRepresentation(FixedNode fixed, ValueNode[] entries, LockState locks) {
-        return new AllocatedObjectNode(this);
+        AllocatedObjectNode node = new AllocatedObjectNode(this);
+        node.setNodeSourcePosition(this.getNodeSourcePosition());
+        return node;
     }
 
     @Override
-    public ValueNode length() {
+    public ValueNode findLength(FindLengthMode mode, ConstantReflectionProvider constantReflection) {
         return ConstantNode.forInt(length);
+    }
+
+    /**
+     * Returns the number of bytes that the entry at a given index actually occupies.
+     */
+    public int byteArrayEntryByteCount(int index, VirtualizerTool tool) {
+        int i = index + 1;
+        while (i < entryCount() && tool.getEntry(this, i).isIllegalConstant()) {
+            i++;
+        }
+        return (i - index);
+    }
+
+    /**
+     * Performs some sanity checks.
+     */
+    public static ValueNode virtualizeByteArrayRead(ValueNode entry, JavaKind accessKind, Stamp targetStamp) {
+        assert !entry.isIllegalConstant();
+        assert targetStamp.getStackKind().isPrimitive();
+        assert accessKind.getBitCount() <= PrimitiveStamp.getBits(targetStamp);
+        return entry;
     }
 }

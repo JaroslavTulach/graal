@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2013, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * The Universal Permissive License (UPL), Version 1.0
@@ -42,56 +42,51 @@ package com.oracle.truffle.sl.test;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.assertSame;
+import static org.junit.Assert.fail;
 
 import java.io.ByteArrayOutputStream;
+import java.io.UnsupportedEncodingException;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
+import org.graalvm.polyglot.Context;
+import org.graalvm.polyglot.HostAccess;
+import org.graalvm.polyglot.Value;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 
-import com.oracle.truffle.api.interop.TruffleObject;
-import com.oracle.truffle.api.interop.java.JavaInterop;
-import com.oracle.truffle.api.source.Source;
-import com.oracle.truffle.api.vm.PolyglotEngine;
-import com.oracle.truffle.sl.SLLanguage;
-import com.oracle.truffle.sl.runtime.SLFunction;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import static org.junit.Assert.assertSame;
-import static org.junit.Assert.fail;
-
 public class SLJavaInteropTest {
 
-    private PolyglotEngine engine;
+    private Context context;
     private ByteArrayOutputStream os;
 
     @Before
     public void create() {
         os = new ByteArrayOutputStream();
-        engine = PolyglotEngine.newBuilder().setOut(os).build();
+        context = Context.newBuilder().allowHostAccess(HostAccess.ALL).out(os).build();
     }
 
     @After
     public void dispose() {
-        engine.dispose();
+        context.close();
     }
 
     @Test
     public void asFunction() throws Exception {
         String scriptText = "function test() {\n" + "    println(\"Called!\");\n" + "}\n";
-        Source script = Source.newBuilder(scriptText).name("Test").mimeType(SLLanguage.MIME_TYPE).build();
-        engine.eval(script);
-        PolyglotEngine.Value main = engine.findGlobalSymbol("test");
-        final Object value = main.get();
-        assertTrue("It's truffle object", value instanceof TruffleObject);
-        SLFunction rawFunction = main.as(SLFunction.class);
-        assertNotNull("One can get the type of the inner Truffle Object", rawFunction);
-        Runnable runnable = JavaInterop.asJavaFunction(Runnable.class, (TruffleObject) value);
+        context.eval("sl", scriptText);
+        Value main = lookup("test");
+        Runnable runnable = main.as(Runnable.class);
         runnable.run();
 
-        assertEquals("Called!\n", os.toString("UTF-8"));
+        assertEquals("Called!\n", toUnixString(os));
+    }
+
+    private Value lookup(String symbol) {
+        return context.getBindings("sl").getMember(symbol);
     }
 
     @Test
@@ -99,15 +94,12 @@ public class SLJavaInteropTest {
         String scriptText = "function values(a, b) {\n" + //
                         "  println(\"Called with \" + a + \" and \" + b);\n" + //
                         "}\n"; //
-        Source script = Source.newBuilder(scriptText).name("Test").mimeType("application/x-sl").build();
-        engine.eval(script);
-        PolyglotEngine.Value fn = engine.findGlobalSymbol("values");
-        final Object value = fn.get();
-        assertTrue("It's truffle object", value instanceof TruffleObject);
-        PassInValues valuesIn = JavaInterop.asJavaFunction(PassInValues.class, (TruffleObject) value);
+        context.eval("sl", scriptText);
+        Value fn = lookup("values");
+        PassInValues valuesIn = fn.as(PassInValues.class);
         valuesIn.call("OK", "Fine");
 
-        assertEquals("Called with OK and Fine\n", os.toString("UTF-8"));
+        assertEquals("Called with OK and Fine\n", toUnixString(os));
     }
 
     private static void assertNumber(double exp, Object real) {
@@ -118,7 +110,8 @@ public class SLJavaInteropTest {
         }
     }
 
-    interface PassInValues {
+    @FunctionalInterface
+    public interface PassInValues {
         void call(Object a, Object b);
     }
 
@@ -127,15 +120,11 @@ public class SLJavaInteropTest {
         String scriptText = "function values(a, b) {\n" + //
                         "  println(\"Called with \" + a[0] + a[1] + \" and \" + b);\n" + //
                         "}\n"; //
-        Source script = Source.newBuilder(scriptText).name("Test").mimeType("application/x-sl").build();
-        engine.eval(script);
-        PolyglotEngine.Value fn = engine.findGlobalSymbol("values");
-        final Object value = fn.get();
-        assertTrue("It's truffle object", value instanceof TruffleObject);
-        PassInArray valuesIn = JavaInterop.asJavaFunction(PassInArray.class, (TruffleObject) value);
-
+        context.eval("sl", scriptText);
+        Value fn = lookup("values");
+        PassInArray valuesIn = fn.as(PassInArray.class);
         valuesIn.call(new Object[]{"OK", "Fine"});
-        assertEquals("Called with OKFine and null\n", os.toString("UTF-8"));
+        assertEquals("Called with OKFine and NULL\n", toUnixString(os));
     }
 
     @Test
@@ -143,15 +132,12 @@ public class SLJavaInteropTest {
         String scriptText = "function values(a, b) {\n" + //
                         "  println(\"Called with \" + a + \" and \" + b);\n" + //
                         "}\n"; //
-        Source script = Source.newBuilder(scriptText).name("Test").mimeType("application/x-sl").build();
-        engine.eval(script);
-        PolyglotEngine.Value fn = engine.findGlobalSymbol("values");
-        final Object value = fn.get();
-        assertTrue("It's truffle object", value instanceof TruffleObject);
-        PassInVarArg valuesIn = JavaInterop.asJavaFunction(PassInVarArg.class, (TruffleObject) value);
+        context.eval("sl", scriptText);
+        Value fn = lookup("values");
+        PassInVarArg valuesIn = fn.as(PassInVarArg.class);
 
         valuesIn.call("OK", "Fine");
-        assertEquals("Called with OK and Fine\n", os.toString("UTF-8"));
+        assertEquals("Called with OK and Fine\n", toUnixString(os));
     }
 
     @Test
@@ -159,15 +145,12 @@ public class SLJavaInteropTest {
         String scriptText = "function values(a, b, c) {\n" + //
                         "  println(\"Called with \" + a + \" and \" + b + c);\n" + //
                         "}\n"; //
-        Source script = Source.newBuilder(scriptText).name("Test").mimeType("application/x-sl").build();
-        engine.eval(script);
-        PolyglotEngine.Value fn = engine.findGlobalSymbol("values");
-        final Object value = fn.get();
-        assertTrue("It's truffle object", value instanceof TruffleObject);
-        PassInArgAndVarArg valuesIn = JavaInterop.asJavaFunction(PassInArgAndVarArg.class, (TruffleObject) value);
+        context.eval("sl", scriptText);
+        Value fn = lookup("values");
+        PassInArgAndVarArg valuesIn = fn.as(PassInArgAndVarArg.class);
 
         valuesIn.call("OK", "Fine", "Well");
-        assertEquals("Called with OK and FineWell\n", os.toString("UTF-8"));
+        assertEquals("Called with OK and FineWell\n", toUnixString(os));
     }
 
     @Test
@@ -178,13 +161,12 @@ public class SLJavaInteropTest {
                         "  obj.value = v;\n" + //
                         "  return sum.sum(obj);\n" + //
                         "}\n"; //
-        Source script = Source.newBuilder(scriptText).name("Test").mimeType("application/x-sl").build();
-        engine.eval(script);
-        PolyglotEngine.Value fn = engine.findGlobalSymbol("values");
+        context.eval("sl", scriptText);
+        Value fn = lookup("values");
 
         Sum javaSum = new Sum();
         Object sum = javaSum;
-        Object ret1 = fn.execute(sum, "one", 1).get();
+        Object ret1 = fn.execute(sum, "one", 1).asHostObject();
         Object ret2 = fn.execute(sum, "two", 2).as(Object.class);
         Sum ret3 = fn.execute(sum, "three", 3).as(Sum.class);
 
@@ -202,9 +184,8 @@ public class SLJavaInteropTest {
                         "  obj.value = v;\n" + //
                         "  return sum.sum(obj);\n" + //
                         "}\n"; //
-        Source script = Source.newBuilder(scriptText).name("Test").mimeType("application/x-sl").build();
-        engine.eval(script);
-        Values fn = engine.findGlobalSymbol("values").as(Values.class);
+        context.eval("sl", scriptText);
+        Values fn = lookup("values").as(Values.class);
 
         Sum sum = new Sum();
         Object ret1 = fn.values(sum, "one", 1);
@@ -225,9 +206,8 @@ public class SLJavaInteropTest {
                         "  obj.value = v;\n" + //
                         "  return sum.sum(obj);\n" + //
                         "}\n"; //
-        Source script = Source.newBuilder(scriptText).name("Test").mimeType("application/x-sl").build();
-        engine.eval(script);
-        ValuesRaw fn = engine.findGlobalSymbol("values").as(ValuesRaw.class);
+        context.eval("sl", scriptText);
+        ValuesRaw fn = lookup("values").as(ValuesRaw.class);
 
         Sum sum = new Sum();
         Object ret1 = fn.values(sum, "one", 1);
@@ -254,9 +234,8 @@ public class SLJavaInteropTest {
                         "  obj.doSum2 = values;\n" + //
                         "  return obj;\n" + //
                         "}\n"; //
-        Source script = Source.newBuilder(scriptText).name("Test").mimeType("application/x-sl").build();
-        engine.eval(script);
-        DoSums fn = engine.findGlobalSymbol("create").execute().as(DoSums.class);
+        context.eval("sl", scriptText);
+        DoSums fn = lookup("create").execute().as(DoSums.class);
 
         Sum sum = new Sum();
         Object ret1 = fn.doSum1(sum, "one", 1);
@@ -274,9 +253,8 @@ public class SLJavaInteropTest {
         String scriptText = "function values(sum, arr) {\n" + //
                         "  sum.sumArray(arr);\n" + //
                         "}\n"; //
-        Source script = Source.newBuilder(scriptText).name("Test").mimeType("application/x-sl").build();
-        engine.eval(script);
-        PolyglotEngine.Value fn = engine.findGlobalSymbol("values");
+        context.eval("sl", scriptText);
+        Value fn = lookup("values");
 
         Sum javaSum = new Sum();
 
@@ -294,9 +272,8 @@ public class SLJavaInteropTest {
         String scriptText = "function values(sum, arr) {\n" + //
                         "  sum.sumArrayArray(arr);\n" + //
                         "}\n"; //
-        Source script = Source.newBuilder(scriptText).name("Test").mimeType("application/x-sl").build();
-        engine.eval(script);
-        PolyglotEngine.Value fn = engine.findGlobalSymbol("values");
+        context.eval("sl", scriptText);
+        Value fn = lookup("values");
 
         Sum javaSum = new Sum();
 
@@ -318,9 +295,8 @@ public class SLJavaInteropTest {
         String scriptText = "function values(sum, arr) {\n" + //
                         "  sum.sumArrayMap(arr);\n" + //
                         "}\n"; //
-        Source script = Source.newBuilder(scriptText).name("Test").mimeType("application/x-sl").build();
-        engine.eval(script);
-        PolyglotEngine.Value fn = engine.findGlobalSymbol("values");
+        context.eval("sl", scriptText);
+        Value fn = lookup("values");
 
         Sum javaSum = new Sum();
 
@@ -342,9 +318,8 @@ public class SLJavaInteropTest {
         String scriptText = "function values(sum, arr) {\n" + //
                         "  sum.sumMapArray(arr);\n" + //
                         "}\n"; //
-        Source script = Source.newBuilder(scriptText).name("Test").mimeType("application/x-sl").build();
-        engine.eval(script);
-        PolyglotEngine.Value fn = engine.findGlobalSymbol("values");
+        context.eval("sl", scriptText);
+        Value fn = lookup("values");
 
         Sum javaSum = new Sum();
 
@@ -362,54 +337,67 @@ public class SLJavaInteropTest {
 
     @Test
     public void accessJavaMap() {
-        String scriptText = "function write(map, key, value) {\n" + //
-                        "  map[key] = value;\n" + //
-                        "}\n" + //
-                        "function read(map, key) {\n" + //
-                        "  return map[key];\n" + //
-                        "}\n"; //
-        Source script = Source.newBuilder(scriptText).name("Test").mimeType("application/x-sl").build();
-        engine.eval(script);
-        PolyglotEngine.Value read = engine.findGlobalSymbol("read");
-        PolyglotEngine.Value write = engine.findGlobalSymbol("write");
+        String scriptText = "function write(map, key, value) {\n" +
+                        "  map.put(key, value);\n" +
+                        "}\n" +
+                        "function read(map, key) {\n" +
+                        "  return map.get(key);\n" +
+                        "}\n";
+        context.eval("sl", scriptText);
+        Value read = lookup("read");
+        Value write = lookup("write");
 
         Map<Object, Object> map = new HashMap<>();
         map.put("a", 42);
 
-        Object b = read.execute(map, "a").get();
+        Object b = read.execute(map, "a").as(Object.class);
         assertNumber(42L, b);
 
         write.execute(map, "a", 33);
 
-        Object c = read.execute(map, "a").get();
+        Object c = read.execute(map, "a").as(Object.class);
         assertNumber(33L, c);
     }
 
+    /**
+     * Converts a {@link ByteArrayOutputStream} content into UTF-8 String with UNIX line ends.
+     */
+    static String toUnixString(ByteArrayOutputStream stream) {
+        try {
+            return stream.toString("UTF-8").replace("\r\n", "\n");
+        } catch (UnsupportedEncodingException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
     @FunctionalInterface
-    interface Values {
+    public interface Values {
         Sum values(Sum sum, String key, int value);
     }
 
     @FunctionalInterface
-    interface ValuesRaw {
+    public interface ValuesRaw {
         Object values(Object sum, String key, int value);
     }
 
-    interface DoSums {
+    public interface DoSums {
         Object doSum1(Sum sum, String key, int value);
 
         Sum doSum2(Sum sum, String key, Integer value);
     }
 
-    interface PassInArray {
+    @FunctionalInterface
+    public interface PassInArray {
         void call(Object[] arr);
     }
 
-    interface PassInVarArg {
+    @FunctionalInterface
+    public interface PassInVarArg {
         void call(Object... arr);
     }
 
-    interface PassInArgAndVarArg {
+    @FunctionalInterface
+    public interface PassInArgAndVarArg {
         void call(Object first, Object... arr);
     }
 
@@ -442,11 +430,13 @@ public class SLJavaInteropTest {
     public static class Sum {
         int sum;
 
+        @HostAccess.Export
         public Sum sum(Pair p) {
             sum += p.value();
             return this;
         }
 
+        @HostAccess.Export
         public void sumArray(List<Pair> pairs) {
             Object[] arr = pairs.toArray();
             assertNotNull("Array created", arr);
@@ -455,6 +445,7 @@ public class SLJavaInteropTest {
             }
         }
 
+        @HostAccess.Export
         public void sumArrayArray(List<List<Pair>> pairs) {
             Object[] arr = pairs.toArray();
             assertNotNull("Array created", arr);
@@ -464,6 +455,7 @@ public class SLJavaInteropTest {
             }
         }
 
+        @HostAccess.Export
         public void sumArrayMap(List<List<Map<String, Integer>>> pairs) {
             Object[] arr = pairs.toArray();
             assertNotNull("Array created", arr);
@@ -476,6 +468,7 @@ public class SLJavaInteropTest {
             }
         }
 
+        @HostAccess.Export
         public void sumMapArray(Map<String, List<Pair>> pairs) {
             assertEquals("Two elements", 2, pairs.size());
             Object one = pairs.get("one");

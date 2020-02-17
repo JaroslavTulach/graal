@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2013, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2013, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -22,6 +24,7 @@
  */
 package org.graalvm.compiler.hotspot.replacements;
 
+import static org.graalvm.compiler.hotspot.GraalHotSpotVMConfigBase.INJECTED_METAACCESS;
 import static org.graalvm.compiler.hotspot.replacements.HotSpotReplacementsUtil.referentOffset;
 import static org.graalvm.compiler.replacements.SnippetTemplate.DEFAULT_REPLACER;
 
@@ -30,7 +33,7 @@ import org.graalvm.compiler.debug.DebugHandlersFactory;
 import org.graalvm.compiler.hotspot.meta.HotSpotProviders;
 import org.graalvm.compiler.nodes.extended.FixedValueAnchorNode;
 import org.graalvm.compiler.nodes.extended.RawLoadNode;
-import org.graalvm.compiler.nodes.memory.HeapAccess.BarrierType;
+import org.graalvm.compiler.nodes.memory.OnHeapMemoryAccess.BarrierType;
 import org.graalvm.compiler.nodes.spi.LoweringTool;
 import org.graalvm.compiler.options.OptionValues;
 import org.graalvm.compiler.replacements.SnippetTemplate.AbstractTemplates;
@@ -46,8 +49,8 @@ public class UnsafeLoadSnippets implements Snippets {
     @Snippet
     public static Object lowerUnsafeLoad(Object object, long offset) {
         Object fixedObject = FixedValueAnchorNode.getObject(object);
-        if (object instanceof java.lang.ref.Reference && referentOffset() == offset) {
-            return Word.objectToTrackedPointer(fixedObject).readObject((int) offset, BarrierType.PRECISE);
+        if (object instanceof java.lang.ref.Reference && referentOffset(INJECTED_METAACCESS) == offset) {
+            return Word.objectToTrackedPointer(fixedObject).readObject((int) offset, BarrierType.WEAK_FIELD);
         } else {
             return Word.objectToTrackedPointer(fixedObject).readObject((int) offset, BarrierType.NONE);
         }
@@ -65,7 +68,7 @@ public class UnsafeLoadSnippets implements Snippets {
             Arguments args = new Arguments(unsafeLoad, load.graph().getGuardsStage(), tool.getLoweringStage());
             args.add("object", load.object());
             args.add("offset", load.offset());
-            template(load.getDebug(), args).instantiate(providers.getMetaAccess(), load, DEFAULT_REPLACER, args);
+            template(load, args).instantiate(providers.getMetaAccess(), load, DEFAULT_REPLACER, args);
         }
     }
 }

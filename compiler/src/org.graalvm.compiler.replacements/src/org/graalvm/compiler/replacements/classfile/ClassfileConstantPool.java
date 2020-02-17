@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2016, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -112,6 +114,9 @@ class ClassfileConstantPool implements ConstantPool {
             case ClassfileConstant.CONSTANT_MethodType:
                 skipFully(stream, 2); // descriptor_index
                 return new ClassfileConstant.Unsupported(tag, "CONSTANT_MethodType_info");
+            case ClassfileConstant.CONSTANT_Dynamic:
+                skipFully(stream, 4); // bootstrap_method_attr_index, name_and_type_index
+                return new ClassfileConstant.Unsupported(tag, "CONSTANT_Dynamic_info");
             case ClassfileConstant.CONSTANT_InvokeDynamic:
                 skipFully(stream, 4); // bootstrap_method_attr_index, name_and_type_index
                 return new ClassfileConstant.Unsupported(tag, "CONSTANT_InvokeDynamic_info");

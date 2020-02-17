@@ -1,65 +1,57 @@
 /*
- * Copyright (c) 2012, 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
- * This code is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.  Oracle designates this
- * particular file as subject to the "Classpath" exception as provided
- * by Oracle in the LICENSE file that accompanied this code.
+ * The Universal Permissive License (UPL), Version 1.0
  *
- * This code is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
- * version 2 for more details (a copy is included in the LICENSE file that
- * accompanied this code).
+ * Subject to the condition set forth below, permission is hereby granted to any
+ * person obtaining a copy of this software, associated documentation and/or
+ * data (collectively the "Software"), free of charge and under any and all
+ * copyright rights in the Software, and any and all patent rights owned or
+ * freely licensable by each licensor hereunder covering either (i) the
+ * unmodified Software as contributed to or provided by such licensor, or (ii)
+ * the Larger Works (as defined below), to deal in both
  *
- * You should have received a copy of the GNU General Public License version
- * 2 along with this work; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
+ * (a) the Software, and
  *
- * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
- * or visit www.oracle.com if you need additional information or have any
- * questions.
+ * (b) any piece of software and/or hardware listed in the lrgrwrks.txt file if
+ * one is included with the Software each a "Larger Work" to which the Software
+ * is contributed by such licensors),
+ *
+ * without restriction, including without limitation the rights to copy, create
+ * derivative works of, display, perform, and distribute the Software and make,
+ * use, sell, offer for sale, import, export, have made, and have sold the
+ * Software and the Larger Work(s), and to sublicense the foregoing rights on
+ * either these or other terms.
+ *
+ * This license is subject to the following condition:
+ *
+ * The above copyright notice and either this complete permission notice or at a
+ * minimum a reference to the UPL must be included in all copies or substantial
+ * portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
  */
 package org.graalvm.word;
 
-import java.lang.annotation.ElementType;
-import java.lang.annotation.Retention;
-import java.lang.annotation.RetentionPolicy;
-import java.lang.annotation.Target;
+import org.graalvm.word.impl.WordBoxFactory;
+import org.graalvm.word.impl.WordFactoryOpcode;
+import org.graalvm.word.impl.WordFactoryOperation;
 
-public abstract class WordFactory {
+/**
+ * Provides factory method to create machine-word-sized values.
+ *
+ * @since 19.0
+ */
+public final class WordFactory {
 
-    /**
-     * Links a method to a canonical operation represented by an {@link FactoryOpcode} val.
-     */
-    @Retention(RetentionPolicy.RUNTIME)
-    @Target(ElementType.METHOD)
-    protected @interface FactoryOperation {
-        FactoryOpcode opcode();
-    }
-
-    /**
-     * The canonical {@link FactoryOperation} represented by a method in a word type.
-     */
-    protected enum FactoryOpcode {
-        ZERO,
-        FROM_UNSIGNED,
-        FROM_SIGNED,
-    }
-
-    protected interface BoxFactory {
-        <T extends WordBase> T box(long val);
-    }
-
-    protected static BoxFactory boxFactory;
-
-    /**
-     * We allow subclassing, because only subclasses can access the protected inner classes that we
-     * use to mark the operations.
-     */
-    protected WordFactory() {
+    private WordFactory() {
     }
 
     /**
@@ -67,10 +59,12 @@ public abstract class WordFactory {
      * unsigned zero.
      *
      * @return the constant 0.
+     *
+     * @since 19.0
      */
-    @FactoryOperation(opcode = FactoryOpcode.ZERO)
+    @WordFactoryOperation(opcode = WordFactoryOpcode.ZERO)
     public static <T extends WordBase> T zero() {
-        return boxFactory.box(0L);
+        return WordBoxFactory.box(0L);
     }
 
     /**
@@ -78,10 +72,12 @@ public abstract class WordFactory {
      * unsigned {@link #zero}.
      *
      * @return the null pointer.
+     *
+     * @since 19.0
      */
-    @FactoryOperation(opcode = FactoryOpcode.ZERO)
+    @WordFactoryOperation(opcode = WordFactoryOpcode.ZERO)
     public static <T extends PointerBase> T nullPointer() {
-        return boxFactory.box(0L);
+        return WordBoxFactory.box(0L);
     }
 
     /**
@@ -90,10 +86,12 @@ public abstract class WordFactory {
      *
      * @param val a 64 bit unsigned value
      * @return the value cast to Word
+     *
+     * @since 19.0
      */
-    @FactoryOperation(opcode = FactoryOpcode.FROM_UNSIGNED)
+    @WordFactoryOperation(opcode = WordFactoryOpcode.FROM_UNSIGNED)
     public static <T extends UnsignedWord> T unsigned(long val) {
-        return boxFactory.box(val);
+        return WordBoxFactory.box(val);
     }
 
     /**
@@ -102,10 +100,12 @@ public abstract class WordFactory {
      *
      * @param val a 64 bit unsigned value
      * @return the value cast to PointerBase
+     *
+     * @since 19.0
      */
-    @FactoryOperation(opcode = FactoryOpcode.FROM_UNSIGNED)
+    @WordFactoryOperation(opcode = WordFactoryOpcode.FROM_UNSIGNED)
     public static <T extends PointerBase> T pointer(long val) {
-        return boxFactory.box(val);
+        return WordBoxFactory.box(val);
     }
 
     /**
@@ -114,10 +114,12 @@ public abstract class WordFactory {
      *
      * @param val a 32 bit unsigned value
      * @return the value cast to Word
+     *
+     * @since 19.0
      */
-    @FactoryOperation(opcode = FactoryOpcode.FROM_UNSIGNED)
+    @WordFactoryOperation(opcode = WordFactoryOpcode.FROM_UNSIGNED)
     public static <T extends UnsignedWord> T unsigned(int val) {
-        return boxFactory.box(val & 0xffffffffL);
+        return WordBoxFactory.box(val & 0xffffffffL);
     }
 
     /**
@@ -126,10 +128,12 @@ public abstract class WordFactory {
      *
      * @param val a 64 bit signed value
      * @return the value cast to Word
+     *
+     * @since 19.0
      */
-    @FactoryOperation(opcode = FactoryOpcode.FROM_SIGNED)
+    @WordFactoryOperation(opcode = WordFactoryOpcode.FROM_SIGNED)
     public static <T extends SignedWord> T signed(long val) {
-        return boxFactory.box(val);
+        return WordBoxFactory.box(val);
     }
 
     /**
@@ -138,9 +142,11 @@ public abstract class WordFactory {
      *
      * @param val a 32 bit signed value
      * @return the value cast to Word
+     *
+     * @since 19.0
      */
-    @FactoryOperation(opcode = FactoryOpcode.FROM_SIGNED)
+    @WordFactoryOperation(opcode = WordFactoryOpcode.FROM_SIGNED)
     public static <T extends SignedWord> T signed(int val) {
-        return boxFactory.box(val);
+        return WordBoxFactory.box(val);
     }
 }

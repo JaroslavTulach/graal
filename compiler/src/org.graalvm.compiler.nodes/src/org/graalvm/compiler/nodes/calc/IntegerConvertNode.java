@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2014, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2014, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -22,8 +24,7 @@
  */
 package org.graalvm.compiler.nodes.calc;
 
-import java.io.Serializable;
-import java.util.function.Function;
+import static org.graalvm.compiler.nodes.calc.BinaryArithmeticNode.getArithmeticOpTable;
 
 import org.graalvm.compiler.core.common.type.ArithmeticOpTable;
 import org.graalvm.compiler.core.common.type.ArithmeticOpTable.IntegerConvertOp;
@@ -35,6 +36,7 @@ import org.graalvm.compiler.graph.spi.CanonicalizerTool;
 import org.graalvm.compiler.nodeinfo.NodeInfo;
 import org.graalvm.compiler.nodes.ArithmeticOperation;
 import org.graalvm.compiler.nodes.ConstantNode;
+import org.graalvm.compiler.nodes.NodeView;
 import org.graalvm.compiler.nodes.StructuredGraph;
 import org.graalvm.compiler.nodes.ValueNode;
 import org.graalvm.compiler.nodes.spi.ArithmeticLIRLowerable;
@@ -50,23 +52,14 @@ import jdk.vm.ci.meta.ConstantReflectionProvider;
 public abstract class IntegerConvertNode<OP, REV> extends UnaryNode implements ArithmeticOperation, ConvertNode, ArithmeticLIRLowerable, StampInverter {
     @SuppressWarnings("rawtypes") public static final NodeClass<IntegerConvertNode> TYPE = NodeClass.create(IntegerConvertNode.class);
 
-    protected final SerializableIntegerConvertFunction<OP> getOp;
-    protected final SerializableIntegerConvertFunction<REV> getReverseOp;
-
     protected final int inputBits;
     protected final int resultBits;
 
-    protected interface SerializableIntegerConvertFunction<T> extends Function<ArithmeticOpTable, IntegerConvertOp<T>>, Serializable {
-    }
-
-    protected IntegerConvertNode(NodeClass<? extends IntegerConvertNode<OP, REV>> c, SerializableIntegerConvertFunction<OP> getOp, SerializableIntegerConvertFunction<REV> getReverseOp, int inputBits,
-                    int resultBits, ValueNode input) {
-        super(c, getOp.apply(ArithmeticOpTable.forStamp(input.stamp())).foldStamp(inputBits, resultBits, input.stamp()), input);
-        this.getOp = getOp;
-        this.getReverseOp = getReverseOp;
+    protected IntegerConvertNode(NodeClass<? extends IntegerConvertNode<OP, REV>> c, IntegerConvertOp<OP> opForStampComputation, int inputBits, int resultBits, ValueNode input) {
+        super(c, opForStampComputation.foldStamp(inputBits, resultBits, input.stamp(NodeView.DEFAULT)), input);
         this.inputBits = inputBits;
         this.resultBits = resultBits;
-        assert ((PrimitiveStamp) input.stamp()).getBits() == inputBits;
+        assert PrimitiveStamp.getBits(input.stamp(NodeView.DEFAULT)) == 0 || PrimitiveStamp.getBits(input.stamp(NodeView.DEFAULT)) == inputBits;
     }
 
     public int getInputBits() {
@@ -77,13 +70,13 @@ public abstract class IntegerConvertNode<OP, REV> extends UnaryNode implements A
         return resultBits;
     }
 
-    protected final IntegerConvertOp<OP> getOp(ValueNode forValue) {
-        return getOp.apply(ArithmeticOpTable.forStamp(forValue.stamp()));
-    }
+    protected abstract IntegerConvertOp<OP> getOp(ArithmeticOpTable table);
+
+    protected abstract IntegerConvertOp<REV> getReverseOp(ArithmeticOpTable table);
 
     @Override
     public final IntegerConvertOp<OP> getArithmeticOp() {
-        return getOp(getValue());
+        return getOp(getArithmeticOpTable(getValue()));
     }
 
     @Override
@@ -93,19 +86,19 @@ public abstract class IntegerConvertNode<OP, REV> extends UnaryNode implements A
 
     @Override
     public Constant reverse(Constant c, ConstantReflectionProvider constantReflection) {
-        IntegerConvertOp<REV> reverse = getReverseOp.apply(ArithmeticOpTable.forStamp(stamp()));
+        IntegerConvertOp<REV> reverse = getReverseOp(ArithmeticOpTable.forStamp(stamp(NodeView.DEFAULT)));
         return reverse.foldConstant(getResultBits(), getInputBits(), c);
     }
 
     @Override
     public Stamp foldStamp(Stamp newStamp) {
-        assert newStamp.isCompatible(getValue().stamp());
+        assert newStamp.isCompatible(getValue().stamp(NodeView.DEFAULT));
         return getArithmeticOp().foldStamp(inputBits, resultBits, newStamp);
     }
 
     @Override
     public ValueNode canonical(CanonicalizerTool tool, ValueNode forValue) {
-        ValueNode synonym = findSynonym(getOp(forValue), forValue, inputBits, resultBits, stamp());
+        ValueNode synonym = findSynonym(getOp(getArithmeticOpTable(forValue)), forValue, inputBits, resultBits, stamp(NodeView.DEFAULT));
         if (synonym != null) {
             return synonym;
         }
@@ -121,12 +114,12 @@ public abstract class IntegerConvertNode<OP, REV> extends UnaryNode implements A
         return null;
     }
 
-    public static ValueNode convert(ValueNode input, Stamp stamp) {
-        return convert(input, stamp, false);
+    public static ValueNode convert(ValueNode input, Stamp stamp, NodeView view) {
+        return convert(input, stamp, false, view);
     }
 
-    public static ValueNode convert(ValueNode input, Stamp stamp, StructuredGraph graph) {
-        ValueNode convert = convert(input, stamp, false);
+    public static ValueNode convert(ValueNode input, Stamp stamp, StructuredGraph graph, NodeView view) {
+        ValueNode convert = convert(input, stamp, false, view);
         if (!convert.isAlive()) {
             assert !convert.isDeleted();
             convert = graph.addOrUniqueWithInputs(convert);
@@ -134,12 +127,21 @@ public abstract class IntegerConvertNode<OP, REV> extends UnaryNode implements A
         return convert;
     }
 
-    public static ValueNode convertUnsigned(ValueNode input, Stamp stamp) {
-        return convert(input, stamp, true);
+    public static ValueNode convertUnsigned(ValueNode input, Stamp stamp, NodeView view) {
+        return convert(input, stamp, true, view);
     }
 
-    public static ValueNode convert(ValueNode input, Stamp stamp, boolean zeroExtend) {
-        IntegerStamp fromStamp = (IntegerStamp) input.stamp();
+    public static ValueNode convertUnsigned(ValueNode input, Stamp stamp, StructuredGraph graph, NodeView view) {
+        ValueNode convert = convert(input, stamp, true, view);
+        if (!convert.isAlive()) {
+            assert !convert.isDeleted();
+            convert = graph.addOrUniqueWithInputs(convert);
+        }
+        return convert;
+    }
+
+    public static ValueNode convert(ValueNode input, Stamp stamp, boolean zeroExtend, NodeView view) {
+        IntegerStamp fromStamp = (IntegerStamp) input.stamp(view);
         IntegerStamp toStamp = (IntegerStamp) stamp;
 
         ValueNode result;
@@ -149,13 +151,13 @@ public abstract class IntegerConvertNode<OP, REV> extends UnaryNode implements A
             result = new NarrowNode(input, fromStamp.getBits(), toStamp.getBits());
         } else if (zeroExtend) {
             // toStamp.getBits() > fromStamp.getBits()
-            result = ZeroExtendNode.create(input, toStamp.getBits());
+            result = ZeroExtendNode.create(input, toStamp.getBits(), view);
         } else {
             // toStamp.getBits() > fromStamp.getBits()
-            result = SignExtendNode.create(input, toStamp.getBits());
+            result = SignExtendNode.create(input, toStamp.getBits(), view);
         }
 
-        IntegerStamp resultStamp = (IntegerStamp) result.stamp();
+        IntegerStamp resultStamp = (IntegerStamp) result.stamp(view);
         assert toStamp.getBits() == resultStamp.getBits();
         return result;
     }

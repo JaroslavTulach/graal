@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2011, 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -24,6 +26,7 @@ package org.graalvm.compiler.core.common.type;
 
 import org.graalvm.compiler.core.common.LIRKind;
 import org.graalvm.compiler.core.common.spi.LIRKindTool;
+import org.graalvm.compiler.serviceprovider.SpeculationReasonGroup.SpeculationContextObject;
 
 import jdk.vm.ci.meta.Constant;
 import jdk.vm.ci.meta.JavaKind;
@@ -34,7 +37,7 @@ import jdk.vm.ci.meta.ResolvedJavaType;
 /**
  * A stamp is the basis for a type system.
  */
-public abstract class Stamp {
+public abstract class Stamp implements SpeculationContextObject {
 
     protected Stamp() {
     }
@@ -133,6 +136,13 @@ public abstract class Stamp {
     }
 
     /**
+     * Tests whether this stamp represents a pointer value.
+     */
+    public boolean isPointerStamp() {
+        return this instanceof AbstractPointerStamp;
+    }
+
+    /**
      * If this stamp represents a single value, the methods returns this single value. It returns
      * null otherwise.
      *
@@ -183,4 +193,15 @@ public abstract class Stamp {
         }
         return false;
     }
+
+    /**
+     * Convert a Stamp into a representation that can be resolved symbolically into the original
+     * stamp. If this stamp contains no references to JVMCI types then simply return null.
+     */
+    public SymbolicJVMCIReference<? extends Stamp> makeSymbolic() {
+        return null;
+    }
+
+    @Override
+    public abstract String toString();
 }

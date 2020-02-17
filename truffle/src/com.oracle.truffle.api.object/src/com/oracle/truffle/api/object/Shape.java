@@ -1,26 +1,42 @@
 /*
- * Copyright (c) 2012, 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
- * This code is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.  Oracle designates this
- * particular file as subject to the "Classpath" exception as provided
- * by Oracle in the LICENSE file that accompanied this code.
+ * The Universal Permissive License (UPL), Version 1.0
  *
- * This code is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
- * version 2 for more details (a copy is included in the LICENSE file that
- * accompanied this code).
+ * Subject to the condition set forth below, permission is hereby granted to any
+ * person obtaining a copy of this software, associated documentation and/or
+ * data (collectively the "Software"), free of charge and under any and all
+ * copyright rights in the Software, and any and all patent rights owned or
+ * freely licensable by each licensor hereunder covering either (i) the
+ * unmodified Software as contributed to or provided by such licensor, or (ii)
+ * the Larger Works (as defined below), to deal in both
  *
- * You should have received a copy of the GNU General Public License version
- * 2 along with this work; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
+ * (a) the Software, and
  *
- * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
- * or visit www.oracle.com if you need additional information or have any
- * questions.
+ * (b) any piece of software and/or hardware listed in the lrgrwrks.txt file if
+ * one is included with the Software each a "Larger Work" to which the Software
+ * is contributed by such licensors),
+ *
+ * without restriction, including without limitation the rights to copy, create
+ * derivative works of, display, perform, and distribute the Software and make,
+ * use, sell, offer for sale, import, export, have made, and have sold the
+ * Software and the Larger Work(s), and to sublicense the foregoing rights on
+ * either these or other terms.
+ *
+ * This license is subject to the following condition:
+ *
+ * The above copyright notice and either this complete permission notice or at a
+ * minimum a reference to the UPL must be included in all copies or substantial
+ * portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
  */
 package com.oracle.truffle.api.object;
 
@@ -96,7 +112,9 @@ public abstract class Shape {
      *
      * @return list of properties
      * @since 0.8 or earlier
+     * @deprecated use {@link #getPropertyList()} instead
      */
+    @Deprecated
     public abstract List<Property> getPropertyList(Pred<Property> filter);
 
     /**
@@ -120,7 +138,9 @@ public abstract class Shape {
      * Get a filtered list of property keys in insertion order.
      *
      * @since 0.8 or earlier
+     * @deprecated use {@link #getKeyList()} instead
      */
+    @Deprecated
     public abstract List<Object> getKeyList(Pred<Property> filter);
 
     /**
@@ -224,7 +244,7 @@ public abstract class Shape {
     public abstract int getPropertyCount();
 
     /**
-     * Get the shape's operations.
+     * Get the shape's object type info.
      *
      * @since 0.8 or earlier
      */
@@ -238,7 +258,7 @@ public abstract class Shape {
     public abstract Shape getRoot();
 
     /**
-     * Check whether this shape is identical to the given shape.
+     * Checks whether the given object's shape is identical to this shape.
      *
      * @since 0.8 or earlier
      */
@@ -262,7 +282,9 @@ public abstract class Shape {
      * Query whether the shape has a transition with the given key.
      *
      * @since 0.8 or earlier
+     * @deprecated the result of this method may change at any time
      */
+    @Deprecated
     public abstract boolean hasTransitionWithKey(Object key);
 
     /**
@@ -359,10 +381,14 @@ public abstract class Shape {
         }
 
         /** @since 0.8 or earlier */
+        @Deprecated
         protected abstract Location locationForValue(Object value, boolean useFinal, boolean nonNull);
 
         /**
          * Create a new location compatible with the given initial value.
+         *
+         * Use {@link #locationForType(Class)} or {@link Shape#defineProperty(Object, Object, int)}
+         * instead.
          *
          * @param value the initial value this location is going to be assigned
          * @since 0.8 or earlier
@@ -377,7 +403,10 @@ public abstract class Shape {
          * @param value the initial value this location is going to be assigned
          * @param modifiers additional restrictions and semantics
          * @since 0.8 or earlier
+         * @deprecated use {@link #locationForType(Class, EnumSet)} or
+         *             {@link Shape#defineProperty(Object, Object, int)} instead
          */
+        @Deprecated
         public final Location locationForValue(Object value, EnumSet<LocationModifier> modifiers) {
             assert value != null || !modifiers.contains(LocationModifier.NonNull);
             return locationForValue(value, modifiers.contains(LocationModifier.Final), modifiers.contains(LocationModifier.NonNull));
@@ -446,7 +475,10 @@ public abstract class Shape {
      *
      * @param <T> the type of the input to the predicate
      * @since 0.8 or earlier
+     * @deprecated all methods that use this interface are deprecated; use
+     *             {@link java.util.function.Predicate} instead.
      */
+    @Deprecated
     public interface Pred<T> {
         /**
          * Evaluates this predicate on the given argument.

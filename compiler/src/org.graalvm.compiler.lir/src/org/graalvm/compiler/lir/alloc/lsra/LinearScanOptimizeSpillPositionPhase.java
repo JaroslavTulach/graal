@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2015, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -148,10 +150,10 @@ public final class LinearScanOptimizeSpillPositionPhase extends LinearScanAlloca
                 debug.log("Better spill position found (Block %s)", spillBlock);
             }
 
-            if (defBlock.probability() <= spillBlock.probability()) {
-                debug.log(DebugContext.VERBOSE_LEVEL, "Definition has lower probability %s (%f) is lower than spill block %s (%f)", defBlock, defBlock.probability(), spillBlock,
-                                spillBlock.probability());
-                // better spill block has the same probability -> do nothing
+            if (defBlock.getRelativeFrequency() <= spillBlock.getRelativeFrequency()) {
+                debug.log(DebugContext.VERBOSE_LEVEL, "Definition has lower frequency %s (%f) is lower than spill block %s (%f)", defBlock, defBlock.getRelativeFrequency(), spillBlock,
+                                spillBlock.getRelativeFrequency());
+                // better spill block has the same frequency -> do nothing
                 interval.setSpillState(SpillState.StoreAtDefinition);
                 return;
             }

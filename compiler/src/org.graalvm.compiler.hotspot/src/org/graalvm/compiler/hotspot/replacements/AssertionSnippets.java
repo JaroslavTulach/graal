@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2014, 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2014, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -22,6 +24,8 @@
  */
 package org.graalvm.compiler.hotspot.replacements;
 
+import static org.graalvm.compiler.api.directives.GraalDirectives.SLOWPATH_PROBABILITY;
+import static org.graalvm.compiler.api.directives.GraalDirectives.injectBranchProbability;
 import static org.graalvm.compiler.replacements.SnippetTemplate.DEFAULT_REPLACER;
 import static org.graalvm.compiler.replacements.nodes.CStringConstant.cstring;
 
@@ -56,14 +60,14 @@ public class AssertionSnippets implements Snippets {
 
     @Snippet
     public static void assertion(boolean condition, @ConstantParameter String message) {
-        if (!condition) {
+        if (injectBranchProbability(SLOWPATH_PROBABILITY, !condition)) {
             vmMessageC(ASSERTION_VM_MESSAGE_C, true, cstring(message), 0L, 0L, 0L);
         }
     }
 
     @Snippet
     public static void stubAssertion(boolean condition, @ConstantParameter String message) {
-        if (!condition) {
+        if (injectBranchProbability(SLOWPATH_PROBABILITY, !condition)) {
             vmMessageC(ASSERTION_VM_MESSAGE_C, true, cstring(message), 0L, 0L, 0L);
         }
     }
@@ -86,7 +90,7 @@ public class AssertionSnippets implements Snippets {
             args.add("condition", assertionNode.condition());
             args.addConst("message", "failed runtime assertion in snippet/stub: " + assertionNode.message() + " (" + graph.method() + ")");
 
-            template(assertionNode.getDebug(), args).instantiate(providers.getMetaAccess(), assertionNode, DEFAULT_REPLACER, args);
+            template(assertionNode, args).instantiate(providers.getMetaAccess(), assertionNode, DEFAULT_REPLACER, args);
         }
     }
 }

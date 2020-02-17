@@ -13,18 +13,48 @@ addons:
 sudo: required
 dist: trusty
 
+jdk:
+    - openjdk11
+
 env:
   global:
-    - JVMCI_VERSION="jvmci-0.36"
-    - JVMCI_BASE_JDK8="openjdk1.8.0_141"
-    - JDK9_BUILD="181"
-  matrix:
-    - JDK="jdk8" GATE="style,fullbuild"
-    - JDK="jdk8" GATE="build,test"
-    - JDK="jdk8" GATE="build,bootstraplite"
-    - JDK="jdk9" GATE="style,fullbuild"
-    - JDK="jdk9" GATE="build,test"
-    - JDK="jdk9" GATE="build,bootstraplite"
+    - JVMCI_VERSION="jvmci-20.0-b02"
+    - JDK8_UPDATE_VERSION="242"
+    - JDK8_UPDATE_VERSION_SUFFIX=""
+
+matrix:
+  include:
+  - env: JDK="jdk8" GATE="style,fullbuild" PRIMARY="substratevm"
+  - env: JDK="jdk8" GATE="build,test" PRIMARY="compiler"
+  - env: JDK="jdk8" GATE="build,test,helloworld" PRIMARY="substratevm"
+  - env: JDK="jdk8" GATE="build,bootstraplite" PRIMARY="compiler"
+  - env: JDK="jdk8" GATE="style,fullbuild,sulongBasic" PRIMARY="sulong"
+    addons:
+      apt:
+        packages:
+          - python-pip
+          - libc++1
+          - libc++abi1
+  - env: JDK="jdk8" GATE="build,sulong" PRIMARY="vm" DYNAMIC_IMPORTS="/sulong,/substratevm" DISABLE_POLYGLOT=true DISABLE_LIBPOLYGLOT=true
+    addons:
+      apt:
+        sources:
+          - ubuntu-toolchain-r-test
+        packages:
+          - libc++1
+          - libc++abi1
+  - env: JDK="jdk11" GATE="style,fullbuild" PRIMARY="compiler"
+  - env: JDK="jdk11" GATE="build,test" PRIMARY="compiler"
+  - env: JDK="jdk11" GATE="build,bootstraplite" PRIMARY="compiler"
+  - os: linux
+    arch: arm64
+    env: JDK="jdk11" GATE="fullbuild,test" PRIMARY="compiler"
+  - os: linux
+    arch: arm64
+    env: JDK="jdk11" GATE="build,bootstraplite" PRIMARY="compiler"
+# GR-16977
+#  - env: JDK="jdk11" GATE="build,test,helloworld" PRIMARY="substratevm"
+
 install:
   - |
       export MX_PATH=${TRAVIS_BUILD_DIR}/../mx
@@ -39,40 +69,44 @@ install:
         pip install pylint==1.1.0
 
         export ECLIPSE_TAR=${TRAVIS_BUILD_DIR}/../eclipse.tar.gz
-        wget http://archive.eclipse.org/eclipse/downloads/drops4/R-4.5.2-201602121500/eclipse-SDK-4.5.2-linux-gtk-x86_64.tar.gz -O ${ECLIPSE_TAR}
+        wget https://archive.eclipse.org/eclipse/downloads/drops4/R-4.5.2-201602121500/eclipse-SDK-4.5.2-linux-gtk-x86_64.tar.gz -O ${ECLIPSE_TAR}
         tar -C ${TRAVIS_BUILD_DIR}/.. -xzf ${ECLIPSE_TAR}
         export ECLIPSE_EXE=${TRAVIS_BUILD_DIR}/../eclipse/eclipse
+
+        # the style gate needs the full commit history for checking copyright years
+        git fetch --unshallow
       fi
   - |
       if [[ ${GATE} == *fullbuild* ]]
       then
-        # JDT is not supported on JDK9
-        if [ "${JDK}" != "jdk9" ]
+        # Only test JDT on JDK8
+        if [ "${JDK}" == "jdk8" ]
         then
           export JDT=${MX_PATH}/ecj.jar
-          wget http://archive.eclipse.org/eclipse/downloads/drops4/R-4.5.2-201602121500/ecj-4.5.2.jar -O ${JDT}
+          wget https://archive.eclipse.org/eclipse/downloads/drops4/R-4.5.2-201602121500/ecj-4.5.2.jar -O ${JDT}
         fi
       fi
   - |
       if [ "${JDK}" == "jdk8" ]
       then
         JDK_TAR=${TRAVIS_BUILD_DIR}/../jdk.tar.gz
-        wget https://github.com/dougxc/openjdk8-jvmci-builder/releases/download/${JVMCI_VERSION}/${JVMCI_BASE_JDK8}-${JVMCI_VERSION}-linux-amd64.tar.gz -O ${JDK_TAR}
+        wget https://github.com/graalvm/openjdk8-jvmci-builder/releases/download/${JVMCI_VERSION}/openjdk-8u${JDK8_UPDATE_VERSION}${JDK8_UPDATE_VERSION_SUFFIX}-${JVMCI_VERSION}-linux-amd64.tar.gz -O ${JDK_TAR}
         tar -C ${TRAVIS_BUILD_DIR}/.. -xzf ${JDK_TAR}
-        export JAVA_HOME=${TRAVIS_BUILD_DIR}/../${JVMCI_BASE_JDK8}-${JVMCI_VERSION}
+        export JAVA_HOME=${TRAVIS_BUILD_DIR}/../openjdk1.8.0_${JDK8_UPDATE_VERSION}-${JVMCI_VERSION}
       fi
   - |
-      if [ "${JDK}" == "jdk9" ]
+      if [ "${JDK}" == "jdk11" ]
       then
-        JDK_TAR=${TRAVIS_BUILD_DIR}/../jdk.tar.gz
-        wget http://download.java.net/java/jdk9/archive/${JDK9_BUILD}/binaries/jdk-9+${JDK9_BUILD}_linux-x64_bin.tar.gz -O ${JDK_TAR}
-        tar -C ${TRAVIS_BUILD_DIR}/.. -xzf ${JDK_TAR}
-        export JAVA_HOME=${TRAVIS_BUILD_DIR}/../jdk-9
+        # Set the JAVA_HOME to openjdk11 if it is not set
+        if [ "${JAVA_HOME}" == "" ]
+        then
+          export JAVA_HOME=$(realpath $(dirname $(which java | xargs realpath))/../)
+        fi
       fi
 
 script:
   - echo ${JAVA_HOME}
   - ${JAVA_HOME}/bin/java -version
-  - mx -v --primary-suite-path ${TRAVIS_BUILD_DIR}/compiler --java-home=${JAVA_HOME} gate --strict-mode --tags ${GATE}
+  - mx --primary-suite-path ${TRAVIS_BUILD_DIR}/${PRIMARY} --J @"-Xmx2g" --java-home=${JAVA_HOME} gate --strict-mode --tags ${GATE}
 after_failure:
   - cat hs_err*

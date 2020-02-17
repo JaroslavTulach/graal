@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2016, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -24,6 +26,8 @@ package org.graalvm.compiler.replacements.nodes;
 
 import static org.graalvm.compiler.nodeinfo.NodeCycles.CYCLES_UNKNOWN;
 import static org.graalvm.compiler.nodeinfo.NodeSize.SIZE_1;
+
+import jdk.vm.ci.meta.Value;
 import org.graalvm.compiler.core.common.spi.ForeignCallDescriptor;
 import org.graalvm.compiler.core.common.type.FloatStamp;
 import org.graalvm.compiler.core.common.type.PrimitiveStamp;
@@ -35,6 +39,7 @@ import org.graalvm.compiler.graph.spi.CanonicalizerTool;
 import org.graalvm.compiler.lir.gen.ArithmeticLIRGeneratorTool;
 import org.graalvm.compiler.nodeinfo.NodeInfo;
 import org.graalvm.compiler.nodes.ConstantNode;
+import org.graalvm.compiler.nodes.NodeView;
 import org.graalvm.compiler.nodes.ValueNode;
 import org.graalvm.compiler.nodes.calc.BinaryNode;
 import org.graalvm.compiler.nodes.calc.FloatDivNode;
@@ -43,10 +48,9 @@ import org.graalvm.compiler.nodes.calc.SqrtNode;
 import org.graalvm.compiler.nodes.spi.ArithmeticLIRLowerable;
 import org.graalvm.compiler.nodes.spi.Lowerable;
 import org.graalvm.compiler.nodes.spi.LoweringTool;
-import org.graalvm.compiler.nodes.spi.NodeLIRBuilderTool;
 
 import jdk.vm.ci.meta.JavaKind;
-import jdk.vm.ci.meta.Value;
+import org.graalvm.compiler.nodes.spi.NodeLIRBuilderTool;
 
 @NodeInfo(nameTemplate = "MathIntrinsic#{p#operation/s}", cycles = CYCLES_UNKNOWN, size = SIZE_1)
 public final class BinaryMathIntrinsicNode extends BinaryNode implements ArithmeticLIRLowerable, Lowerable {
@@ -86,13 +90,13 @@ public final class BinaryMathIntrinsicNode extends BinaryNode implements Arithme
 
     @Override
     public Stamp foldStamp(Stamp stampX, Stamp stampY) {
-        return stamp();
+        return stamp(NodeView.DEFAULT);
     }
 
     protected BinaryMathIntrinsicNode(ValueNode forX, ValueNode forY, BinaryOperation op) {
         super(TYPE, StampFactory.forKind(JavaKind.Double), forX, forY);
-        assert forX.stamp() instanceof FloatStamp && PrimitiveStamp.getBits(forX.stamp()) == 64;
-        assert forY.stamp() instanceof FloatStamp && PrimitiveStamp.getBits(forY.stamp()) == 64;
+        assert forX.stamp(NodeView.DEFAULT) instanceof FloatStamp && PrimitiveStamp.getBits(forX.stamp(NodeView.DEFAULT)) == 64;
+        assert forY.stamp(NodeView.DEFAULT) instanceof FloatStamp && PrimitiveStamp.getBits(forY.stamp(NodeView.DEFAULT)) == 64;
         this.operation = op;
     }
 
@@ -103,6 +107,7 @@ public final class BinaryMathIntrinsicNode extends BinaryNode implements Arithme
 
     @Override
     public void generate(NodeLIRBuilderTool nodeValueMap, ArithmeticLIRGeneratorTool gen) {
+        // We can only reach here in the math stubs
         Value xValue = nodeValueMap.operand(getX());
         Value yValue = nodeValueMap.operand(getY());
         Value result;
@@ -118,6 +123,7 @@ public final class BinaryMathIntrinsicNode extends BinaryNode implements Arithme
 
     @Override
     public ValueNode canonical(CanonicalizerTool tool, ValueNode forX, ValueNode forY) {
+        NodeView view = NodeView.from(tool);
         ValueNode c = tryConstantFold(forX, forY, getOperation());
         if (c != null) {
             return c;
@@ -150,8 +156,8 @@ public final class BinaryMathIntrinsicNode extends BinaryNode implements Arithme
             }
 
             // x**0.5 = sqrt(x)
-            if (yValue == 0.5D && x.stamp() instanceof FloatStamp && ((FloatStamp) x.stamp()).lowerBound() >= 0.0D) {
-                return new SqrtNode(x);
+            if (yValue == 0.5D && x.stamp(view) instanceof FloatStamp && ((FloatStamp) x.stamp(view)).lowerBound() >= 0.0D) {
+                return SqrtNode.create(x, view);
             }
         }
         return this;

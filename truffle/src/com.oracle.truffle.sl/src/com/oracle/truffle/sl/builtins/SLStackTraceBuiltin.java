@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2014, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * The Universal Permissive License (UPL), Version 1.0
@@ -56,8 +56,7 @@ import com.oracle.truffle.api.nodes.RootNode;
 
 /**
  * Returns a string representation of the current stack. This includes the {@link CallTarget}s and
- * the contents of the {@link Frame}. Note that this is implemented as a slow path by passing
- * {@code true} to {@link FrameInstance#getFrame(FrameAccess, boolean)}.
+ * the contents of the {@link Frame}.
  */
 @NodeInfo(shortName = "stacktrace")
 public abstract class SLStackTraceBuiltin extends SLBuiltinNode {
@@ -84,7 +83,7 @@ public abstract class SLStackTraceBuiltin extends SLBuiltinNode {
                 Frame frame = frameInstance.getFrame(FrameAccess.READ_ONLY);
                 RootNode rn = ((RootCallTarget) callTarget).getRootNode();
                 // ignore internal or interop stack frames
-                if (rn.getLanguageInfo() == null) {
+                if (rn.isInternal() || rn.getLanguageInfo() == null) {
                     return 1;
                 }
                 if (str.length() > 0) {

@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -159,9 +161,9 @@ public class NestedLoopTest extends GraalCompilerTest {
         Assert.assertTrue(containsDirect(innerMostLoop, d, cfg));
         Assert.assertTrue(contains(rootLoop, d, cfg));
         Assert.assertTrue(contains(nestedLoop, d, cfg));
-        Assert.assertEquals(rootExits, rootLoop.getExits().size());
-        Assert.assertEquals(nestedExits, nestedLoop.getExits().size());
-        Assert.assertEquals(innerExits, innerMostLoop.getExits().size());
+        Assert.assertEquals(rootExits, rootLoop.getLoopExits().size());
+        Assert.assertEquals(nestedExits, nestedLoop.getLoopExits().size());
+        Assert.assertEquals(innerExits, innerMostLoop.getLoopExits().size());
         debug.dump(DebugContext.BASIC_LEVEL, graph, "Graph");
     }
 

@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2011, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -48,13 +50,13 @@ public interface VirtualizerTool {
     /**
      * @return the {@link MetaAccessProvider} associated with the current compilation.
      */
-    MetaAccessProvider getMetaAccessProvider();
+    MetaAccessProvider getMetaAccess();
 
     /**
      * @return the {@link ConstantReflectionProvider} associated with the current compilation, which
      *         can be used to access {@link JavaConstant}s.
      */
-    ConstantReflectionProvider getConstantReflectionProvider();
+    ConstantReflectionProvider getConstantReflection();
 
     /**
      * This method should be used to query the maximum size of virtualized objects before attempting
@@ -166,6 +168,15 @@ public interface VirtualizerTool {
      * @return true if materialization happened, false if not.
      */
     boolean ensureMaterialized(VirtualObjectNode virtualObject);
+
+    /**
+     *
+     * Returns whether deoptimization can recover from virtualizing large unsafe accesses to a byte
+     * array.
+     *
+     * @return true if deoptimization can recover, false if not.
+     */
+    boolean canVirtualizeLargeByteArrayUnsafeAccess();
 
     OptionValues getOptions();
 

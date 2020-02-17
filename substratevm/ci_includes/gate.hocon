@@ -1,0 +1,67 @@
+svm-common-gate: {
+  targets: [gate]
+  setup: [
+    ["cd", "./substratevm"]
+  ] ${download-hsdis.setup}
+}
+
+svm-common-linux-gate: ${svm-common-linux-amd64} ${svm-common-gate}
+svm-common-darwin-gate: ${svm-common-darwin} ${svm-common-gate}
+svm-common-windows-gate: ${svm-common-windows} ${svm-common-gate}
+
+svm-cmd-gate: ["mx", "--kill-with-sigquit", "--strict-compliance", "gate", "--strict-mode", "--tags"]
+
+gate-svm-js: {
+  run: [
+    ${svm-common-clone-benchmarks}
+    ${svm-cmd-gate} ["build,js"]
+  ]
+}
+
+gate-svm-truffle-tck: {
+  run: [
+    ${svm-cmd-gate} ["build,truffletck"]
+  ]
+}
+
+builds += [
+  ${oraclejdk8} ${svm-common-linux-gate} ${gate-svm-js} ${svm-capabilities-base} {
+    name: "gate-svm-js"
+    timelimit: "35:00"
+  }
+  ${oraclejdk8} ${svm-common-darwin-gate} ${gate-svm-js} {
+    name: "gate-svm-darwin-js"
+  }
+  ${labsjdk-ee-11} ${svm-common-linux-gate} ${linux-deploy} {
+    name: "gate-svm-build-ee-11"
+    environment : {
+      MAVEN_REPO_LOCAL : "$BUILD_DIR/.m2"
+    }
+    run: [
+      ${svm-cmd-gate} ["build,helloworld,test,relocations,maven,nativeimagehelp"]
+    ]
+  }
+  ${oraclejdk8} ${svm-common-linux-gate} ${eclipse} ${jdt} ${linux-deploy} {
+    name: "gate-svm-style-fullbuild"
+    environment : {
+      MAVEN_REPO_LOCAL : "$BUILD_DIR/.m2"
+    }
+    run: [
+      ${svm-cmd-gate} ["style,fullbuild,helloworld,test,svmjunit,maven"]
+    ]
+  }
+  ${oraclejdk8} ${svm-common-windows-gate} {
+    name: "gate-svm-windows-basics"
+    environment: {
+      PATH : "$MVN_HOME;$PATH"  # workaround until GR-10735 is resolved
+      MAVEN_REPO_LOCAL : "$BUILD_DIR\.m2"
+    }
+    run: [
+      ${svm-cmd-gate} ["build,helloworld,svmjunit,maven"]
+    ]
+  }
+  ${oraclejdk8} ${svm-common-linux-gate} ${gate-svm-truffle-tck} ${svm-capabilities-base} {
+    name: "gate-svm-truffle-tck"
+    timelimit: "30:00"
+  }
+]

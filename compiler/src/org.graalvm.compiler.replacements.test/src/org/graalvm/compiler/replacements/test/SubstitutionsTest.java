@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -118,7 +120,7 @@ public class SubstitutionsTest extends ReplacementsTest {
     protected void registerInvocationPlugins(InvocationPlugins invocationPlugins) {
         new PluginFactory_SubstitutionsTest().registerPlugins(invocationPlugins, null);
         ClassfileBytecodeProvider bytecodeProvider = getSystemClassLoaderBytecodeProvider();
-        Registration r = new Registration(invocationPlugins, TestMethod.class, bytecodeProvider);
+        Registration r = new Registration(invocationPlugins, TestMethod.class, getReplacements(), bytecodeProvider);
         r.registerMethodSubstitution(TestMethodSubstitution.class, "test");
         super.registerInvocationPlugins(invocationPlugins);
     }
@@ -128,7 +130,7 @@ public class SubstitutionsTest extends ReplacementsTest {
     }
 
     @Override
-    protected boolean checkHighTierGraph(StructuredGraph graph) {
+    protected void checkHighTierGraph(StructuredGraph graph) {
         // Check that the graph contains the expected test nodes.
         NodeIterable<ReturnNode> retNodes = graph.getNodes().filter(ReturnNode.class);
         Assert.assertTrue("expected exactly one ReturnNode", retNodes.count() == 1);
@@ -149,8 +151,6 @@ public class SubstitutionsTest extends ReplacementsTest {
         value.safeDelete();
         guard.safeDelete();
         graph.removeFixed(memory);
-
-        return true;
     }
 
     @Test

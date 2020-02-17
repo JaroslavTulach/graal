@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2009, 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2009, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -36,6 +38,7 @@ import org.graalvm.compiler.nodes.spi.NodeValueMap;
 import jdk.vm.ci.meta.Constant;
 import jdk.vm.ci.meta.JavaConstant;
 import jdk.vm.ci.meta.JavaKind;
+import jdk.vm.ci.meta.SerializableConstant;
 
 /**
  * This class represents a value within the graph, including local variables, phis, and all other
@@ -56,8 +59,8 @@ public abstract class ValueNode extends org.graalvm.compiler.graph.Node implemen
         this.stamp = stamp;
     }
 
-    public final Stamp stamp() {
-        return stamp;
+    public final Stamp stamp(NodeView view) {
+        return view.stamp(this);
     }
 
     public final void setStamp(Stamp stamp) {
@@ -99,7 +102,7 @@ public abstract class ValueNode extends org.graalvm.compiler.graph.Node implemen
     }
 
     public final JavaKind getStackKind() {
-        return stamp().getStackKind();
+        return stamp(NodeView.DEFAULT).getStackKind();
     }
 
     /**
@@ -132,6 +135,11 @@ public abstract class ValueNode extends org.graalvm.compiler.graph.Node implemen
         return value != null && value.isNull();
     }
 
+    public final boolean isDefaultConstant() {
+        Constant value = asConstant();
+        return value != null && value.isDefaultForKind();
+    }
+
     /**
      * Convert this value to a constant if it is a constant, otherwise return null.
      *
@@ -146,6 +154,10 @@ public abstract class ValueNode extends org.graalvm.compiler.graph.Node implemen
         }
     }
 
+    public boolean isIllegalConstant() {
+        return isConstant() && asConstant().equals(JavaConstant.forIllegal());
+    }
+
     public final boolean isJavaConstant() {
         return isConstant() && asConstant() instanceof JavaConstant;
     }
@@ -154,6 +166,19 @@ public abstract class ValueNode extends org.graalvm.compiler.graph.Node implemen
         Constant value = asConstant();
         if (value instanceof JavaConstant) {
             return (JavaConstant) value;
+        } else {
+            return null;
+        }
+    }
+
+    public final boolean isSerializableConstant() {
+        return isConstant() && asConstant() instanceof SerializableConstant;
+    }
+
+    public final SerializableConstant asSerializableConstant() {
+        Constant value = asConstant();
+        if (value instanceof SerializableConstant) {
+            return (SerializableConstant) value;
         } else {
             return null;
         }
@@ -197,12 +222,13 @@ public abstract class ValueNode extends org.graalvm.compiler.graph.Node implemen
 
     private boolean checkReplaceAtUsagesInvariants(Node other) {
         assert other == null || other instanceof ValueNode;
-        if (this.hasUsages() && !this.stamp().isEmpty() && !(other instanceof PhiNode) && other != null) {
-            assert ((ValueNode) other).stamp().getClass() == stamp().getClass() : "stamp have to be of same class";
-            boolean morePrecise = ((ValueNode) other).stamp().join(stamp()).equals(((ValueNode) other).stamp());
+        if (this.hasUsages() && !this.stamp(NodeView.DEFAULT).isEmpty() && !(other instanceof PhiNode) && other != null) {
+            assert ((ValueNode) other).stamp(NodeView.DEFAULT).getClass() == stamp(NodeView.DEFAULT).getClass() : "stamp have to be of same class";
+            boolean morePrecise = ((ValueNode) other).stamp(NodeView.DEFAULT).join(stamp(NodeView.DEFAULT)).equals(((ValueNode) other).stamp(NodeView.DEFAULT));
             assert morePrecise : "stamp can only get more precise " + toString(Verbosity.All) + " " +
                             other.toString(Verbosity.All);
         }
         return true;
     }
+
 }

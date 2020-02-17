@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * The Universal Permissive License (UPL), Version 1.0
@@ -40,14 +40,15 @@
  */
 package com.oracle.truffle.sl.nodes.expression;
 
-import java.math.BigInteger;
-
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
+import com.oracle.truffle.api.dsl.Fallback;
 import com.oracle.truffle.api.dsl.ImplicitCast;
 import com.oracle.truffle.api.dsl.Specialization;
 import com.oracle.truffle.api.nodes.NodeInfo;
+import com.oracle.truffle.sl.SLException;
 import com.oracle.truffle.sl.nodes.SLBinaryNode;
 import com.oracle.truffle.sl.nodes.SLTypes;
+import com.oracle.truffle.sl.runtime.SLBigNumber;
 
 /**
  * SL node that performs the "+" operation, which performs addition on arbitrary precision numbers,
@@ -65,7 +66,7 @@ public abstract class SLAddNode extends SLBinaryNode {
     /**
      * Specialization for primitive {@code long} values. This is the fast path of the
      * arbitrary-precision arithmetic. We need to check for overflows of the addition, and switch to
-     * the {@link #add(BigInteger, BigInteger) slow path}. Therefore, we use an
+     * the {@link #add(SLBigNumber, SLBigNumber) slow path}. Therefore, we use an
      * {@link Math#addExact(long, long) addition method that throws an exception on overflow}. The
      * {@code rewriteOn} attribute on the {@link Specialization} annotation automatically triggers
      * the node rewriting on the exception.
@@ -83,21 +84,21 @@ public abstract class SLAddNode extends SLBinaryNode {
     }
 
     /**
-     * This is the slow path of the arbitrary-precision arithmetic. The {@link BigInteger} type of
+     * This is the slow path of the arbitrary-precision arithmetic. The {@link SLBigNumber} type of
      * Java is doing everything we need.
      * <p>
      * This specialization is automatically selected by the Truffle DSL if both the left and right
-     * operand are {@link BigInteger} values. Because the type system defines an {@link ImplicitCast
-     * implicit conversion} from {@code long} to {@link BigInteger} in
-     * {@link SLTypes#castBigInteger(long)}, this specialization is also taken if the left or the
+     * operand are {@link SLBigNumber} values. Because the type system defines an
+     * {@link ImplicitCast implicit conversion} from {@code long} to {@link SLBigNumber} in
+     * {@link SLTypes#castBigNumber(long)}, this specialization is also taken if the left or the
      * right operand is a {@code long} value. Because the {@link #add(long, long) long}
      * specialization} has the {@code rewriteOn} attribute, this specialization is also taken if
      * both input values are {@code long} values but the primitive addition overflows.
      */
     @Specialization
     @TruffleBoundary
-    protected BigInteger add(BigInteger left, BigInteger right) {
-        return left.add(right);
+    protected SLBigNumber add(SLBigNumber left, SLBigNumber right) {
+        return new SLBigNumber(left.getValue().add(right.getValue()));
     }
 
     /**
@@ -120,5 +121,10 @@ public abstract class SLAddNode extends SLBinaryNode {
      */
     protected boolean isString(Object a, Object b) {
         return a instanceof String || b instanceof String;
+    }
+
+    @Fallback
+    protected Object typeError(Object left, Object right) {
+        throw SLException.typeError(this, left, right);
     }
 }

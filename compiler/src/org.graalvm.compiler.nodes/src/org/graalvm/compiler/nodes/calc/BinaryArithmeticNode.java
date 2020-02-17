@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2009, 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2009, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -25,11 +27,9 @@ package org.graalvm.compiler.nodes.calc;
 import static org.graalvm.compiler.nodeinfo.NodeCycles.CYCLES_1;
 import static org.graalvm.compiler.nodeinfo.NodeSize.SIZE_1;
 
-import java.io.Serializable;
-import java.util.function.Function;
-
 import org.graalvm.compiler.core.common.type.ArithmeticOpTable;
 import org.graalvm.compiler.core.common.type.ArithmeticOpTable.BinaryOp;
+import org.graalvm.compiler.core.common.type.IntegerStamp;
 import org.graalvm.compiler.core.common.type.Stamp;
 import org.graalvm.compiler.debug.GraalError;
 import org.graalvm.compiler.graph.Graph;
@@ -41,6 +41,7 @@ import org.graalvm.compiler.graph.spi.CanonicalizerTool;
 import org.graalvm.compiler.nodeinfo.NodeInfo;
 import org.graalvm.compiler.nodes.ArithmeticOperation;
 import org.graalvm.compiler.nodes.ConstantNode;
+import org.graalvm.compiler.nodes.NodeView;
 import org.graalvm.compiler.nodes.StructuredGraph;
 import org.graalvm.compiler.nodes.ValueNode;
 import org.graalvm.compiler.nodes.ValuePhiNode;
@@ -54,20 +55,24 @@ public abstract class BinaryArithmeticNode<OP> extends BinaryNode implements Ari
 
     @SuppressWarnings("rawtypes") public static final NodeClass<BinaryArithmeticNode> TYPE = NodeClass.create(BinaryArithmeticNode.class);
 
-    protected interface SerializableBinaryFunction<T> extends Function<ArithmeticOpTable, BinaryOp<T>>, Serializable {
+    protected BinaryArithmeticNode(NodeClass<? extends BinaryArithmeticNode<OP>> c, BinaryOp<OP> opForStampComputation, ValueNode x, ValueNode y) {
+        super(c, opForStampComputation.foldStamp(x.stamp(NodeView.DEFAULT), y.stamp(NodeView.DEFAULT)), x, y);
     }
 
-    protected final SerializableBinaryFunction<OP> getOp;
-
-    protected BinaryArithmeticNode(NodeClass<? extends BinaryArithmeticNode<OP>> c, SerializableBinaryFunction<OP> getOp, ValueNode x, ValueNode y) {
-        super(c, getOp.apply(ArithmeticOpTable.forStamp(x.stamp())).foldStamp(x.stamp(), y.stamp()), x, y);
-        this.getOp = getOp;
+    protected BinaryArithmeticNode(NodeClass<? extends BinaryArithmeticNode<OP>> c, Stamp stamp, ValueNode x, ValueNode y) {
+        super(c, stamp, x, y);
     }
+
+    public static ArithmeticOpTable getArithmeticOpTable(ValueNode forValue) {
+        return ArithmeticOpTable.forStamp(forValue.stamp(NodeView.DEFAULT));
+    }
+
+    protected abstract BinaryOp<OP> getOp(ArithmeticOpTable table);
 
     protected final BinaryOp<OP> getOp(ValueNode forX, ValueNode forY) {
-        ArithmeticOpTable table = ArithmeticOpTable.forStamp(forX.stamp());
-        assert table.equals(ArithmeticOpTable.forStamp(forY.stamp()));
-        return getOp.apply(table);
+        ArithmeticOpTable table = getArithmeticOpTable(forX);
+        assert table.equals(getArithmeticOpTable(forY));
+        return getOp(table);
     }
 
     @Override
@@ -81,14 +86,36 @@ public abstract class BinaryArithmeticNode<OP> extends BinaryNode implements Ari
 
     @Override
     public ValueNode canonical(CanonicalizerTool tool, ValueNode forX, ValueNode forY) {
-        ValueNode result = tryConstantFold(getOp(forX, forY), forX, forY, stamp());
+        NodeView view = NodeView.from(tool);
+        ValueNode result = tryConstantFold(getOp(forX, forY), forX, forY, stamp(view), view);
         if (result != null) {
             return result;
+        }
+        if (forX instanceof ConditionalNode && forY.isConstant() && forX.hasExactlyOneUsage()) {
+            ConditionalNode conditionalNode = (ConditionalNode) forX;
+            BinaryOp<OP> arithmeticOp = getArithmeticOp();
+            ConstantNode trueConstant = tryConstantFold(arithmeticOp, conditionalNode.trueValue(), forY, this.stamp(view), view);
+            if (trueConstant != null) {
+                ConstantNode falseConstant = tryConstantFold(arithmeticOp, conditionalNode.falseValue(), forY, this.stamp(view), view);
+                if (falseConstant != null) {
+                    // @formatter:off
+                    /* The arithmetic is folded into a constant on both sides of the conditional.
+                     * Example:
+                     *            (cond ? -5 : 5) + 100
+                     * canonicalizes to:
+                     *            (cond ? 95 : 105)
+                     */
+                    // @formatter:on
+                    return ConditionalNode.create(conditionalNode.condition, trueConstant,
+                                    falseConstant, view);
+                }
+            }
         }
         return this;
     }
 
-    public static <OP> ConstantNode tryConstantFold(BinaryOp<OP> op, ValueNode forX, ValueNode forY, Stamp stamp) {
+    @SuppressWarnings("unused")
+    public static <OP> ConstantNode tryConstantFold(BinaryOp<OP> op, ValueNode forX, ValueNode forY, Stamp stamp, NodeView view) {
         if (forX.isConstant() && forY.isConstant()) {
             Constant ret = op.foldConstant(forX.asConstant(), forY.asConstant());
             if (ret != null) {
@@ -100,32 +127,73 @@ public abstract class BinaryArithmeticNode<OP> extends BinaryNode implements Ari
 
     @Override
     public Stamp foldStamp(Stamp stampX, Stamp stampY) {
-        assert stampX.isCompatible(x.stamp()) && stampY.isCompatible(y.stamp());
+        assert stampX.isCompatible(x.stamp(NodeView.DEFAULT)) && stampY.isCompatible(y.stamp(NodeView.DEFAULT));
         return getArithmeticOp().foldStamp(stampX, stampY);
     }
 
-    public static ValueNode add(StructuredGraph graph, ValueNode v1, ValueNode v2) {
-        return graph.addOrUniqueWithInputs(AddNode.create(v1, v2));
+    public static ValueNode add(StructuredGraph graph, ValueNode v1, ValueNode v2, NodeView view) {
+        return graph.addOrUniqueWithInputs(AddNode.create(v1, v2, view));
+    }
+
+    public static ValueNode add(ValueNode v1, ValueNode v2, NodeView view) {
+        return AddNode.create(v1, v2, view);
     }
 
     public static ValueNode add(ValueNode v1, ValueNode v2) {
-        return AddNode.create(v1, v2);
+        return add(v1, v2, NodeView.DEFAULT);
     }
 
-    public static ValueNode mul(StructuredGraph graph, ValueNode v1, ValueNode v2) {
-        return graph.addOrUniqueWithInputs(MulNode.create(v1, v2));
+    public static ValueNode mul(StructuredGraph graph, ValueNode v1, ValueNode v2, NodeView view) {
+        return graph.addOrUniqueWithInputs(MulNode.create(v1, v2, view));
+    }
+
+    public static ValueNode mul(ValueNode v1, ValueNode v2, NodeView view) {
+        return MulNode.create(v1, v2, view);
     }
 
     public static ValueNode mul(ValueNode v1, ValueNode v2) {
-        return MulNode.create(v1, v2);
+        return mul(v1, v2, NodeView.DEFAULT);
     }
 
-    public static ValueNode sub(StructuredGraph graph, ValueNode v1, ValueNode v2) {
-        return graph.addOrUniqueWithInputs(SubNode.create(v1, v2));
+    public static ValueNode sub(StructuredGraph graph, ValueNode v1, ValueNode v2, NodeView view) {
+        return graph.addOrUniqueWithInputs(SubNode.create(v1, v2, view));
+    }
+
+    public static ValueNode sub(ValueNode v1, ValueNode v2, NodeView view) {
+        return SubNode.create(v1, v2, view);
     }
 
     public static ValueNode sub(ValueNode v1, ValueNode v2) {
-        return SubNode.create(v1, v2);
+        return sub(v1, v2, NodeView.DEFAULT);
+    }
+
+    public static ValueNode branchlessMin(ValueNode v1, ValueNode v2, NodeView view) {
+        if (v1.isDefaultConstant() && !v2.isDefaultConstant()) {
+            return branchlessMin(v2, v1, view);
+        }
+        int bits = ((IntegerStamp) v1.stamp(view)).getBits();
+        assert ((IntegerStamp) v2.stamp(view)).getBits() == bits;
+        ValueNode t1 = sub(v1, v2, view);
+        ValueNode t2 = RightShiftNode.create(t1, bits - 1, view);
+        ValueNode t3 = AndNode.create(t1, t2, view);
+        return add(v2, t3, view);
+    }
+
+    public static ValueNode branchlessMax(ValueNode v1, ValueNode v2, NodeView view) {
+        if (v1.isDefaultConstant() && !v2.isDefaultConstant()) {
+            return branchlessMax(v2, v1, view);
+        }
+        int bits = ((IntegerStamp) v1.stamp(view)).getBits();
+        assert ((IntegerStamp) v2.stamp(view)).getBits() == bits;
+        if (v2.isDefaultConstant()) {
+            // prefer a & ~(a>>31) to a - (a & (a>>31))
+            return AndNode.create(v1, NotNode.create(RightShiftNode.create(v1, bits - 1, view)), view);
+        } else {
+            ValueNode t1 = sub(v1, v2, view);
+            ValueNode t2 = RightShiftNode.create(t1, bits - 1, view);
+            ValueNode t3 = AndNode.create(t1, t2, view);
+            return sub(v1, t3, view);
+        }
     }
 
     private enum ReassociateMatch {
@@ -193,7 +261,7 @@ public abstract class BinaryArithmeticNode<OP> extends BinaryNode implements Ari
      * @param forY
      * @param forX
      */
-    public static ValueNode reassociate(BinaryArithmeticNode<?> node, NodePredicate criterion, ValueNode forX, ValueNode forY) {
+    public static ValueNode reassociate(BinaryArithmeticNode<?> node, NodePredicate criterion, ValueNode forX, ValueNode forY, NodeView view) {
         assert node.getOp(forX, forY).isAssociative();
         ReassociateMatch match1 = findReassociate(node, criterion);
         if (match1 == null) {
@@ -239,21 +307,21 @@ public abstract class BinaryArithmeticNode<OP> extends BinaryNode implements Ari
         if (node instanceof AddNode || node instanceof SubNode) {
             ValueNode associated;
             if (invertM1) {
-                associated = BinaryArithmeticNode.sub(m2, m1);
+                associated = BinaryArithmeticNode.sub(m2, m1, view);
             } else if (invertM2) {
-                associated = BinaryArithmeticNode.sub(m1, m2);
+                associated = BinaryArithmeticNode.sub(m1, m2, view);
             } else {
-                associated = BinaryArithmeticNode.add(m1, m2);
+                associated = BinaryArithmeticNode.add(m1, m2, view);
             }
             if (invertA) {
-                return BinaryArithmeticNode.sub(associated, a);
+                return BinaryArithmeticNode.sub(associated, a, view);
             }
             if (aSub) {
-                return BinaryArithmeticNode.sub(a, associated);
+                return BinaryArithmeticNode.sub(a, associated, view);
             }
-            return BinaryArithmeticNode.add(a, associated);
+            return BinaryArithmeticNode.add(a, associated, view);
         } else if (node instanceof MulNode) {
-            return BinaryArithmeticNode.mul(a, AddNode.mul(m1, m2));
+            return BinaryArithmeticNode.mul(a, AddNode.mul(m1, m2, view), view);
         } else if (node instanceof AndNode) {
             return new AndNode(a, new AndNode(m1, m2));
         } else if (node instanceof OrNode) {

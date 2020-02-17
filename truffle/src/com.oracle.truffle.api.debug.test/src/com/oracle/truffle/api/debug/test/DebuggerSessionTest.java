@@ -1,32 +1,62 @@
 /*
- * Copyright (c) 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2016, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
- * This code is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.  Oracle designates this
- * particular file as subject to the "Classpath" exception as provided
- * by Oracle in the LICENSE file that accompanied this code.
+ * The Universal Permissive License (UPL), Version 1.0
  *
- * This code is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
- * version 2 for more details (a copy is included in the LICENSE file that
- * accompanied this code).
+ * Subject to the condition set forth below, permission is hereby granted to any
+ * person obtaining a copy of this software, associated documentation and/or
+ * data (collectively the "Software"), free of charge and under any and all
+ * copyright rights in the Software, and any and all patent rights owned or
+ * freely licensable by each licensor hereunder covering either (i) the
+ * unmodified Software as contributed to or provided by such licensor, or (ii)
+ * the Larger Works (as defined below), to deal in both
  *
- * You should have received a copy of the GNU General Public License version
- * 2 along with this work; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
+ * (a) the Software, and
  *
- * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
- * or visit www.oracle.com if you need additional information or have any
- * questions.
+ * (b) any piece of software and/or hardware listed in the lrgrwrks.txt file if
+ * one is included with the Software each a "Larger Work" to which the Software
+ * is contributed by such licensors),
+ *
+ * without restriction, including without limitation the rights to copy, create
+ * derivative works of, display, perform, and distribute the Software and make,
+ * use, sell, offer for sale, import, export, have made, and have sold the
+ * Software and the Larger Work(s), and to sublicense the foregoing rights on
+ * either these or other terms.
+ *
+ * This license is subject to the following condition:
+ *
+ * The above copyright notice and either this complete permission notice or at a
+ * minimum a reference to the UPL must be included in all copies or substantial
+ * portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
  */
 package com.oracle.truffle.api.debug.test;
 
-import java.lang.reflect.InvocationTargetException;
-import java.lang.reflect.Method;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.net.URI;
+import java.nio.file.FileSystem;
+import java.nio.file.FileSystems;
+import java.nio.file.FileVisitResult;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.SimpleFileVisitor;
+import java.nio.file.attribute.BasicFileAttributes;
+import java.util.Arrays;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Supplier;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
 
 import org.junit.Assert;
 import org.junit.Test;
@@ -36,36 +66,15 @@ import com.oracle.truffle.api.debug.Debugger;
 import com.oracle.truffle.api.debug.DebuggerSession;
 import com.oracle.truffle.api.debug.SuspendedCallback;
 import com.oracle.truffle.api.debug.SuspendedEvent;
-import com.oracle.truffle.api.test.ReflectionUtils;
+import com.oracle.truffle.api.instrumentation.test.InstrumentationTestLanguage;
+import com.oracle.truffle.api.source.SourceSection;
+import com.oracle.truffle.api.test.GCUtils;
+import com.oracle.truffle.api.test.polyglot.ProxyLanguage;
+
 import org.graalvm.polyglot.Context;
 import org.graalvm.polyglot.Source;
 
 public class DebuggerSessionTest extends AbstractDebugTest {
-
-    private static void suspend(DebuggerSession session, Thread thread) {
-        invoke(session, "suspend", new Class<?>[]{Thread.class}, thread);
-    }
-
-    private static void suspendAll(DebuggerSession session) {
-        invoke(session, "suspendAll", new Class<?>[]{});
-    }
-
-    private static void resume(DebuggerSession session, Thread thread) {
-        invoke(session, "resume", new Class<?>[]{Thread.class}, thread);
-    }
-
-    private static void invoke(DebuggerSession session, String name, Class<?>[] classes, Object... arguments) throws AssertionError {
-        try {
-            Method method = session.getClass().getDeclaredMethod(name, classes);
-            ReflectionUtils.setAccessible(method, true);
-            method.invoke(session, arguments);
-        } catch (Throwable e) {
-            if (e instanceof InvocationTargetException && e.getCause() instanceof RuntimeException) {
-                throw (RuntimeException) e.getCause();
-            }
-            throw new AssertionError(e);
-        }
-    }
 
     @Test
     public void testSuspendNextExecution1() {
@@ -158,7 +167,7 @@ public class DebuggerSessionTest extends AbstractDebugTest {
         try (DebuggerSession session = startSession()) {
             // do suspend next for a few times
             for (int i = 0; i < 100; i++) {
-                suspend(session, getEvalThread());
+                session.suspend(getEvalThread());
                 startEval(testSource);
                 expectSuspended((SuspendedEvent event) -> {
                     checkState(event, 2, true, "STATEMENT").prepareContinue();
@@ -175,14 +184,14 @@ public class DebuggerSessionTest extends AbstractDebugTest {
                         "STATEMENT)");
 
         try (DebuggerSession session = startSession()) {
-            suspend(session, getEvalThread());
+            session.suspend(getEvalThread());
             startEval(testSource);
             expectSuspended((SuspendedEvent event) -> {
                 checkState(event, 2, true, "STATEMENT").prepareContinue();
             });
 
             // prepareContinue should be ignored here as suspensions counts more
-            suspend(session, getEvalThread());
+            session.suspend(getEvalThread());
 
             expectSuspended((SuspendedEvent event) -> {
                 checkState(event, 3, true, "STATEMENT").prepareContinue();
@@ -199,14 +208,14 @@ public class DebuggerSessionTest extends AbstractDebugTest {
                         "STATEMENT)");
 
         try (DebuggerSession session = startSession()) {
-            suspend(session, getEvalThread());
+            session.suspend(getEvalThread());
             startEval(testSource);
             expectSuspended((SuspendedEvent event) -> {
                 checkState(event, 2, true, "STATEMENT").prepareKill();
             });
 
             // For prepareKill additional suspensions should be ignored
-            suspend(session, getEvalThread());
+            session.suspend(getEvalThread());
 
             expectKilled();
         }
@@ -220,7 +229,7 @@ public class DebuggerSessionTest extends AbstractDebugTest {
 
         try (DebuggerSession session = startSession()) {
             for (int i = 0; i < 10; i++) {
-                suspendAll(session);
+                session.suspendAll();
                 startEval(testSource);
                 expectSuspended((SuspendedEvent event) -> {
                     checkState(event, 2, true, "STATEMENT").prepareContinue();
@@ -237,14 +246,14 @@ public class DebuggerSessionTest extends AbstractDebugTest {
                         "STATEMENT)");
 
         try (DebuggerSession session = startSession()) {
-            suspendAll(session);
+            session.suspendAll();
             startEval(testSource);
             expectSuspended((SuspendedEvent event) -> {
                 checkState(event, 2, true, "STATEMENT").prepareContinue();
             });
 
             // prepareContinue should be ignored here as suspenions counts higher
-            suspendAll(session);
+            session.suspendAll();
 
             expectSuspended((SuspendedEvent event) -> {
                 checkState(event, 3, true, "STATEMENT").prepareContinue();
@@ -261,14 +270,14 @@ public class DebuggerSessionTest extends AbstractDebugTest {
                         "STATEMENT)");
 
         try (DebuggerSession session = startSession()) {
-            suspendAll(session);
+            session.suspendAll();
             startEval(testSource);
             expectSuspended((SuspendedEvent event) -> {
                 checkState(event, 2, true, "STATEMENT").prepareKill();
             });
 
             // For prepareKill additional suspensions should be ignored
-            suspendAll(session);
+            session.suspendAll();
 
             expectKilled();
         }
@@ -288,7 +297,7 @@ public class DebuggerSessionTest extends AbstractDebugTest {
                     checkState(event, 2, true, "STATEMENT").prepareStepOver(1);
                 });
                 // resume events are ignored by stepping
-                resume(session, getEvalThread());
+                session.resume(getEvalThread());
                 expectDone();
             }
         }
@@ -303,14 +312,14 @@ public class DebuggerSessionTest extends AbstractDebugTest {
         try (DebuggerSession session = startSession()) {
             for (int i = 0; i < 10; i++) {
                 session.suspendNextExecution();
-                resume(session, getEvalThread());
+                session.resume(getEvalThread());
                 startEval(testSource);
 
                 // even if the thread is resumed suspend next execution will trigger.
                 expectSuspended((SuspendedEvent event) -> {
                     checkState(event, 2, true, "STATEMENT").prepareStepOver(1);
                 });
-                resume(session, getEvalThread());
+                session.resume(getEvalThread());
                 expectDone();
             }
         }
@@ -340,7 +349,7 @@ public class DebuggerSessionTest extends AbstractDebugTest {
 
         try (DebuggerSession session = startSession()) {
             for (int i = 0; i < 10; i++) {
-                suspendAll(session);
+                session.suspendAll();
                 session.resumeAll();
                 startEval(testSource);
                 expectDone();
@@ -356,7 +365,7 @@ public class DebuggerSessionTest extends AbstractDebugTest {
 
         try (DebuggerSession session = startSession()) {
             for (int i = 0; i < 10; i++) {
-                suspend(session, getEvalThread());
+                session.suspend(getEvalThread());
                 session.resumeAll();
                 startEval(testSource);
                 expectDone();
@@ -427,10 +436,10 @@ public class DebuggerSessionTest extends AbstractDebugTest {
 
         // if the engine disposes the session should still work
         session.suspendNextExecution();
-        suspend(session, Thread.currentThread());
-        suspendAll(session);
+        session.suspend(Thread.currentThread());
+        session.suspendAll();
         session.install(Breakpoint.newBuilder(getSourceImpl(testSource)).lineIs(2).build());
-        resume(session, Thread.currentThread());
+        session.resume(Thread.currentThread());
         session.resumeAll();
         session.getDebugger();
         session.getBreakpoints();
@@ -445,12 +454,12 @@ public class DebuggerSessionTest extends AbstractDebugTest {
         }
 
         try {
-            suspend(session, Thread.currentThread());
+            session.suspend(Thread.currentThread());
             Assert.fail();
         } catch (IllegalStateException e) {
         }
         try {
-            suspendAll(session);
+            session.suspendAll();
             Assert.fail();
         } catch (IllegalStateException e) {
         }
@@ -461,7 +470,7 @@ public class DebuggerSessionTest extends AbstractDebugTest {
         } catch (IllegalStateException e) {
         }
         try {
-            resume(session, Thread.currentThread());
+            session.resume(Thread.currentThread());
             Assert.fail();
         } catch (IllegalStateException e) {
         }
@@ -480,4 +489,229 @@ public class DebuggerSessionTest extends AbstractDebugTest {
         session.getDebugger();
     }
 
+    @Test
+    public void testNoContentSource() {
+        TestDebugNoContentLanguage language = new TestDebugNoContentLanguage("relative/test", true, true);
+        ProxyLanguage.setDelegate(language);
+        try (DebuggerSession session = tester.startSession()) {
+            session.suspendNextExecution();
+            Source source = Source.create(ProxyLanguage.ID, "relative source\nVarA");
+            tester.startEval(source);
+            expectSuspended((SuspendedEvent event) -> {
+                SourceSection sourceSection = event.getSourceSection();
+                Assert.assertTrue(sourceSection.isAvailable());
+                Assert.assertTrue(sourceSection.hasLines());
+                Assert.assertTrue(sourceSection.hasColumns());
+                Assert.assertFalse(sourceSection.hasCharIndex());
+                Assert.assertFalse(sourceSection.getSource().hasCharacters());
+                Assert.assertEquals(1, sourceSection.getStartLine());
+                Assert.assertEquals(1, sourceSection.getStartColumn());
+                Assert.assertEquals(1, sourceSection.getEndLine());
+                Assert.assertEquals(15, sourceSection.getEndColumn());
+
+                URI uri = sourceSection.getSource().getURI();
+                Assert.assertFalse(uri.toString(), uri.isAbsolute());
+                Assert.assertEquals("relative/test", uri.getPath());
+
+                sourceSection = event.getTopStackFrame().getSourceSection();
+                Assert.assertTrue(sourceSection.isAvailable());
+                Assert.assertFalse(sourceSection.getSource().hasCharacters());
+                Assert.assertSame(uri, sourceSection.getSource().getURI());
+
+                sourceSection = event.getTopStackFrame().getScope().getDeclaredValue("a").getSourceLocation();
+                Assert.assertTrue(sourceSection.isAvailable());
+                Assert.assertFalse(sourceSection.getSource().hasCharacters());
+                Assert.assertSame(uri, sourceSection.getSource().getURI());
+
+                event.prepareContinue();
+            });
+        }
+        expectDone();
+    }
+
+    @Test
+    public void testSourcePath() throws IOException {
+        String sourceContent = "\n  relative source\nVarA";
+        Source source = Source.newBuilder(ProxyLanguage.ID, sourceContent, "file").cached(false).build();
+        String relativePath = "relative/test.file";
+        Path testSourcePath = Files.createTempDirectory("testPath").toRealPath();
+        Files.createDirectory(testSourcePath.resolve("relative"));
+        Path filePath = testSourcePath.resolve(relativePath);
+        Files.write(filePath, sourceContent.getBytes());
+        URI resolvedURI = testSourcePath.resolve(relativePath).toUri();
+        boolean[] trueFalse = new boolean[]{true, false};
+        try (DebuggerSession session = tester.startSession()) {
+            session.setSourcePath(Arrays.asList(testSourcePath.toUri()));
+            for (boolean lineInfo : trueFalse) {
+                for (boolean columnInfo : trueFalse) {
+                    if (columnInfo && !lineInfo) {
+                        continue;
+                    }
+                    TestDebugNoContentLanguage language = new TestDebugNoContentLanguage(relativePath, lineInfo, columnInfo);
+                    ProxyLanguage.setDelegate(language);
+                    session.suspendNextExecution();
+                    tester.startEval(source);
+                    expectSuspended((SuspendedEvent event) -> {
+                        SourceSection sourceSection = event.getSourceSection();
+                        URI uri = sourceSection.getSource().getURI();
+                        Assert.assertTrue(uri.toString(), uri.isAbsolute());
+                        Assert.assertEquals(resolvedURI, uri);
+                        checkResolvedSourceSection(sourceSection, 2, 3, 17, 3, 15);
+                        Assert.assertEquals(sourceContent, sourceSection.getSource().getCharacters().toString());
+                        Assert.assertEquals(sourceContent.substring(3, sourceContent.indexOf('\n', 3)), sourceSection.getCharacters().toString());
+
+                        sourceSection = event.getTopStackFrame().getSourceSection();
+                        Assert.assertTrue(sourceSection.isAvailable());
+                        Assert.assertTrue(sourceSection.getSource().hasCharacters());
+                        Assert.assertEquals(sourceContent.substring(3, sourceContent.indexOf('\n', 3)), sourceSection.getCharacters().toString());
+                        checkResolvedSourceSection(sourceSection, 2, 3, 17, 3, 15);
+
+                        sourceSection = event.getTopStackFrame().getScope().getDeclaredValue("a").getSourceLocation();
+                        Assert.assertTrue(sourceSection.isAvailable());
+                        Assert.assertTrue(sourceSection.getSource().hasCharacters());
+                        Assert.assertEquals(sourceContent.substring(sourceContent.lastIndexOf('\n') + 1), sourceSection.getCharacters().toString());
+                        checkResolvedSourceSection(sourceSection, 3, 1, 4, 19, 4);
+                        event.prepareContinue();
+                    });
+                    expectDone();
+                }
+            }
+        } finally {
+            deleteRecursively(testSourcePath);
+        }
+    }
+
+    @Test
+    public void testSourcePathZip() throws IOException {
+        String sourceContent = "\n  relative source\nVarA";
+        Source source = Source.newBuilder(ProxyLanguage.ID, sourceContent, "file").cached(false).build();
+        String relativePath = "relative/test.file";
+        File zip = File.createTempFile("TestZip", ".zip").getCanonicalFile();
+        zip.deleteOnExit();
+        try (ZipOutputStream out = new ZipOutputStream(new FileOutputStream(zip))) {
+            ZipEntry e = new ZipEntry("src/" + relativePath);
+            out.putNextEntry(e);
+            byte[] data = sourceContent.getBytes();
+            out.write(data, 0, data.length);
+            out.closeEntry();
+        }
+        URI sourcePathURI;
+        URI resolvedURI;
+        try (FileSystem fs = FileSystems.newFileSystem(zip.toPath(), (ClassLoader) null)) {
+            Path spInZip = fs.getPath("src");
+            sourcePathURI = spInZip.toUri();
+            resolvedURI = fs.getPath("src", relativePath).toUri();
+        }
+        boolean[] trueFalse = new boolean[]{true, false};
+        try (DebuggerSession session = tester.startSession()) {
+            session.setSourcePath(Arrays.asList(sourcePathURI));
+            for (boolean lineInfo : trueFalse) {
+                for (boolean columnInfo : trueFalse) {
+                    if (columnInfo && !lineInfo) {
+                        continue;
+                    }
+                    TestDebugNoContentLanguage language = new TestDebugNoContentLanguage(relativePath, lineInfo, columnInfo);
+                    ProxyLanguage.setDelegate(language);
+                    session.suspendNextExecution();
+                    tester.startEval(source);
+                    expectSuspended((SuspendedEvent event) -> {
+                        SourceSection sourceSection = event.getSourceSection();
+                        URI uri = sourceSection.getSource().getURI();
+                        Assert.assertTrue(uri.toString(), uri.isAbsolute());
+                        Assert.assertEquals(resolvedURI, uri);
+                        checkResolvedSourceSection(sourceSection, 2, 3, 17, 3, 15);
+                        Assert.assertEquals(sourceContent, sourceSection.getSource().getCharacters().toString());
+                        Assert.assertEquals(sourceContent.substring(3, sourceContent.indexOf('\n', 3)), sourceSection.getCharacters().toString());
+
+                        event.prepareContinue();
+                    });
+                    expectDone();
+                }
+            }
+        }
+    }
+
+    private static void checkResolvedSourceSection(SourceSection sourceSection, int line, int col1, int col2, int cind, int clen) {
+        Assert.assertTrue(sourceSection.isAvailable());
+        Assert.assertTrue(sourceSection.hasLines());
+        Assert.assertTrue(sourceSection.hasColumns());
+        Assert.assertTrue(sourceSection.hasCharIndex());
+        Assert.assertTrue(sourceSection.getSource().hasCharacters());
+        Assert.assertEquals(line, sourceSection.getStartLine());
+        Assert.assertEquals(col1, sourceSection.getStartColumn());
+        Assert.assertEquals(line, sourceSection.getEndLine());
+        Assert.assertEquals(col2, sourceSection.getEndColumn());
+        Assert.assertEquals(cind, sourceSection.getCharIndex());
+        Assert.assertEquals(cind + clen, sourceSection.getCharEndIndex());
+        Assert.assertEquals(clen, sourceSection.getCharLength());
+    }
+
+    @Test
+    public void testDebuggedSourcesCanBeReleasedAbsolute() {
+        testDebuggedSourcesCanBeReleased(() -> {
+            return Source.newBuilder(InstrumentationTestLanguage.ID, "STATEMENT", "file").cached(false).buildLiteral();
+        });
+    }
+
+    @Test
+    public void testDebuggedSourcesCanBeReleasedRelative() throws IOException {
+        String sourceContent = "\n  relative source\nVarA";
+        String relativePath = "relative/test.file";
+        Path testSourcePath = Files.createTempDirectory("testPath").toRealPath();
+        Files.createDirectory(testSourcePath.resolve("relative"));
+        Path filePath = testSourcePath.resolve(relativePath);
+        Files.write(filePath, sourceContent.getBytes());
+        testDebuggedSourcesCanBeReleased(() -> {
+            TestDebugNoContentLanguage language = new TestDebugNoContentLanguage(relativePath, true, true);
+            ProxyLanguage.setDelegate(language);
+            return Source.newBuilder(ProxyLanguage.ID, sourceContent, "file").cached(false).buildLiteral();
+        });
+    }
+
+    private void testDebuggedSourcesCanBeReleased(Supplier<Source> sourceFactory) {
+        try (DebuggerSession session = tester.startSession()) {
+            GCUtils.assertObjectsCollectible(iteration -> {
+                session.suspendNextExecution();
+                Source source = sourceFactory.get();
+                AtomicReference<com.oracle.truffle.api.source.Source> truffleSource = new AtomicReference<>();
+                tester.startEval(source);
+                expectSuspended((SuspendedEvent event) -> {
+                    SourceSection sourceSection = event.getSourceSection();
+                    truffleSource.set(sourceSection.getSource());
+                });
+                expectDone();
+                return truffleSource.get();
+            });
+        }
+    }
+
+    @Test
+    @SuppressWarnings("try")
+    public void testSessionCount() {
+        Assert.assertEquals(0, tester.getDebugger().getSessionCount());
+        try (DebuggerSession s = tester.startSession()) {
+            Assert.assertEquals(1, tester.getDebugger().getSessionCount());
+            try (DebuggerSession s2 = tester.startSession()) {
+                Assert.assertEquals(2, tester.getDebugger().getSessionCount());
+            }
+            Assert.assertEquals(1, tester.getDebugger().getSessionCount());
+        }
+        Assert.assertEquals(0, tester.getDebugger().getSessionCount());
+    }
+
+    private static void deleteRecursively(Path path) throws IOException {
+        Files.walkFileTree(path, new SimpleFileVisitor<Path>() {
+            @Override
+            public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
+                Files.delete(file);
+                return FileVisitResult.CONTINUE;
+            }
+
+            @Override
+            public FileVisitResult postVisitDirectory(Path dir, IOException exc) throws IOException {
+                Files.delete(dir);
+                return FileVisitResult.CONTINUE;
+            }
+        });
+    }
 }

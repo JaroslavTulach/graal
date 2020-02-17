@@ -1,28 +1,48 @@
 /*
- * Copyright (c) 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
- * This code is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * The Universal Permissive License (UPL), Version 1.0
  *
- * This code is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
- * version 2 for more details (a copy is included in the LICENSE file that
- * accompanied this code).
+ * Subject to the condition set forth below, permission is hereby granted to any
+ * person obtaining a copy of this software, associated documentation and/or
+ * data (collectively the "Software"), free of charge and under any and all
+ * copyright rights in the Software, and any and all patent rights owned or
+ * freely licensable by each licensor hereunder covering either (i) the
+ * unmodified Software as contributed to or provided by such licensor, or (ii)
+ * the Larger Works (as defined below), to deal in both
  *
- * You should have received a copy of the GNU General Public License version
- * 2 along with this work; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
+ * (a) the Software, and
  *
- * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
- * or visit www.oracle.com if you need additional information or have any
- * questions.
+ * (b) any piece of software and/or hardware listed in the lrgrwrks.txt file if
+ * one is included with the Software each a "Larger Work" to which the Software
+ * is contributed by such licensors),
+ *
+ * without restriction, including without limitation the rights to copy, create
+ * derivative works of, display, perform, and distribute the Software and make,
+ * use, sell, offer for sale, import, export, have made, and have sold the
+ * Software and the Larger Work(s), and to sublicense the foregoing rights on
+ * either these or other terms.
+ *
+ * This license is subject to the following condition:
+ *
+ * The above copyright notice and either this complete permission notice or at a
+ * minimum a reference to the UPL must be included in all copies or substantial
+ * portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
  */
 package com.oracle.truffle.api.test.nodes;
 
+import static com.oracle.truffle.api.test.OSUtils.toUnixString;
 import static org.hamcrest.CoreMatchers.is;
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertThat;
 
 import java.util.Iterator;
@@ -248,6 +268,49 @@ public class NodeUtilTest {
         Assert.assertEquals(1, otherChild.visited);
     }
 
+    @Test
+    public void testPrintCompactTree() {
+        String testNodeSimpleName = getSimpleName(TestNode.class);
+        String testForEachNodeSimpleName = getSimpleName(TestForEachNode.class);
+
+        TestNode test1 = new TestNode();
+        test1.child0 = new TestNode();
+        test1.child1 = new TestNode();
+        String output = NodeUtil.printCompactTreeToString(test1);
+        assertEquals("" +
+                        "  " + testNodeSimpleName + "\n" +
+                        "    child0 = " + testNodeSimpleName + "\n" +
+                        "    child1 = " + testNodeSimpleName + "\n", toUnixString(output));
+
+        TestForEachNode test2 = new TestForEachNode(4);
+        test2.firstChild = new TestNode();
+        test2.children[1] = test1;
+        test2.children[3] = new TestNode();
+        test2.lastChild = new TestNode();
+        output = NodeUtil.printCompactTreeToString(test2);
+        assertEquals("" +
+                        "  " + testForEachNodeSimpleName + "\n" +
+                        "    firstChild = " + testNodeSimpleName + "\n" +
+                        "    children[1] = " + testNodeSimpleName + "\n" +
+                        "      child0 = " + testNodeSimpleName + "\n" +
+                        "      child1 = " + testNodeSimpleName + "\n" +
+                        "    children[3] = " + testNodeSimpleName + "\n" +
+                        "    lastChild = " + testNodeSimpleName + "\n", toUnixString(output));
+        TestBlockResNode block = new TestBlockResNode(new Node[]{new TestNode(), new TestNode()}, new TestNode());
+        String testBlockResNodeSimpleName = getSimpleName(TestBlockResNode.class);
+        output = NodeUtil.printCompactTreeToString(block);
+        assertEquals("" +
+                        "  " + testBlockResNodeSimpleName + "\n" +
+                        "    children[0] = " + testNodeSimpleName + "\n" +
+                        "    children[1] = " + testNodeSimpleName + "\n" +
+                        "    resultNode = " + testNodeSimpleName + "\n", toUnixString(output));
+        block = new TestBlockResNode(null, new TestNode());
+        output = NodeUtil.printCompactTreeToString(block);
+        assertEquals("" +
+                        "  " + testBlockResNodeSimpleName + "\n" +
+                        "    resultNode = " + testNodeSimpleName + "\n", toUnixString(output));
+    }
+
     private static int iterate(Iterator<Node> iterator) {
         int iterationCount = 0;
         while (iterator.hasNext()) {
@@ -265,6 +328,10 @@ public class NodeUtilTest {
             iterationCount++;
         }
         return iterationCount;
+    }
+
+    private static String getSimpleName(Class<?> clazz) {
+        return clazz.getName().substring(clazz.getName().lastIndexOf('.') + 1);
     }
 
     private static class VisitableNode extends Node {
@@ -311,6 +378,17 @@ public class NodeUtilTest {
             this.children = new Node[childrenSize];
         }
 
+    }
+
+    private static class TestBlockResNode extends VisitableNode {
+
+        private @Children Node[] children;
+        private @Child Node resultNode;
+
+        TestBlockResNode(Node[] body, Node resultNode) {
+            this.children = body;
+            this.resultNode = resultNode;
+        }
     }
 
 }

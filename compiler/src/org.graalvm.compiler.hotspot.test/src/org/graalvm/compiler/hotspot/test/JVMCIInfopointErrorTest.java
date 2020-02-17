@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2015, 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -22,6 +24,7 @@
  */
 package org.graalvm.compiler.hotspot.test;
 
+import static org.graalvm.compiler.debug.DebugOptions.DumpOnError;
 import static org.graalvm.compiler.lir.LIRInstruction.OperandFlag.REG;
 import static org.graalvm.compiler.lir.LIRInstruction.OperandFlag.STACK;
 import static org.graalvm.compiler.nodeinfo.NodeCycles.CYCLES_IGNORED;
@@ -33,9 +36,9 @@ import org.graalvm.compiler.code.CompilationResult;
 import org.graalvm.compiler.core.common.LIRKind;
 import org.graalvm.compiler.core.common.type.StampFactory;
 import org.graalvm.compiler.core.test.GraalCompilerTest;
-import org.graalvm.compiler.debug.DebugHandlersFactory;
 import org.graalvm.compiler.debug.DebugContext;
 import org.graalvm.compiler.debug.DebugContext.Scope;
+import org.graalvm.compiler.debug.DebugHandlersFactory;
 import org.graalvm.compiler.graph.NodeClass;
 import org.graalvm.compiler.hotspot.HotSpotCompiledCodeBuilder;
 import org.graalvm.compiler.lir.FullInfopointOp;
@@ -50,6 +53,7 @@ import org.graalvm.compiler.nodes.DeoptimizingFixedWithNextNode;
 import org.graalvm.compiler.nodes.StructuredGraph;
 import org.graalvm.compiler.nodes.spi.LIRLowerable;
 import org.graalvm.compiler.nodes.spi.NodeLIRBuilderTool;
+import org.graalvm.compiler.options.OptionValues;
 import org.junit.Test;
 
 import jdk.vm.ci.code.BytecodeFrame;
@@ -137,6 +141,14 @@ public class JVMCIInfopointErrorTest extends GraalCompilerTest {
         test(getDebugContext(), spec);
     }
 
+    /**
+     * Avoids dumping during tests which are expected to fail.
+     */
+    private void testNoDump(TestSpec spec) {
+        OptionValues options = new OptionValues(getInitialOptions(), DumpOnError, false);
+        test(getDebugContext(options, null, null), spec);
+    }
+
     private void test(DebugContext debug, TestSpec spec) {
         ResolvedJavaMethod method = getResolvedJavaMethod("testMethod");
 
@@ -146,13 +158,13 @@ public class JVMCIInfopointErrorTest extends GraalCompilerTest {
 
         CompilationResult compResult = compile(method, graph);
         CodeCacheProvider codeCache = getCodeCache();
-        HotSpotCompiledCode compiledCode = HotSpotCompiledCodeBuilder.createCompiledCode(codeCache, method, null, compResult);
+        HotSpotCompiledCode compiledCode = HotSpotCompiledCodeBuilder.createCompiledCode(codeCache, method, null, compResult, getInitialOptions());
         codeCache.addCode(method, compiledCode, null, null);
     }
 
-    @Test(expected = JVMCIError.class)
+    @Test(expected = Error.class)
     public void testInvalidShortOop() {
-        test((tool, state, safepoint) -> {
+        testNoDump((tool, state, safepoint) -> {
             PlatformKind kind = tool.target().arch.getPlatformKind(JavaKind.Short);
             LIRKind lirKind = LIRKind.reference(kind);
 
@@ -163,14 +175,14 @@ public class JVMCIInfopointErrorTest extends GraalCompilerTest {
         });
     }
 
-    @Test(expected = JVMCIError.class)
+    @Test(expected = Error.class)
     public void testInvalidShortDerivedOop() {
-        test((tool, state, safepoint) -> {
+        testNoDump((tool, state, safepoint) -> {
             Variable baseOop = tool.newVariable(LIRKind.fromJavaKind(tool.target().arch, JavaKind.Object));
             tool.append(new ValueDef(baseOop));
 
             PlatformKind kind = tool.target().arch.getPlatformKind(JavaKind.Short);
-            LIRKind lirKind = LIRKind.derivedReference(kind, baseOop);
+            LIRKind lirKind = LIRKind.derivedReference(kind, baseOop, false);
 
             Variable var = tool.newVariable(lirKind);
             tool.append(new ValueDef(var));

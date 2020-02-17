@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2017, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -22,84 +24,88 @@
  */
 package org.graalvm.compiler.truffle.test;
 
-import org.graalvm.compiler.truffle.TruffleCompilerOptions;
-import org.graalvm.compiler.truffle.test.builtins.SLIsOptimizedBuiltinFactory;
+import org.graalvm.compiler.truffle.options.PolyglotCompilerOptions;
+import org.graalvm.compiler.truffle.runtime.OptimizedCallTarget;
 import org.graalvm.options.OptionDescriptor;
 import org.graalvm.polyglot.Context;
 import org.graalvm.polyglot.Engine;
-import org.graalvm.polyglot.Value;
-import org.graalvm.polyglot.proxy.ProxyExecutable;
 import org.junit.Assert;
 import org.junit.Test;
 
-import com.oracle.truffle.api.dsl.NodeFactory;
-import com.oracle.truffle.sl.builtins.SLBuiltinNode;
-import com.oracle.truffle.sl.nodes.call.SLDispatchNode;
-import com.oracle.truffle.sl.runtime.SLContext;
+import com.oracle.truffle.api.Truffle;
+import com.oracle.truffle.api.nodes.RootNode;
+import com.oracle.truffle.sl.SLLanguage;
+import com.oracle.truffle.sl.runtime.SLFunction;
 
 public class PolyglotEngineOptionsTest extends TestWithSynchronousCompiling {
-
-    private static final String COMPILATION_THRESHOLD_OPTION = "compiler.CompilationThreshold";
 
     @Test
     public void testVisibleOptions() {
         Engine engine = Engine.create();
-        OptionDescriptor compilationThreshold = engine.getOptions().get(COMPILATION_THRESHOLD_OPTION);
-        OptionDescriptor queueTimeThreshold = engine.getOptions().get("compiler.QueueTimeThreshold");
+        OptionDescriptor compilationThreshold = engine.getOptions().get("engine.CompilationThreshold");
         Assert.assertNotNull(compilationThreshold);
-        Assert.assertNotNull(queueTimeThreshold);
         engine.close();
     }
 
     @Test
     public void testCompilationThreshold() {
         // does not work with a different inline cache size.
-        Assert.assertEquals(2, SLDispatchNode.INLINE_CACHE_SIZE);
+        Assert.assertEquals(2, SLFunction.INLINE_CACHE_SIZE);
 
         // doWhile must run isolated and should not affect other compilation thresholds
+        OptimizedCallTarget target = (OptimizedCallTarget) Truffle.getRuntime().createCallTarget(RootNode.createConstantNode(42));
         Runnable doWhile = () -> testCompilationThreshold(50, "50", null);
         testCompilationThreshold(42, "42", doWhile); // test default value
-        testCompilationThreshold(TruffleCompilerOptions.TruffleCompilationThreshold.getValue(TruffleCompilerOptions.getOptions()), null, doWhile);
+        testCompilationThreshold(target.getOptionValue(PolyglotCompilerOptions.CompilationThreshold), null, doWhile);
         testCompilationThreshold(2, "2", doWhile); // test default value
     }
 
-    private static void testCompilationThreshold(int value, String optionValue, Runnable doWhile) {
-        Context.Builder builder = Context.newBuilder("sl");
-        if (optionValue != null) {
-            builder.option(COMPILATION_THRESHOLD_OPTION, optionValue);
-        }
-        Context context = builder.build();
+    @Test
+    public void testPolyglotCompilerOptionsAreUsed() {
+        setupContext("engine.CompilationThreshold", "27", //
+                        "engine.TraceCompilation", "true", //
+                        "engine.TraceCompilationDetails", "true", //
+                        "engine.Inlining", "false", //
+                        "engine.Splitting", "false", //
+                        "engine.Mode", "latency");
+        OptimizedCallTarget target = (OptimizedCallTarget) Truffle.getRuntime().createCallTarget(RootNode.createConstantNode(42));
+        Assert.assertEquals(27, (int) target.getOptionValue(PolyglotCompilerOptions.CompilationThreshold));
+        Assert.assertEquals(true, target.getOptionValue(PolyglotCompilerOptions.TraceCompilation));
+        Assert.assertEquals(true, target.getOptionValue(PolyglotCompilerOptions.TraceCompilationDetails));
+        Assert.assertEquals(false, target.getOptionValue(PolyglotCompilerOptions.Inlining));
+        Assert.assertEquals(false, target.getOptionValue(PolyglotCompilerOptions.Splitting));
+        Assert.assertEquals(PolyglotCompilerOptions.EngineModeEnum.LATENCY, target.getOptionValue(PolyglotCompilerOptions.Mode));
+    }
 
-        // installs isOptimized
-        installSLBuiltin(context, SLIsOptimizedBuiltinFactory.getInstance());
+    @Test(expected = IllegalArgumentException.class)
+    public void testParseUnknownMode() {
+        Context.newBuilder() //
+                        .allowExperimentalOptions(true) //
+                        .option("engine.Mode", "anUnknownMode").build();
+    }
 
-        context.eval("sl", "function test() {}");
+    private void testCompilationThreshold(int iterations, String compilationThresholdOption, Runnable doWhile) {
+        Context ctx = setupContext(compilationThresholdOption == null ? new String[0] : new String[]{"engine.CompilationThreshold", compilationThresholdOption});
+        ctx.eval("sl", "function test() {}");
+        SLFunction test = SLLanguage.getCurrentContext().getFunctionRegistry().getFunction("test");
 
-        Value test = context.lookup("sl", "test");
-        Value isOptimized = context.lookup("sl", "isOptimized");
-        Assert.assertFalse(isOptimized.execute(test).asBoolean());
-        for (int i = 0; i < value - 1; i++) {
-            Assert.assertFalse(isOptimized.execute(test).asBoolean());
-            test.execute();
+        Assert.assertFalse(isExecuteCompiled(test));
+        for (int i = 0; i < iterations - 1; i++) {
+            Assert.assertFalse(isExecuteCompiled(test));
+            test.getCallTarget().call();
         }
         if (doWhile != null) {
             doWhile.run();
         }
-        Assert.assertFalse(isOptimized.execute(test).asBoolean());
-        test.execute();
-        Assert.assertTrue(isOptimized.execute(test).asBoolean());
-        test.execute();
-        Assert.assertTrue(isOptimized.execute(test).asBoolean());
+        Assert.assertFalse(isExecuteCompiled(test));
+        test.getCallTarget().call();
+        Assert.assertTrue(isExecuteCompiled(test));
+        test.getCallTarget().call();
+        Assert.assertTrue(isExecuteCompiled(test));
     }
 
-    private static void installSLBuiltin(Context context, NodeFactory<? extends SLBuiltinNode> builtin) {
-        context.eval("sl", "function installBuiltin(e) { return e(); }");
-        context.lookup("sl", "installBuiltin").execute(new ProxyExecutable() {
-            @Override
-            public Object execute(Value... t) {
-                SLContext.getCurrent().installBuiltin(builtin);
-                return true;
-            }
-        });
+    private static boolean isExecuteCompiled(SLFunction value) {
+        return ((OptimizedCallTarget) value.getCallTarget()).isValid();
     }
+
 }

@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -45,33 +47,43 @@ public interface InlineInvokePlugin extends GraphBuilderPlugin {
          * Denotes a call site that must not be inlined and should be implemented by a node that
          * does not speculate on the call not raising an exception.
          */
-        public static final InlineInfo DO_NOT_INLINE_WITH_EXCEPTION = new InlineInfo(null, null);
+        public static final InlineInfo DO_NOT_INLINE_WITH_EXCEPTION = new InlineInfo();
 
         /**
          * Denotes a call site must not be inlined and can be implemented by a node that speculates
          * the call will not throw an exception.
          */
-        public static final InlineInfo DO_NOT_INLINE_NO_EXCEPTION = new InlineInfo(null, null);
+        public static final InlineInfo DO_NOT_INLINE_NO_EXCEPTION = new InlineInfo();
 
         /**
          * Denotes a call site must not be inlined and the execution should be transferred to
          * interpreter in case of an exception.
          */
-        public static final InlineInfo DO_NOT_INLINE_DEOPTIMIZE_ON_EXCEPTION = new InlineInfo(null, null);
+        public static final InlineInfo DO_NOT_INLINE_DEOPTIMIZE_ON_EXCEPTION = new InlineInfo();
 
         private final ResolvedJavaMethod methodToInline;
+        private final MethodSubstitutionPlugin plugin;
         private final BytecodeProvider intrinsicBytecodeProvider;
 
         public static InlineInfo createStandardInlineInfo(ResolvedJavaMethod methodToInline) {
-            return new InlineInfo(methodToInline, null);
+            return new InlineInfo(methodToInline, null, null);
         }
 
         public static InlineInfo createIntrinsicInlineInfo(ResolvedJavaMethod methodToInline, BytecodeProvider intrinsicBytecodeProvider) {
-            return new InlineInfo(methodToInline, intrinsicBytecodeProvider);
+            return new InlineInfo(methodToInline, null, intrinsicBytecodeProvider);
         }
 
-        private InlineInfo(ResolvedJavaMethod methodToInline, BytecodeProvider intrinsicBytecodeProvider) {
+        public static InlineInfo createMethodSubstitutionInlineInfo(ResolvedJavaMethod methodToInline, MethodSubstitutionPlugin plugin) {
+            return new InlineInfo(methodToInline, plugin, plugin.getBytecodeProvider());
+        }
+
+        private InlineInfo() {
+            this(null, null, null);
+        }
+
+        private InlineInfo(ResolvedJavaMethod methodToInline, MethodSubstitutionPlugin plugin, BytecodeProvider intrinsicBytecodeProvider) {
             this.methodToInline = methodToInline;
+            this.plugin = plugin;
             this.intrinsicBytecodeProvider = intrinsicBytecodeProvider;
         }
 
@@ -82,6 +94,10 @@ public interface InlineInvokePlugin extends GraphBuilderPlugin {
             return methodToInline;
         }
 
+        public boolean allowsInlining() {
+            return methodToInline != null;
+        }
+
         /**
          * Gets the provider of bytecode to be parsed for {@link #getMethodToInline()} if is is an
          * intrinsic for the original method (i.e., the {@code method} passed to
@@ -90,6 +106,14 @@ public interface InlineInvokePlugin extends GraphBuilderPlugin {
          */
         public BytecodeProvider getIntrinsicBytecodeProvider() {
             return intrinsicBytecodeProvider;
+        }
+
+        public boolean isSubstitution() {
+            return plugin != null;
+        }
+
+        public MethodSubstitutionPlugin getPlugin() {
+            return plugin;
         }
     }
 

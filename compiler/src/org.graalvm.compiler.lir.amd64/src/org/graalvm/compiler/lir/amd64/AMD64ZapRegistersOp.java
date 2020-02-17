@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2013, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2013, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -22,25 +24,21 @@
  */
 package org.graalvm.compiler.lir.amd64;
 
-import static org.graalvm.compiler.lir.amd64.AMD64SaveRegistersOp.prune;
-
 import org.graalvm.compiler.asm.amd64.AMD64MacroAssembler;
 import org.graalvm.compiler.lir.LIRInstructionClass;
 import org.graalvm.compiler.lir.Opcode;
-import org.graalvm.compiler.lir.StandardOp.SaveRegistersOp;
+import org.graalvm.compiler.lir.StandardOp;
 import org.graalvm.compiler.lir.asm.CompilationResultBuilder;
-import org.graalvm.compiler.lir.framemap.FrameMap;
-import org.graalvm.util.EconomicSet;
 
+import jdk.vm.ci.amd64.AMD64Kind;
 import jdk.vm.ci.code.Register;
-import jdk.vm.ci.code.RegisterSaveLayout;
 import jdk.vm.ci.meta.JavaConstant;
 
 /**
  * Writes well known garbage values to registers.
  */
 @Opcode("ZAP_REGISTER")
-public final class AMD64ZapRegistersOp extends AMD64LIRInstruction implements SaveRegistersOp {
+public final class AMD64ZapRegistersOp extends AMD64LIRInstruction implements StandardOp.ZapRegistersOp {
     public static final LIRInstructionClass<AMD64ZapRegistersOp> TYPE = LIRInstructionClass.create(AMD64ZapRegistersOp.class);
 
     /**
@@ -64,23 +62,8 @@ public final class AMD64ZapRegistersOp extends AMD64LIRInstruction implements Sa
         for (int i = 0; i < zappedRegisters.length; i++) {
             Register reg = zappedRegisters[i];
             if (reg != null) {
-                AMD64Move.const2reg(crb, masm, reg, zapValues[i]);
+                AMD64Move.const2reg(crb, masm, reg, zapValues[i], AMD64Kind.QWORD);
             }
         }
-    }
-
-    @Override
-    public boolean supportsRemove() {
-        return true;
-    }
-
-    @Override
-    public int remove(EconomicSet<Register> doNotSave) {
-        return prune(doNotSave, zappedRegisters);
-    }
-
-    @Override
-    public RegisterSaveLayout getMap(FrameMap frameMap) {
-        return new RegisterSaveLayout(new Register[0], new int[0]);
     }
 }

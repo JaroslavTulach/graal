@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2009, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2009, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -29,6 +31,7 @@ import static jdk.vm.ci.sparc.SPARCKind.WORD;
 import static jdk.vm.ci.sparc.SPARCKind.XWORD;
 
 import org.graalvm.compiler.core.common.LIRKind;
+import org.graalvm.compiler.core.common.calc.CanonicalCondition;
 import org.graalvm.compiler.core.common.calc.Condition;
 import org.graalvm.compiler.core.gen.NodeMatchRules;
 import org.graalvm.compiler.core.match.ComplexMatchResult;
@@ -40,13 +43,15 @@ import org.graalvm.compiler.lir.gen.LIRGeneratorTool;
 import org.graalvm.compiler.lir.sparc.SPARCAddressValue;
 import org.graalvm.compiler.nodes.DeoptimizingNode;
 import org.graalvm.compiler.nodes.IfNode;
+import org.graalvm.compiler.nodes.NodeView;
 import org.graalvm.compiler.nodes.ValueNode;
 import org.graalvm.compiler.nodes.calc.CompareNode;
 import org.graalvm.compiler.nodes.calc.SignExtendNode;
 import org.graalvm.compiler.nodes.calc.ZeroExtendNode;
 import org.graalvm.compiler.nodes.java.LogicCompareAndSwapNode;
-import org.graalvm.compiler.nodes.memory.Access;
+import org.graalvm.compiler.nodes.memory.AddressableMemoryAccess;
 import org.graalvm.compiler.nodes.memory.LIRLowerableAccess;
+import org.graalvm.compiler.nodes.memory.MemoryAccess;
 
 import jdk.vm.ci.meta.JavaConstant;
 import jdk.vm.ci.meta.Value;
@@ -61,7 +66,7 @@ public class SPARCNodeMatchRules extends NodeMatchRules {
         super(gen);
     }
 
-    protected LIRFrameState getState(Access access) {
+    protected LIRFrameState getState(MemoryAccess access) {
         if (access instanceof DeoptimizingNode) {
             return state((DeoptimizingNode) access);
         }
@@ -69,10 +74,10 @@ public class SPARCNodeMatchRules extends NodeMatchRules {
     }
 
     protected LIRKind getLirKind(LIRLowerableAccess access) {
-        return gen.getLIRKind(access.getAccessStamp());
+        return gen.getLIRKind(access.getAccessStamp(NodeView.DEFAULT));
     }
 
-    private ComplexMatchResult emitSignExtendMemory(Access access, int fromBits, int toBits) {
+    private ComplexMatchResult emitSignExtendMemory(AddressableMemoryAccess access, int fromBits, int toBits) {
         assert fromBits <= toBits && toBits <= 64;
         SPARCKind toKind = null;
         SPARCKind fromKind = null;
@@ -100,7 +105,7 @@ public class SPARCNodeMatchRules extends NodeMatchRules {
         };
     }
 
-    private ComplexMatchResult emitZeroExtendMemory(Access access, int fromBits, int toBits) {
+    private ComplexMatchResult emitZeroExtendMemory(AddressableMemoryAccess access, int fromBits, int toBits) {
         assert fromBits <= toBits && toBits <= 64;
         SPARCKind toKind = null;
         SPARCKind fromKind = null;
@@ -131,13 +136,15 @@ public class SPARCNodeMatchRules extends NodeMatchRules {
 
     @MatchRule("(SignExtend Read=access)")
     @MatchRule("(SignExtend FloatingRead=access)")
-    public ComplexMatchResult signExtend(SignExtendNode root, Access access) {
+    @MatchRule("(SignExtend VolatileRead=access)")
+    public ComplexMatchResult signExtend(SignExtendNode root, AddressableMemoryAccess access) {
         return emitSignExtendMemory(access, root.getInputBits(), root.getResultBits());
     }
 
     @MatchRule("(ZeroExtend Read=access)")
     @MatchRule("(ZeroExtend FloatingRead=access)")
-    public ComplexMatchResult zeroExtend(ZeroExtendNode root, Access access) {
+    @MatchRule("(ZeroExtend VolatileRead=access)")
+    public ComplexMatchResult zeroExtend(ZeroExtendNode root, AddressableMemoryAccess access) {
         return emitZeroExtendMemory(access, root.getInputBits(), root.getResultBits());
     }
 
@@ -147,8 +154,8 @@ public class SPARCNodeMatchRules extends NodeMatchRules {
     @MatchRule("(If (IntegerEquals=compare value LogicCompareAndSwap=cas))")
     public ComplexMatchResult ifCompareLogicCas(IfNode root, CompareNode compare, ValueNode value, LogicCompareAndSwapNode cas) {
         JavaConstant constant = value.asJavaConstant();
-        assert compare.condition() == Condition.EQ;
-        if (constant != null && cas.usages().count() == 1) {
+        assert compare.condition() == CanonicalCondition.EQ;
+        if (constant != null && cas.hasExactlyOneUsage()) {
             long constantValue = constant.asLong();
             boolean successIsTrue;
             if (constantValue == 0) {
@@ -168,7 +175,7 @@ public class SPARCNodeMatchRules extends NodeMatchRules {
                 SPARCAddressValue address = (SPARCAddressValue) operand(cas.getAddress());
                 Condition condition = successIsTrue ? Condition.EQ : Condition.NE;
 
-                Value result = getLIRGeneratorTool().emitValueCompareAndSwap(address, expectedValue, newValue);
+                Value result = getLIRGeneratorTool().emitValueCompareAndSwap(kind, address, expectedValue, newValue);
                 getLIRGeneratorTool().emitCompareBranch(kind.getPlatformKind(), result, expectedValue, condition, false, trueLabel, falseLabel, trueLabelProbability);
                 return null;
             };

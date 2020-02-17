@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2013, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2013, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -25,6 +27,7 @@ package org.graalvm.compiler.phases.common;
 import org.graalvm.compiler.core.common.type.ObjectStamp;
 import org.graalvm.compiler.core.common.type.Stamp;
 import org.graalvm.compiler.core.common.type.StampFactory;
+import org.graalvm.compiler.nodes.NodeView;
 import org.graalvm.compiler.nodes.ParameterNode;
 import org.graalvm.compiler.nodes.StructuredGraph;
 import org.graalvm.compiler.phases.Phase;
@@ -39,8 +42,8 @@ public class NonNullParametersPhase extends Phase {
     protected void run(StructuredGraph graph) {
         Stamp nonNull = StampFactory.objectNonNull();
         for (ParameterNode param : graph.getNodes(ParameterNode.TYPE)) {
-            if (param.stamp() instanceof ObjectStamp) {
-                ObjectStamp paramStamp = (ObjectStamp) param.stamp();
+            if (param.stamp(NodeView.DEFAULT) instanceof ObjectStamp) {
+                ObjectStamp paramStamp = (ObjectStamp) param.stamp(NodeView.DEFAULT);
                 param.setStamp(paramStamp.join(nonNull));
             }
         }

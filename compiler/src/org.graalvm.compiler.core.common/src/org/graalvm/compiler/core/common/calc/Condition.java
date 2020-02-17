@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2009, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2009, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -115,6 +117,55 @@ public enum Condition {
         throw new IllegalArgumentException(this.toString());
     }
 
+    public static final class CanonicalizedCondition {
+        private final CanonicalCondition canonicalCondition;
+        private final boolean mirror;
+        private final boolean negate;
+
+        private CanonicalizedCondition(CanonicalCondition canonicalCondition, boolean mirror, boolean negate) {
+            this.canonicalCondition = canonicalCondition;
+            this.mirror = mirror;
+            this.negate = negate;
+        }
+
+        public CanonicalCondition getCanonicalCondition() {
+            return canonicalCondition;
+        }
+
+        public boolean mustMirror() {
+            return mirror;
+        }
+
+        public boolean mustNegate() {
+            return negate;
+        }
+    }
+
+    public CanonicalizedCondition canonicalize() {
+        CanonicalCondition canonicalCondition;
+        switch (this) {
+            case EQ:
+            case NE:
+                canonicalCondition = CanonicalCondition.EQ;
+                break;
+            case LT:
+            case LE:
+            case GT:
+            case GE:
+                canonicalCondition = CanonicalCondition.LT;
+                break;
+            case BT:
+            case BE:
+            case AT:
+            case AE:
+                canonicalCondition = CanonicalCondition.BT;
+                break;
+            default:
+                throw new IllegalArgumentException(this.toString());
+        }
+        return new CanonicalizedCondition(canonicalCondition, canonicalMirror(), canonicalNegate());
+    }
+
     /**
      * Given a condition and its negation, this method returns true for one of the two and false for
      * the other one. This can be used to keep comparisons in a canonical form.
@@ -151,7 +202,7 @@ public enum Condition {
      * Returns true if the condition needs to be mirrored to get to a canonical condition. The
      * result of the mirroring operation might still need to be negated to achieve a canonical form.
      */
-    public boolean canonicalMirror() {
+    private boolean canonicalMirror() {
         switch (this) {
             case EQ:
                 return false;
@@ -181,7 +232,7 @@ public enum Condition {
      * Returns true if the condition needs to be negated to get to a canonical condition. The result
      * of the negation might still need to be mirrored to achieve a canonical form.
      */
-    public boolean canonicalNegate() {
+    private boolean canonicalNegate() {
         switch (this) {
             case EQ:
                 return false;

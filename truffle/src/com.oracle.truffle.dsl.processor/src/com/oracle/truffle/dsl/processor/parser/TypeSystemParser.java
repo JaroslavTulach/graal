@@ -1,28 +1,45 @@
 /*
- * Copyright (c) 2012, 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
- * This code is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * The Universal Permissive License (UPL), Version 1.0
  *
- * This code is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
- * version 2 for more details (a copy is included in the LICENSE file that
- * accompanied this code).
+ * Subject to the condition set forth below, permission is hereby granted to any
+ * person obtaining a copy of this software, associated documentation and/or
+ * data (collectively the "Software"), free of charge and under any and all
+ * copyright rights in the Software, and any and all patent rights owned or
+ * freely licensable by each licensor hereunder covering either (i) the
+ * unmodified Software as contributed to or provided by such licensor, or (ii)
+ * the Larger Works (as defined below), to deal in both
  *
- * You should have received a copy of the GNU General Public License version
- * 2 along with this work; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
+ * (a) the Software, and
  *
- * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
- * or visit www.oracle.com if you need additional information or have any
- * questions.
+ * (b) any piece of software and/or hardware listed in the lrgrwrks.txt file if
+ * one is included with the Software each a "Larger Work" to which the Software
+ * is contributed by such licensors),
+ *
+ * without restriction, including without limitation the rights to copy, create
+ * derivative works of, display, perform, and distribute the Software and make,
+ * use, sell, offer for sale, import, export, have made, and have sold the
+ * Software and the Larger Work(s), and to sublicense the foregoing rights on
+ * either these or other terms.
+ *
+ * This license is subject to the following condition:
+ *
+ * The above copyright notice and either this complete permission notice or at a
+ * minimum a reference to the UPL must be included in all copies or substantial
+ * portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
  */
 package com.oracle.truffle.dsl.processor.parser;
 
-import java.lang.annotation.Annotation;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -35,14 +52,12 @@ import javax.lang.model.element.Element;
 import javax.lang.model.element.ExecutableElement;
 import javax.lang.model.element.Modifier;
 import javax.lang.model.element.TypeElement;
+import javax.lang.model.type.DeclaredType;
 import javax.lang.model.type.TypeKind;
 import javax.lang.model.type.TypeMirror;
 import javax.lang.model.util.ElementFilter;
 import javax.lang.model.util.Types;
 
-import com.oracle.truffle.api.dsl.TypeCast;
-import com.oracle.truffle.api.dsl.TypeCheck;
-import com.oracle.truffle.api.dsl.TypeSystem;
 import com.oracle.truffle.dsl.processor.java.ElementUtils;
 import com.oracle.truffle.dsl.processor.model.ImplicitCastData;
 import com.oracle.truffle.dsl.processor.model.Template;
@@ -50,13 +65,11 @@ import com.oracle.truffle.dsl.processor.model.TypeCastData;
 import com.oracle.truffle.dsl.processor.model.TypeCheckData;
 import com.oracle.truffle.dsl.processor.model.TypeSystemData;
 
-@SuppressWarnings("deprecation")
-@com.oracle.truffle.api.dsl.internal.DSLOptions
 public class TypeSystemParser extends AbstractParser<TypeSystemData> {
 
     @Override
-    public Class<? extends Annotation> getAnnotationType() {
-        return TypeSystem.class;
+    public DeclaredType getAnnotationType() {
+        return types.TypeSystem;
     }
 
     /**
@@ -69,28 +82,19 @@ public class TypeSystemParser extends AbstractParser<TypeSystemData> {
     }
 
     @Override
-    protected TypeSystemData parse(Element element, AnnotationMirror mirror) {
+    protected TypeSystemData parse(Element element, List<AnnotationMirror> mirror) {
         TypeElement templateType = (TypeElement) element;
-        AnnotationMirror templateTypeAnnotation = mirror;
-        com.oracle.truffle.api.dsl.internal.DSLOptions options = element.getAnnotation(com.oracle.truffle.api.dsl.internal.DSLOptions.class);
-        if (options == null) {
-            options = TypeSystemParser.class.getAnnotation(com.oracle.truffle.api.dsl.internal.DSLOptions.class);
-        }
-        assert options != null;
+        AnnotationMirror templateTypeAnnotation = mirror.iterator().next();
 
-        TypeSystemData typeSystem = new TypeSystemData(context, templateType, templateTypeAnnotation, options, false);
+        TypeSystemData typeSystem = new TypeSystemData(context, templateType, templateTypeAnnotation, false);
 
         // annotation type on class path!?
-        TypeElement annotationTypeElement = processingEnv.getElementUtils().getTypeElement(getAnnotationType().getCanonicalName());
-        if (annotationTypeElement == null) {
-            typeSystem.addError("Required class %s is not on the classpath.", getAnnotationType().getName());
-        }
         if (templateType.getModifiers().contains(Modifier.PRIVATE)) {
-            typeSystem.addError("A @%s must have at least package protected visibility.", getAnnotationType().getName());
+            typeSystem.addError("A @%s must have at least package protected visibility.", getAnnotationType().asElement().getSimpleName().toString());
         }
 
         if (templateType.getModifiers().contains(Modifier.FINAL)) {
-            typeSystem.addError("The @%s must not be final.", getAnnotationType().getName());
+            typeSystem.addError("The @%s must not be final.", getAnnotationType().asElement().getSimpleName().toString());
         }
         if (typeSystem.hasErrors()) {
             return typeSystem;
@@ -100,7 +104,7 @@ public class TypeSystemParser extends AbstractParser<TypeSystemData> {
             return typeSystem;
         }
 
-        verifyExclusiveMethodAnnotation(typeSystem, TypeCast.class, TypeCheck.class);
+        verifyExclusiveMethodAnnotation(typeSystem, types.TypeCast, types.TypeCheck);
 
         List<Element> elements = newElementList(context.getEnvironment().getElementUtils().getAllMembers(templateType));
         List<ImplicitCastData> implicitCasts = new ImplicitCastParser(context, typeSystem).parse(elements);
@@ -132,13 +136,13 @@ public class TypeSystemParser extends AbstractParser<TypeSystemData> {
         return typeSystem;
     }
 
-    private void verifyExclusiveMethodAnnotation(Template template, Class<?>... annotationTypes) {
+    private static void verifyExclusiveMethodAnnotation(Template template, DeclaredType... annotationTypes) {
         List<ExecutableElement> methods = ElementFilter.methodsIn(template.getTemplateType().getEnclosedElements());
         for (ExecutableElement method : methods) {
             List<AnnotationMirror> foundAnnotations = new ArrayList<>();
             for (int i = 0; i < annotationTypes.length; i++) {
-                Class<?> annotationType = annotationTypes[i];
-                AnnotationMirror mirror = ElementUtils.findAnnotationMirror(context.getEnvironment(), method, annotationType);
+                DeclaredType annotationType = annotationTypes[i];
+                AnnotationMirror mirror = ElementUtils.findAnnotationMirror(method, annotationType);
                 if (mirror != null) {
                     foundAnnotations.add(mirror);
                 }
@@ -196,13 +200,15 @@ public class TypeSystemParser extends AbstractParser<TypeSystemData> {
         }
     }
 
+    private static final TypeKind[] TYPE_KIND_VALUES = TypeKind.values();
+
     private boolean isPrimitiveWrapper(TypeMirror type) {
-        Types types = context.getEnvironment().getTypeUtils();
-        for (TypeKind kind : TypeKind.values()) {
+        Types typeUtils = context.getEnvironment().getTypeUtils();
+        for (TypeKind kind : TYPE_KIND_VALUES) {
             if (!kind.isPrimitive()) {
                 continue;
             }
-            if (ElementUtils.typeEquals(type, types.boxedClass(types.getPrimitiveType(kind)).asType())) {
+            if (ElementUtils.typeEquals(type, typeUtils.boxedClass(typeUtils.getPrimitiveType(kind)).asType())) {
                 return true;
             }
         }
