@@ -57,6 +57,7 @@ import org.graalvm.compiler.nodes.ValueNode;
 import org.graalvm.compiler.nodes.calc.BinaryNode;
 import org.graalvm.compiler.nodes.calc.ConditionalNode;
 import org.graalvm.compiler.nodes.calc.FixedBinaryNode;
+import org.graalvm.compiler.nodes.calc.NarrowNode;
 import org.graalvm.compiler.nodes.calc.NegateNode;
 import org.graalvm.compiler.nodes.calc.UnaryNode;
 
@@ -233,7 +234,35 @@ public final class JavaOutput {
         }
         if (at instanceof ConstantNode) {
             String value = ((ConstantNode) at).getValue().toValueString();
-            out.append(value);
+            final String txt;
+            switch (((ConstantNode) at).getStackKind()) {
+                case Boolean:
+                case Int:
+                case Double:
+                    txt = value.toString();
+                    break;
+                case Byte:
+                    txt = "((byte)" + value + ")";
+                    break;
+                case Short:
+                    txt = "((short)" + value + ")";
+                    break;
+                case Char:
+                    txt = "((char)" + value + ")";
+                    break;
+                case Float:
+                    txt = value + "f";
+                    break;
+                case Long:
+                    txt = value + "l";
+                    break;
+                case Object:
+                    txt = value.toString();
+                    break;
+                default:
+                    throw new IllegalStateException("can't convert " + value);
+            }
+            out.append(txt);
             return;
         }
         if (at instanceof BinaryOpLogicNode || at instanceof BinaryNode || at instanceof FixedBinaryNode) {
@@ -245,6 +274,17 @@ public final class JavaOutput {
             out.append(" ").append(at.getNodeClass().shortName()).append(" ");
             expr(out, twoIt.next(), "");
             out.append(")");
+            return;
+        }
+        if (at instanceof NarrowNode) {
+            switch (((NarrowNode) at).getStackKind()) {
+                case Byte: out.append("((byte)("); break;
+                case Short: out.append("((short)("); break;
+                case Int: out.append("((int)("); break;
+                default: throw new IllegalStateException("no narrow for " + at);
+            }
+            expr(out, at.inputs().iterator().next(), "");
+            out.append("))");
             return;
         }
         if (at instanceof NegateNode) {

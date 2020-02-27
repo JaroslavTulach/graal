@@ -48,13 +48,13 @@ public class Java_irem4 extends JavaOutputTest {
     @Test
     public void rem6to13() throws Throwable {
         runTest("rem6", 13);
-        assertCode("% has to stay there", "% 6", 1, 1);
+        assertCode("% has been eliminated", "%", 0, 0);
     }
 
     @Test
     public void rem6to64() throws Throwable {
         runTest("rem6", 64);
-        assertCode("% has to stay there", "% 6", 1, 1);
+        assertCode("% has been eliminated", "%", 0, 0);
     }
 
 }
