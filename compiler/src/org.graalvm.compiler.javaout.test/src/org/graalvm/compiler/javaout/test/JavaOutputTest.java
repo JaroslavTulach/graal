@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2013, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2013, 2020, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -27,8 +29,6 @@ import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.Collections;
 import java.util.Set;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.Exchanger;
 import jdk.vm.ci.meta.DeoptimizationReason;
 import jdk.vm.ci.meta.ResolvedJavaMethod;
 import org.graalvm.compiler.code.CompilationResult;
@@ -43,7 +43,6 @@ import org.junit.Assert;
 import static org.junit.Assert.assertNotNull;
 import org.junit.Assume;
 import org.junit.BeforeClass;
-import org.junit.Test;
 
 public abstract class JavaOutputTest extends GraalCompilerTest {
     static final Set<DeoptimizationReason> EMPTY = Collections.<DeoptimizationReason> emptySet();
@@ -72,8 +71,9 @@ public abstract class JavaOutputTest extends GraalCompilerTest {
         DebugContext debug = graphToCompile.getDebug();
         try (DebugContext.Scope s = debug.scope("Compile", graphToCompile)) {
             assert options != null;
-            GraalCompiler.Request<CompilationResult> request = new GraalCompiler.Request<>(graphToCompile, installedCodeOwner, getProviders(), getBackend(), getDefaultGraphBuilderSuite(), getOptimisticOptimizations(),
-                    graphToCompile.getProfilingInfo(), createSuites(options), createLIRSuites(options), compilationResult, CompilationResultBuilderFactory.Default, true);
+            GraalCompiler.Request<CompilationResult> request = new GraalCompiler.Request<>(graphToCompile, installedCodeOwner, getProviders(), getBackend(), getDefaultGraphBuilderSuite(),
+                            getOptimisticOptimizations(),
+                            graphToCompile.getProfilingInfo(), createSuites(options), createLIRSuites(options), compilationResult, CompilationResultBuilderFactory.Default, true);
             GraalCompiler.compile(request).getMethods();
             assert optimizedGraph != null;
             return optimizedGraph;

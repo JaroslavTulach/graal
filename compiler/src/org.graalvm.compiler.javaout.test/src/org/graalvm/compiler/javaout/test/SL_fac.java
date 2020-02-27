@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2013, 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2013, 2020, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -36,8 +38,8 @@ public class SL_fac extends JavaOutputSL {
                         + "  } else {\n" //
                         + "    return n * fac(n - 1);\n" //
                         + "  }\n" //
-                        + "}\n" //
-                        , "fac" //
+                        + "}\n", //
+                        "fac" //
         );
         long ret = t.call(3);
         Assert.assertEquals(6L, ret);
@@ -45,6 +47,6 @@ public class SL_fac extends JavaOutputSL {
         Assert.assertEquals(24L, ret2);
         StructuredGraph graph = t.compile();
         Object actual = invokeCode(graph, null, null, 3);
-        Assert.assertEquals((Long) ret, actual);
+        Assert.assertEquals(ret, actual);
     }
 }

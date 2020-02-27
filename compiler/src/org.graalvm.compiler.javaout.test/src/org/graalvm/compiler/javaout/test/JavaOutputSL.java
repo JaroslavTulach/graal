@@ -1,10 +1,12 @@
 /*
- * Copyright (c) 2013, 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2013, 2020, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
+ * published by the Free Software Foundation.  Oracle designates this
+ * particular file as subject to the "Classpath" exception as provided
+ * by Oracle in the LICENSE file that accompanied this code.
  *
  * This code is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
@@ -52,9 +54,9 @@ public class JavaOutputSL extends JavaOutputTest {
         for (RootCallTarget target : new RootCallTarget[0]) {
             if (target instanceof OptimizedCallTarget) {
                 OptimizedCallTarget oct = (OptimizedCallTarget) target;
-//                if (oct.getCompilationProfile() == null) {
-//                    continue;
-//                }
+                // if (oct.getCompilationProfile() == null) {
+                // continue;
+                // }
                 if (oct.getRootNode().getClass().getSimpleName().equals("SLRootNode")) {
                     if (symbol.equals(oct.getRootNode().getName())) {
                         assertNull("No previous target: " + found, found);
@@ -100,24 +102,9 @@ public class JavaOutputSL extends JavaOutputTest {
         }
 
         @Override
-        public void onCompilationTruffleTierFinished(OptimizedCallTarget target, TruffleInlining inliningDecision, TruffleCompilerListener.GraphInfo graph) {
-            this.graph = (StructuredGraph) (Object) graph;
+        public void onCompilationTruffleTierFinished(OptimizedCallTarget target, TruffleInlining inliningDecision, TruffleCompilerListener.GraphInfo newGraph) {
+            this.graph = (StructuredGraph) (Object) newGraph;
             this.task.cancel();
-        }
-    }
-
-    private static final class StructuredGraphException extends RuntimeException {
-        static final long serialVersionUID = 1L;
-
-        private final StructuredGraph graph;
-
-        public StructuredGraphException(StructuredGraph graph) {
-            this.graph = graph;
-        }
-
-        @Override
-        public Throwable fillInStackTrace() {
-            return this;
         }
     }
 }
