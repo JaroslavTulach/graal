@@ -47,6 +47,7 @@ import org.graalvm.compiler.nodes.LoopBeginNode;
 import org.graalvm.compiler.nodes.LoopEndNode;
 import org.graalvm.compiler.nodes.LoopExitNode;
 import org.graalvm.compiler.nodes.MergeNode;
+import org.graalvm.compiler.nodes.NodeView;
 import org.graalvm.compiler.nodes.ParameterNode;
 import org.graalvm.compiler.nodes.PhiNode;
 import org.graalvm.compiler.nodes.ReturnNode;
@@ -177,7 +178,7 @@ public final class JavaOutput {
         MetaAccessProvider metaAccess = JVMCI.getRuntime().getHostJVMCIBackend().getMetaAccess();
         StringBuilder sb = new StringBuilder();
         for (PhiNode phi : phis) {
-            sb.append("    ").append(phi.stamp().javaType(metaAccess).toJavaName());
+            sb.append("    ").append(phi.stamp(NodeView.DEFAULT).javaType(metaAccess).toJavaName());
             sb.append(" phi").append(findNodeId(phi)).append(";\n");
         }
         return sb.toString();
@@ -188,7 +189,7 @@ public final class JavaOutput {
         for (PhiNode phi : end.merge().phis()) {
             if (phi.isLoopPhi() == loopPhiOnly) {
                 phis.add(phi);
-                out.append(sep).append(phi.stamp().javaType(metaAccess).toJavaName());
+                out.append(sep).append(phi.stamp(NodeView.DEFAULT).javaType(metaAccess).toJavaName());
                 out.append(" newPhi").append(findNodeId(phi)).append(" = ");
                 expr(out, phi.valueAt(end), sep);
                 out.append(";").append("\n");

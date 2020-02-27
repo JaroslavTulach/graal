@@ -27,6 +27,8 @@ import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.Collections;
 import java.util.Set;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Exchanger;
 import jdk.vm.ci.meta.DeoptimizationReason;
 import jdk.vm.ci.meta.ResolvedJavaMethod;
 import org.graalvm.compiler.code.CompilationResult;
@@ -37,11 +39,11 @@ import org.graalvm.compiler.debug.DebugContext;
 import org.graalvm.compiler.lir.asm.CompilationResultBuilderFactory;
 import org.graalvm.compiler.nodes.StructuredGraph;
 import org.graalvm.compiler.options.OptionValues;
-import org.graalvm.compiler.phases.OptimisticOptimizations;
 import org.junit.Assert;
 import static org.junit.Assert.assertNotNull;
 import org.junit.Assume;
 import org.junit.BeforeClass;
+import org.junit.Test;
 
 public abstract class JavaOutputTest extends GraalCompilerTest {
     static final Set<DeoptimizationReason> EMPTY = Collections.<DeoptimizationReason> emptySet();
@@ -70,21 +72,24 @@ public abstract class JavaOutputTest extends GraalCompilerTest {
         DebugContext debug = graphToCompile.getDebug();
         try (DebugContext.Scope s = debug.scope("Compile", graphToCompile)) {
             assert options != null;
-            GraalCompiler.Request<CompilationResult> request = new GraalCompiler.Request<>(graphToCompile, installedCodeOwner, getProviders(), getBackend(), getDefaultGraphBuilderSuite(),
-                            OptimisticOptimizations.ALL,
-                            graphToCompile.getProfilingInfo(), createSuites(options), createLIRSuites(options), compilationResult, CompilationResultBuilderFactory.Default);
-            GraalCompiler.emitFrontEnd(
-                            request.providers, request.backend, request.graph, request.graphBuilderSuite,
-                            request.optimisticOpts, request.profilingInfo, request.suites);
-            return request.graph;
+            GraalCompiler.Request<CompilationResult> request = new GraalCompiler.Request<>(graphToCompile, installedCodeOwner, getProviders(), getBackend(), getDefaultGraphBuilderSuite(), getOptimisticOptimizations(),
+                    graphToCompile.getProfilingInfo(), createSuites(options), createLIRSuites(options), compilationResult, CompilationResultBuilderFactory.Default, true);
+            GraalCompiler.compile(request).getMethods();
+            assert optimizedGraph != null;
+            return optimizedGraph;
         } catch (Throwable e) {
             throw debug.handle(e);
         }
     }
 
     @Override
+    protected void checkHighTierGraph(StructuredGraph graph) {
+        optimizedGraph = graph;
+    }
+
+    @Override
     protected CompilationResult compile(ResolvedJavaMethod installedCodeOwner, StructuredGraph graph, CompilationResult compilationResult, CompilationIdentifier compilationId, OptionValues options) {
-        optimizedGraph = optimize(installedCodeOwner, graph, compilationResult, compilationId, options);
+        optimize(installedCodeOwner, graph, compilationResult, compilationId, options);
         return null;
     }
 

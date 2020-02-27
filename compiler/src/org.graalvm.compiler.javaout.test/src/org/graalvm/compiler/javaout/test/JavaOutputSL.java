@@ -24,17 +24,15 @@ package org.graalvm.compiler.javaout.test;
 
 import com.oracle.truffle.api.RootCallTarget;
 import com.oracle.truffle.api.Truffle;
-import com.oracle.truffle.api.frame.Frame;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.ExecutionException;
-import org.graalvm.compiler.code.CompilationResult;
 import org.graalvm.compiler.nodes.StructuredGraph;
-import org.graalvm.compiler.truffle.CancellableCompileTask;
-import org.graalvm.compiler.truffle.GraalTruffleCompilationListener;
-import org.graalvm.compiler.truffle.GraalTruffleRuntime;
-import org.graalvm.compiler.truffle.OptimizedCallTarget;
-import org.graalvm.compiler.truffle.OptimizedDirectCallNode;
-import org.graalvm.compiler.truffle.TruffleInlining;
+import org.graalvm.compiler.truffle.runtime.CancellableCompileTask;
+import org.graalvm.compiler.truffle.runtime.GraalTruffleRuntime;
+import org.graalvm.compiler.truffle.runtime.OptimizedCallTarget;
+import org.graalvm.compiler.truffle.runtime.TruffleInlining;
+import org.graalvm.compiler.truffle.common.TruffleCompilerListener;
+import org.graalvm.compiler.truffle.runtime.GraalTruffleRuntimeListener;
 import org.graalvm.polyglot.Context;
 import org.graalvm.polyglot.Value;
 import static org.junit.Assert.assertNotNull;
@@ -44,19 +42,19 @@ public class JavaOutputSL extends JavaOutputTest {
     public Fun compile(String code, String symbol) {
         final Context ctx = Context.create("sl");
         ctx.eval("sl", code);
-        Value fn = ctx.importSymbol(symbol);
+        Value fn = ctx.getBindings("sl").getMember(symbol);
         return new Fun(fn, symbol);
     }
 
     @SuppressWarnings("deprecation")
     protected static final OptimizedCallTarget findTarget(String symbol) {
         OptimizedCallTarget found = null;
-        for (RootCallTarget target : Truffle.getRuntime().getCallTargets()) {
+        for (RootCallTarget target : new RootCallTarget[0]) {
             if (target instanceof OptimizedCallTarget) {
                 OptimizedCallTarget oct = (OptimizedCallTarget) target;
-                if (oct.getCompilationProfile() == null) {
-                    continue;
-                }
+//                if (oct.getCompilationProfile() == null) {
+//                    continue;
+//                }
                 if (oct.getRootNode().getClass().getSimpleName().equals("SLRootNode")) {
                     if (symbol.equals(oct.getRootNode().getName())) {
                         assertNull("No previous target: " + found, found);
@@ -69,7 +67,7 @@ public class JavaOutputSL extends JavaOutputTest {
         return found;
     }
 
-    public static final class Fun implements GraalTruffleCompilationListener {
+    public static final class Fun implements GraalTruffleRuntimeListener {
         private final Value fn;
         private final String name;
         private StructuredGraph graph;
@@ -87,68 +85,24 @@ public class JavaOutputSL extends JavaOutputTest {
         public StructuredGraph compile() {
             OptimizedCallTarget target = findTarget(name);
             GraalTruffleRuntime runtime = (GraalTruffleRuntime) Truffle.getRuntime();
-            runtime.addCompilationListener(this);
-            task = runtime.submitForCompilation(target);
+            runtime.addListener(this);
+            task = runtime.submitForCompilation(target, true);
             try {
-                task.getFuture().get();
+                task.awaitCompletion();
             } catch (InterruptedException | ExecutionException ex) {
                 throw new AssertionError("Error waiting for compilation", ex);
             } catch (CancellationException ok) {
                 // OK
             }
-            assertTrue("Compilation finished", task.getFuture().isDone());
-            runtime.removeCompilationListener(this);
+            assertFalse("Compilation finished", task.isCancelled());
+            runtime.removeListener(this);
             return graph;
         }
 
         @Override
-        public void notifyCompilationSplit(OptimizedDirectCallNode callNode) {
-        }
-
-        @Override
-        public void notifyCompilationQueued(OptimizedCallTarget target) {
-        }
-
-        @Override
-        public void notifyCompilationDequeued(OptimizedCallTarget target, Object source, CharSequence reason) {
-        }
-
-        @Override
-        public void notifyCompilationFailed(OptimizedCallTarget target, StructuredGraph graph, Throwable t) {
-        }
-
-        @Override
-        public void notifyCompilationStarted(OptimizedCallTarget target) {
-        }
-
-        @Override
-        public void notifyCompilationTruffleTierFinished(OptimizedCallTarget target, TruffleInlining inliningDecision, StructuredGraph graph) {
-            this.graph = graph;
+        public void onCompilationTruffleTierFinished(OptimizedCallTarget target, TruffleInlining inliningDecision, TruffleCompilerListener.GraphInfo graph) {
+            this.graph = (StructuredGraph) (Object) graph;
             this.task.cancel();
-        }
-
-        @Override
-        public void notifyCompilationGraalTierFinished(OptimizedCallTarget target, StructuredGraph graph) {
-        }
-
-        @Override
-        public void notifyCompilationSuccess(OptimizedCallTarget target, TruffleInlining inliningDecision, StructuredGraph graph, CompilationResult result) {
-        }
-
-        @Override
-        public void notifyCompilationInvalidated(OptimizedCallTarget target, Object source, CharSequence reason) {
-        }
-
-        @Override
-        public void notifyCompilationDeoptimized(OptimizedCallTarget target, Frame frame) {
-        }
-
-        @Override
-        public void notifyShutdown(GraalTruffleRuntime runtime) {
-        }
-
-        @Override
-        public void notifyStartup(GraalTruffleRuntime runtime) {
         }
     }
 

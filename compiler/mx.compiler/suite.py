@@ -1689,7 +1689,7 @@ suite = {
       "subDir" : "src",
       "sourceDirs" : ["src"],
       "dependencies" : [
-        "org.graalvm.compiler.truffle",
+        "org.graalvm.compiler.truffle.runtime",
         "org.graalvm.compiler.core.test",
         "truffle:TRUFFLE_SL_TEST",
       ],
@@ -1698,11 +1698,11 @@ suite = {
       "workingSets" : "Graal,Test",
       "jacoco" : "exclude",
       "findbugs" : "false",
-      "isTestProject" : True,
+      "testProject" : True,
     },
 
     # ------------- JDK AOT -------------
-
+    
     "jdk.tools.jaotc" : {
       "subDir" : "src",
       "sourceDirs" : ["src"],
