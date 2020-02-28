@@ -1140,7 +1140,6 @@ public abstract class OptimizedCallTarget implements CompilableTruffleAST, RootC
          * will get stuck in a "compiling" state.
          */
         synchronized (this) {
-            assert this.compilationTask != null;
             this.compilationTask = null;
         }
     }

@@ -224,7 +224,7 @@ public final class JavaOutput {
         if (at instanceof ParameterNode) {
             StructuredGraph g = (StructuredGraph) at.graph();
             final int index = ((ParameterNode) at).index();
-            if ("org.graalvm.compiler.truffle.OptimizedCallTarget".equals(g.method().getDeclaringClass().toJavaName()) &&
+            if ("org.graalvm.compiler.truffle.runtime.OptimizedCallTarget".equals(g.method().getDeclaringClass().toJavaName()) &&
                             "callRoot".equals(g.method().getName())) {
                 out.append(g.method().getParameters()[0].getName());
                 out.append("[" + index + "]");

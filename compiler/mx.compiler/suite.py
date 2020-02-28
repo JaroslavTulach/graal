@@ -1693,6 +1693,9 @@ suite = {
         "org.graalvm.compiler.core.test",
         "truffle:TRUFFLE_SL_TEST",
       ],
+      "annotationProcessors": [
+          "truffle:TRUFFLE_DSL_PROCESSOR"
+      ],
       "checkstyle" : "org.graalvm.compiler.graph",
       "javaCompliance" : "1.8",
       "workingSets" : "Graal,Test",
@@ -1702,7 +1705,7 @@ suite = {
     },
 
     # ------------- JDK AOT -------------
-    
+
     "jdk.tools.jaotc" : {
       "subDir" : "src",
       "sourceDirs" : ["src"],

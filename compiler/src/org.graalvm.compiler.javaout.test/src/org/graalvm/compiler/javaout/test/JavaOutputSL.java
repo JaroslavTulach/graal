@@ -26,8 +26,10 @@ package org.graalvm.compiler.javaout.test;
 
 import com.oracle.truffle.api.RootCallTarget;
 import com.oracle.truffle.api.Truffle;
+import java.lang.reflect.Field;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.ExecutionException;
+import java.util.function.Function;
 import org.graalvm.compiler.nodes.StructuredGraph;
 import org.graalvm.compiler.truffle.runtime.CancellableCompileTask;
 import org.graalvm.compiler.truffle.runtime.GraalTruffleRuntime;
@@ -38,46 +40,28 @@ import org.graalvm.compiler.truffle.runtime.GraalTruffleRuntimeListener;
 import org.graalvm.polyglot.Context;
 import org.graalvm.polyglot.Value;
 import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNull;
 
 public class JavaOutputSL extends JavaOutputTest {
+    @SuppressWarnings("unchecked")
     public Fun compile(String code, String symbol) {
         final Context ctx = Context.create("sl");
+        Function<String, RootCallTarget> namedTargets = ctx.getEngine().getInstruments().get(CollectRootsInstrument.ID).lookup(Function.class);
         ctx.eval("sl", code);
         Value fn = ctx.getBindings("sl").getMember(symbol);
-        return new Fun(fn, symbol);
-    }
-
-    @SuppressWarnings("deprecation")
-    protected static final OptimizedCallTarget findTarget(String symbol) {
-        OptimizedCallTarget found = null;
-        for (RootCallTarget target : new RootCallTarget[0]) {
-            if (target instanceof OptimizedCallTarget) {
-                OptimizedCallTarget oct = (OptimizedCallTarget) target;
-                // if (oct.getCompilationProfile() == null) {
-                // continue;
-                // }
-                if (oct.getRootNode().getClass().getSimpleName().equals("SLRootNode")) {
-                    if (symbol.equals(oct.getRootNode().getName())) {
-                        assertNull("No previous target: " + found, found);
-                        found = oct;
-                    }
-                }
-            }
-        }
-        assertNotNull("Target " + symbol + " found", found);
-        return found;
+        return new Fun(fn, symbol, namedTargets);
     }
 
     public static final class Fun implements GraalTruffleRuntimeListener {
         private final Value fn;
         private final String name;
+        private final Function<String, RootCallTarget> namedTargets;
         private StructuredGraph graph;
         private CancellableCompileTask task;
 
-        private Fun(Value fn, String name) {
+        private Fun(Value fn, String name, Function<String, RootCallTarget> namedTargets) {
             this.fn = fn;
             this.name = name;
+            this.namedTargets = namedTargets;
         }
 
         public long call(Object... args) {
@@ -85,7 +69,11 @@ public class JavaOutputSL extends JavaOutputTest {
         }
 
         public StructuredGraph compile() {
-            OptimizedCallTarget target = findTarget(name);
+            RootCallTarget found = namedTargets.apply(name);
+            assertNotNull("Target " + name + " found", found);
+            assertTrue("Expecting optimized target: " + found, found instanceof OptimizedCallTarget);
+            OptimizedCallTarget target = (OptimizedCallTarget) found;
+
             GraalTruffleRuntime runtime = (GraalTruffleRuntime) Truffle.getRuntime();
             runtime.addListener(this);
             task = runtime.submitForCompilation(target, true);
@@ -96,14 +84,20 @@ public class JavaOutputSL extends JavaOutputTest {
             } catch (CancellationException ok) {
                 // OK
             }
-            assertFalse("Compilation finished", task.isCancelled());
+            assertTrue("Compilation was cancelled", task.isCancelled());
             runtime.removeListener(this);
             return graph;
         }
 
         @Override
         public void onCompilationTruffleTierFinished(OptimizedCallTarget target, TruffleInlining inliningDecision, TruffleCompilerListener.GraphInfo newGraph) {
-            this.graph = (StructuredGraph) (Object) newGraph;
+            try {
+                Field graphInGraphInfoImpl = newGraph.getClass().getDeclaredField("graph");
+                graphInGraphInfoImpl.setAccessible(true);
+                this.graph = (StructuredGraph) graphInGraphInfoImpl.get(newGraph);
+            } catch (ReflectiveOperationException ex) {
+                throw new AssertionError("Cannot read StructuredGraph", ex);
+            }
             this.task.cancel();
         }
     }
