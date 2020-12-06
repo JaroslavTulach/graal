@@ -1697,7 +1697,7 @@ suite = {
           "truffle:TRUFFLE_DSL_PROCESSOR"
       ],
       "checkstyle" : "org.graalvm.compiler.graph",
-      "javaCompliance" : "1.8",
+      "javaCompliance" : "1.8+",
       "workingSets" : "Graal,Test",
       "jacoco" : "exclude",
       "findbugs" : "false",
