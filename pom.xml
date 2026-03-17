@@ -66,7 +66,7 @@
         </profile>
         <profile>
             <!--
-            Profile as module Java application. Invoke as:
+            Run as module Java application. Invoke as:
 
             JAVA_HOME=/graalvm-community-openjdk-25+25.1/ mvn -Plimitmodules package exec:exec
             -->
@@ -97,35 +97,41 @@
             <build>
                 <plugins>
                     <plugin>
-                        <groupId>org.graalvm.buildtools</groupId>
-                        <artifactId>native-maven-plugin</artifactId>
-                        <version>0.11.3</version>
-                        <extensions>true</extensions>
-                        <executions>
-                            <execution>
-                                <id>build-native</id>
-                                <goals>
-                                    <goal>compile-no-fork</goal>
-                                </goals>
-                                <phase>package</phase>
-                            </execution>
-                        </executions>
-                        <configuration>
-                            <mainClass>${exec.mainClass}</mainClass>
-                            <buildArgs>
-                                <arg>-Ob</arg>
-                            </buildArgs>
-                        </configuration>
-                    </plugin>
-                    <plugin>
                         <groupId>org.codehaus.mojo</groupId>
                         <artifactId>exec-maven-plugin</artifactId>
                         <version>3.6.3</version>
-                        <configuration>
-                            <executable>target/syslog</executable>
-                            <arguments>
-                            </arguments>
-                        </configuration>
+                        <executions>
+                            <execution>
+                                <id>native</id>
+                                <phase>package</phase>
+                                <goals>
+                                    <goal>exec</goal>
+                                </goals>
+                                <configuration>
+                                    <executable>${java.home}/bin/native-image</executable>
+                                    <arguments>
+                                        <arg>-Ob</arg>
+                                        <arg>-o</arg>
+                                        <arg>${project.build.directory}/syslog</arg>
+                                        <arg>-p</arg>
+                                        <classpath/>
+                                        <arg>-m</arg>
+                                        <arg>org.apidesign.demo.syslog/${exec.mainClass}</arg>
+                                    </arguments>
+                                </configuration>
+                            </execution>
+                            <execution>
+                                <id>syslog</id>
+                                <goals>
+                                    <goal>exec</goal>
+                                </goals>
+                                <configuration>
+                                    <executable>${project.build.directory}/syslog</executable>
+                                    <arguments>
+                                    </arguments>
+                                </configuration>
+                            </execution>
+                        </executions>                        
                     </plugin>
                 </plugins>
             </build>
