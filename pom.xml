@@ -121,6 +121,9 @@
                                 <configuration>
                                     <executable>${java.home}/bin/native-image</executable>
                                     <arguments>
+                                        <arg>--initialize-at-build-time</arg>
+                                        <arg>org.apidesign.demo.syslog</arg>
+                                        <arg>--features=org.apidesign.demo.syslog.SysLogFeature</arg>
                                         <arg>-g</arg>
                                         <arg>-Ob</arg>
                                         <arg>-o</arg>
