@@ -11,6 +11,12 @@
         <exec.mainClass>org.apidesign.demo.syslog.SysLog</exec.mainClass>
     </properties>
     <dependencies>
+        <dependency>
+            <groupId>org.graalvm.sdk</groupId>
+            <artifactId>nativeimage</artifactId>
+            <version>25.0.1</version>
+            <scope>provided</scope>
+        </dependency>
     </dependencies>
     <profiles>
         <profile>
@@ -40,7 +46,7 @@
         </profile>
         <profile>
             <!--
-            Profile as module Java application. Invoke as:
+            Run as module Java application. Invoke as:
 
             JAVA_HOME=/graalvm-community-openjdk-25+25.1/ mvn -Pmodulepath package exec:exec
             -->
@@ -93,6 +99,11 @@
             </build>
         </profile>
         <profile>
+            <!--
+            Run as native Java application compiled in "module-path" mode. Invoke as:
+
+            JAVA_HOME=/graalvm-community-openjdk-25+25.1/ mvn -Pnative package exec:exec@syslog
+            -->
             <id>native</id>
             <build>
                 <plugins>
@@ -110,6 +121,7 @@
                                 <configuration>
                                     <executable>${java.home}/bin/native-image</executable>
                                     <arguments>
+                                        <arg>-g</arg>
                                         <arg>-Ob</arg>
                                         <arg>-o</arg>
                                         <arg>${project.build.directory}/syslog</arg>
