@@ -24,17 +24,46 @@
  */
 package com.oracle.svm.test.jni.invocation;
 
+import java.util.Timer;
+import java.util.TimerTask;
+
 /**
  * The Java side of {@code jnidestroyvm.c}: the {@code main} a launcher calls over JNI before it
  * calls {@code DestroyJavaVM}.
  * <p>
- * It leaves behind a daemon thread that swallows {@link InterruptedException}, as
- * {@link java.util.Timer}'s thread does. HotSpot's {@code DestroyJavaVM} does not wait for daemon
- * threads, so a launcher can exit; {@code DestroyJavaVM} must not block on this one.
+ * It leaves behind a daemon thread that swallows {@link InterruptedException}. Which one depends
+ * on the argument: {@code timer} starts a {@link Timer}, whose thread waits on its queue, and
+ * {@code daemon} starts a thread that sleeps. HotSpot's {@code DestroyJavaVM} does not wait for
+ * daemon threads, so a launcher can exit. Native Image tears down the isolate, which interrupts
+ * the thread and, when that does not end it, makes its blocking operation throw
+ * {@link ThreadDeath}; {@code DestroyJavaVM} must not block on it either.
+ * <p>
+ * The cases are separate so that a fix for one of them can be verified on its own.
  */
 public class DaemonMain {
 
     public static void main(String[] args) {
+        if (args.length != 1) {
+            throw new IllegalArgumentException("Expected one argument: timer or daemon");
+        }
+        switch (args[0]) {
+            case "timer" -> startTimer();
+            case "daemon" -> startDaemon();
+            default -> throw new IllegalArgumentException("Unknown case: " + args[0]);
+        }
+        System.out.println("main returns: " + args[0]);
+    }
+
+    private static void startTimer() {
+        Timer timer = new Timer("timer-daemon", true);
+        timer.schedule(new TimerTask() {
+            @Override
+            public void run() {
+            }
+        }, 100_000_000L);
+    }
+
+    private static void startDaemon() {
         Thread daemon = new Thread(() -> {
             while (true) {
                 try {
@@ -46,6 +75,5 @@ public class DaemonMain {
         }, "interrupt-swallowing-daemon");
         daemon.setDaemon(true);
         daemon.start();
-        System.out.println("main returns");
     }
 }

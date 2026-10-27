@@ -1740,6 +1740,10 @@ def _jnidestroyvmtest(native_image, args=None):
     invocation interface, runs a main method that leaves an interrupt-swallowing daemon thread
     behind, and calls DestroyJavaVM as the JDK's launcher does. DestroyJavaVM must return. The
     program's own alarm ends the run if it does not.
+
+    There are two cases, each a run of its own because JNI allows one VM per process: the thread
+    of a java.util.Timer, and a plain daemon thread that sleeps. All cases run, and the result
+    says how many of them failed, so that a fix for one of them can be assessed on its own.
     """
     args = [] if args is None else args
     if mx.get_os() == 'windows':
@@ -1776,9 +1780,17 @@ def _jnidestroyvmtest(native_image, args=None):
             '-o', 'jnidestroyvm-hotspot'],
            cwd=build_dir)
 
-    # Start the C executables: HotSpot first, so a failure there says that the test is wrong.
-    mx.run([join(build_dir, 'jnidestroyvm-hotspot'), test_proj.output_dir()])
-    mx.run([join(build_dir, 'jnidestroyvm')])
+    # Run the cases: HotSpot first, so a failure there says that the test is wrong.
+    cases = ['timer', 'daemon']
+    for case in cases:
+        mx.run([join(build_dir, 'jnidestroyvm-hotspot'), case, test_proj.output_dir()])
+    failed = [case for case in cases if mx.run([join(build_dir, 'jnidestroyvm'), case], nonZeroIsFatal=False) != 0]
+    if failed:
+        summary = f'jnidestroyvmtest: {len(failed)} of {len(cases)} cases failed'
+        mx.abort(f'{summary}: {", ".join(failed)}')
+    else:
+        summary = f'jnidestroyvmtest: {len(cases)} cases succeeded'
+        mx.log(summary)
 
 
 _helloworld_variants = {
@@ -3208,7 +3220,7 @@ def cinterfacetutorial(args):
 def jnidestroyvmtest(args):
     """
     creates a VM in a shared library image through JNI and destroys it while a daemon thread that
-    ignores interrupts is running.
+    ignores interrupts is running, once with a java.util.Timer thread and once with a plain thread.
     """
     native_image_context_run(_jnidestroyvmtest, args)
 # The platform and Graal modules of a small JDK that can run the image builder: no java.se and no

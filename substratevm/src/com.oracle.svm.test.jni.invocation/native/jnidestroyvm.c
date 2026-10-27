@@ -23,16 +23,19 @@
  * questions.
  */
 /*
- * Starts a Java VM through the JNI invocation interface, runs DaemonMain.main, and ends the VM as
- * the JDK's `java` launcher does (JavaMain and LEAVE): DetachCurrentThread, then DestroyJavaVM.
+ * Starts a Java VM through the JNI invocation interface, runs DaemonMain.main with the case named
+ * by the first argument (timer or daemon), and ends the VM as the JDK's `java` launcher does
+ * (JavaMain and LEAVE): DetachCurrentThread, then DestroyJavaVM.
  *
  * DaemonMain leaves a daemon thread running that ignores Thread.interrupt(). The JNI specification
  * has DestroyJavaVM wait for non-daemon threads only, and HotSpot lets it return, so the launcher
- * can exit. If it does not return here, the alarm ends the test with SIGALRM instead of blocking
- * the build.
+ * can exit. Native Image tears down the isolate in DestroyJavaVM, which ends such a thread with
+ * ThreadDeath after a grace period, so DestroyJavaVM returns as well. If it does not return here,
+ * the alarm ends the test with SIGALRM instead of blocking the build.
  *
- * The same program is built twice: against the shared library image, which contains DaemonMain, and
- * against HotSpot's libjvm as the reference, which needs the class path as the first argument.
+ * JNI allows one VM per process, so each case is a run of its own. The same program is built
+ * twice: against the shared library image, which contains DaemonMain, and against HotSpot's libjvm
+ * as the reference, which needs the class path as the second argument.
  */
 #include <jni.h>
 #include <stdio.h>
@@ -46,9 +49,14 @@ int main(int argc, char **argv) {
     JavaVMOption options[1];
     char class_path_option[4096];
     JavaVMInitArgs vm_args = {0};
+    if (argc < 2) {
+        fprintf(stderr, "usage: %s timer|daemon [classpath]\n", argv[0]);
+        return 1;
+    }
+    const char *test_case = argv[1];
     vm_args.version = JNI_VERSION_10;
-    if (argc > 1) {
-        snprintf(class_path_option, sizeof(class_path_option), "-Djava.class.path=%s", argv[1]);
+    if (argc > 2) {
+        snprintf(class_path_option, sizeof(class_path_option), "-Djava.class.path=%s", argv[2]);
         options[0].optionString = class_path_option;
         vm_args.nOptions = 1;
         vm_args.options = options;
@@ -67,8 +75,20 @@ int main(int argc, char **argv) {
         fprintf(stderr, "DaemonMain.main not found\n");
         return 3;
     }
-    (*env)->CallStaticVoidMethod(env, cls, main_method, NULL);
-    int result = (*env)->ExceptionOccurred(env) == NULL ? 0 : 1;
+    jclass string_cls = (*env)->FindClass(env, "java/lang/String");
+    jobjectArray main_args = string_cls == NULL ? NULL : (*env)->NewObjectArray(env, 1, string_cls, NULL);
+    jstring case_string = main_args == NULL ? NULL : (*env)->NewStringUTF(env, test_case);
+    if (case_string == NULL) {
+        fprintf(stderr, "Cannot create the arguments of DaemonMain.main\n");
+        return 3;
+    }
+    (*env)->SetObjectArrayElement(env, main_args, 0, case_string);
+    (*env)->CallStaticVoidMethod(env, cls, main_method, main_args);
+    int result = 0;
+    if ((*env)->ExceptionOccurred(env) != NULL) {
+        (*env)->ExceptionDescribe(env);
+        result = 1;
+    }
 
     if ((*vm)->DetachCurrentThread(vm) != JNI_OK) {
         fprintf(stderr, "DetachCurrentThread failed\n");
@@ -78,6 +98,6 @@ int main(int argc, char **argv) {
         fprintf(stderr, "DestroyJavaVM failed\n");
         return 5;
     }
-    printf("DestroyJavaVM returned\n");
+    printf("DestroyJavaVM returned: %s\n", test_case);
     return result;
 }
