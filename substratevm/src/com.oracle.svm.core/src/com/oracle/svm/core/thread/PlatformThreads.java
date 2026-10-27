@@ -675,6 +675,23 @@ public abstract class PlatformThreads {
 
     static final Method FORK_JOIN_POOL_TRY_TERMINATE_METHOD;
 
+    /**
+     * How long {@link #tearDownOtherThreads} waits for the interrupted threads to exit before it
+     * makes their blocking operations throw {@link ThreadDeath}, see
+     * {@link #interruptExecution}.
+     */
+    private static final long TEAR_DOWN_THREAD_DEATH_DELAY_NANOS = TimeUtils.secondsToNanos(1);
+
+    /** The thread that executes {@link #tearDownOtherThreads}. */
+    private static volatile Thread tearDownThread;
+
+    /**
+     * Set when the threads that {@link #tearDownOtherThreads} interrupted have not exited within
+     * {@link #TEAR_DOWN_THREAD_DEATH_DELAY_NANOS}. From then on, the blocking operations of the
+     * remaining threads throw {@link ThreadDeath}, see {@link #interruptExecution}.
+     */
+    private static volatile boolean tearDownThrowsThreadDeath;
+
     static {
         VMError.guarantee(ImageInfo.inImageBuildtimeCode(), "PlatformThreads must be initialized at build time.");
         FORK_JOIN_POOL_TRY_TERMINATE_METHOD = ReflectionUtil.lookupMethod(ForkJoinPool.class, "tryTerminate", boolean.class, boolean.class);
@@ -683,10 +700,13 @@ public abstract class PlatformThreads {
     /**
      * Interrupts all threads except for the current thread and any threads that require custom
      * teardown logic (see {@link #isVMInternalThread(IsolateThread)}). Waits until the interrupted
-     * threads detach.
+     * threads detach. Threads that keep running regardless of the interrupt are ended with
+     * {@link ThreadDeath} after a grace period, see {@link #interruptExecution}.
      */
     public static void tearDownOtherThreads() {
         Log trace = Log.noopLog().string("[PlatformThreads.tearDownPlatformThreads:").newline().flush();
+
+        tearDownThread = currentThread.get();
 
         /*
          * Set tear-down flag for new Java threads that have already been started on an OS level,
@@ -781,6 +801,16 @@ public abstract class PlatformThreads {
                 throw VMError.shouldNotReachHere("Took too long to tear down the VM.");
             }
 
+            if (!tearDownThrowsThreadDeath && TimeUtils.nanoTimeLessThan(TEAR_DOWN_THREAD_DEATH_DELAY_NANOS, sinceStartNanos)) {
+                /*
+                 * The remaining threads did not exit in response to the interrupt. From now on,
+                 * their blocking operations throw ThreadDeath. Interrupt them again so that the
+                 * ones that are blocked wake up and run into that.
+                 */
+                tearDownThrowsThreadDeath = true;
+                interruptOtherThreads();
+            }
+
             long sinceReportNanos = TimeUtils.nanoSecondsSince(previousReportNanos);
             if (warningConfiguredNanos > 0 && TimeUtils.nanoTimeLessThan(warningConfiguredNanos, sinceReportNanos)) {
                 printLaggards = true;
@@ -798,6 +828,38 @@ public abstract class PlatformThreads {
                 }
             }
         }
+    }
+
+    private static void interruptOtherThreads() {
+        for (Thread thread : fetchThreadsForTeardown()) {
+            if (thread != currentThread.get()) {
+                try {
+                    thread.interrupt(); // not final and subclasses can unexpectedly throw
+                } catch (Throwable ignored) {
+                }
+            }
+        }
+    }
+
+    /**
+     * Returns the {@link InterruptedException} that a blocking operation such as
+     * {@link Object#wait} or {@link Thread#sleep} throws because the current thread was
+     * interrupted. During the tear-down of the isolate (see {@link #tearDownOtherThreads}), this
+     * method throws {@link ThreadDeath} instead once the thread has had a grace period to exit on
+     * its own. This ends threads that swallow the {@link InterruptedException} and block again,
+     * such as the thread of {@link java.util.Timer}, which would otherwise keep the isolate from
+     * being torn down. The interrupt status of the thread remains set so that it dies at its next
+     * blocking operation even if it catches the error.
+     */
+    public static InterruptedException interruptExecution() {
+        if (VMThreads.isTearingDown() && tearDownThrowsThreadDeath) {
+            Thread thread = currentThread.get();
+            if (thread != tearDownThread && !isCurrentThreadVirtual() && !isVMInternalThread(CurrentIsolate.getCurrentThread())) {
+                thread.interrupt();
+                throw new ThreadDeath();
+            }
+        }
+        return new InterruptedException();
     }
 
     public static boolean isVMInternalThread(IsolateThread thread) {
@@ -983,7 +1045,10 @@ public abstract class PlatformThreads {
             ThreadListenerSupport.get().beforeThreadRun();
             thread.run();
         } catch (Throwable ex) {
-            JavaThreads.dispatchUncaughtException(thread, ex);
+            /* The tear-down ending the thread (see interruptExecution) is expected. */
+            if (!(ex instanceof ThreadDeath && tearDownThrowsThreadDeath)) {
+                JavaThreads.dispatchUncaughtException(thread, ex);
+            }
         }
     }
 
@@ -1143,7 +1208,7 @@ public abstract class PlatformThreads {
         }
         sleep0(nanos);
         if (Thread.interrupted()) { // clears the interrupted flag as required of Thread.sleep()
-            throw new InterruptedException();
+            throw interruptExecution();
         }
     }
 

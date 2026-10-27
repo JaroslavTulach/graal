@@ -27,6 +27,7 @@ package com.oracle.svm.core.monitor;
 import org.graalvm.nativeimage.ImageSingletons;
 
 import com.oracle.svm.core.imagelayer.LayeredFoldResolver;
+import com.oracle.svm.core.thread.PlatformThreads;
 import com.oracle.svm.guest.staging.core.thread.ThreadStatus;
 import com.oracle.svm.shared.Uninterruptible;
 
@@ -87,13 +88,17 @@ public abstract class MonitorSupport {
     public final void wait(Object obj, long timeoutMillis) throws InterruptedException {
         /* Required checks on the arguments. */
         if (Thread.interrupted()) {
-            throw new InterruptedException();
+            throw PlatformThreads.interruptExecution();
         }
         if (timeoutMillis < 0) {
             throw new IllegalArgumentException("Timeout is negative.");
         }
 
-        doWait(obj, timeoutMillis);
+        try {
+            doWait(obj, timeoutMillis);
+        } catch (InterruptedException e) {
+            throw PlatformThreads.interruptExecution();
+        }
     }
 
     protected abstract void doWait(Object obj, long timeoutMillis) throws InterruptedException;
