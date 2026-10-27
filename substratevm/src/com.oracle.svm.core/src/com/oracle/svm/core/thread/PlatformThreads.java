@@ -677,20 +677,19 @@ public abstract class PlatformThreads {
 
     /**
      * How long {@link #tearDownOtherThreads} waits for the interrupted threads to exit before it
-     * makes their blocking operations throw {@link ThreadDeath}, see
-     * {@link #interruptExecution}.
+     * sets {@link #tearDownWithThreadDeath}.
      */
-    private static final long TEAR_DOWN_THREAD_DEATH_DELAY_NANOS = TimeUtils.secondsToNanos(1);
+    private static final long TEAR_DOWN_GRACE_PERIOD_NANOS = TimeUtils.secondsToNanos(1);
 
     /** The thread that executes {@link #tearDownOtherThreads}. */
     private static volatile Thread tearDownThread;
 
     /**
-     * Set when the threads that {@link #tearDownOtherThreads} interrupted have not exited within
-     * {@link #TEAR_DOWN_THREAD_DEATH_DELAY_NANOS}. From then on, the blocking operations of the
-     * remaining threads throw {@link ThreadDeath}, see {@link #interruptExecution}.
+     * Set when {@link #tearDownOtherThreads} takes too long because interrupted threads keep
+     * running. From then on, the blocking operations of these threads throw {@link ThreadDeath},
+     * see {@link #interruptExecution}.
      */
-    private static volatile boolean tearDownThrowsThreadDeath;
+    private static volatile boolean tearDownWithThreadDeath;
 
     static {
         VMError.guarantee(ImageInfo.inImageBuildtimeCode(), "PlatformThreads must be initialized at build time.");
@@ -779,17 +778,29 @@ public abstract class PlatformThreads {
             trace.string("  shutdown initiated: ").object(pool).newline().flush();
         }
 
-        waitForTearDown();
+        long startNanos = System.nanoTime();
+        if (!waitForTearDown(startNanos, TEAR_DOWN_GRACE_PERIOD_NANOS)) {
+            /*
+             * The remaining threads did not exit in response to the interrupt. From now on, their
+             * blocking operations throw ThreadDeath. Interrupt them again so that the ones that are
+             * blocked wake up and run into that.
+             */
+            tearDownWithThreadDeath = true;
+            interruptOtherThreads();
+            waitForTearDown(startNanos, 0);
+        }
     }
 
-    /** Wait (im)patiently for the thread list to drain. */
-    private static void waitForTearDown() {
+    /**
+     * Wait (im)patiently for the thread list to drain, but not longer than {@code timeoutNanos}
+     * (0: without limit). Returns true if the thread list drained.
+     */
+    private static boolean waitForTearDown(long startNanos, long timeoutNanos) {
         assert !isVMInternalThread(CurrentIsolate.getCurrentThread()) : "we count the threads until only the current one remains";
 
         long warningConfiguredNanos = SubstrateOptions.getTearDownWarningNanos();
         long failureConfiguredNanos = SubstrateOptions.getTearDownFailureNanos();
-        long startNanos = System.nanoTime();
-        long previousReportNanos = startNanos;
+        long previousReportNanos = System.nanoTime();
 
         boolean printLaggards = false;
         while (!isReadyForTearDown(printLaggards)) {
@@ -800,15 +811,8 @@ public abstract class PlatformThreads {
             if (failureConfiguredNanos > 0 && TimeUtils.nanoTimeLessThan(failureConfiguredNanos, sinceStartNanos)) {
                 throw VMError.shouldNotReachHere("Took too long to tear down the VM.");
             }
-
-            if (!tearDownThrowsThreadDeath && TimeUtils.nanoTimeLessThan(TEAR_DOWN_THREAD_DEATH_DELAY_NANOS, sinceStartNanos)) {
-                /*
-                 * The remaining threads did not exit in response to the interrupt. From now on,
-                 * their blocking operations throw ThreadDeath. Interrupt them again so that the
-                 * ones that are blocked wake up and run into that.
-                 */
-                tearDownThrowsThreadDeath = true;
-                interruptOtherThreads();
+            if (timeoutNanos > 0 && TimeUtils.nanoTimeLessThan(timeoutNanos, sinceStartNanos)) {
+                return false;
             }
 
             long sinceReportNanos = TimeUtils.nanoSecondsSince(previousReportNanos);
@@ -828,6 +832,7 @@ public abstract class PlatformThreads {
                 }
             }
         }
+        return true;
     }
 
     private static void interruptOtherThreads() {
@@ -852,7 +857,7 @@ public abstract class PlatformThreads {
      * blocking operation even if it catches the error.
      */
     public static InterruptedException interruptExecution() {
-        if (VMThreads.isTearingDown() && tearDownThrowsThreadDeath) {
+        if (VMThreads.isTearingDown() && tearDownWithThreadDeath) {
             Thread thread = currentThread.get();
             if (thread != tearDownThread && !isCurrentThreadVirtual() && !isVMInternalThread(CurrentIsolate.getCurrentThread())) {
                 thread.interrupt();
@@ -1046,7 +1051,7 @@ public abstract class PlatformThreads {
             thread.run();
         } catch (Throwable ex) {
             /* The tear-down ending the thread (see interruptExecution) is expected. */
-            if (!(ex instanceof ThreadDeath && tearDownThrowsThreadDeath)) {
+            if (!(ex instanceof ThreadDeath && tearDownWithThreadDeath)) {
                 JavaThreads.dispatchUncaughtException(thread, ex);
             }
         }
