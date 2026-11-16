@@ -24,7 +24,7 @@
  */
 /*
  * Starts a Java VM through the JNI invocation interface, runs DaemonMain.main with the case named
- * by the first argument (timer or daemon), and ends the VM as the JDK's `java` launcher does
+ * by the first argument (timer, daemon or cleaner), and ends the VM as the JDK's `java` launcher does
  * (JavaMain and LEAVE): DetachCurrentThread, then DestroyJavaVM.
  *
  * DaemonMain leaves a daemon thread running that ignores Thread.interrupt(). The JNI specification
@@ -50,7 +50,7 @@ int main(int argc, char **argv) {
     char class_path_option[4096];
     JavaVMInitArgs vm_args = {0};
     if (argc < 2) {
-        fprintf(stderr, "usage: %s timer|daemon [classpath]\n", argv[0]);
+        fprintf(stderr, "usage: %s timer|daemon|cleaner [classpath]\n", argv[0]);
         return 1;
     }
     const char *test_case = argv[1];

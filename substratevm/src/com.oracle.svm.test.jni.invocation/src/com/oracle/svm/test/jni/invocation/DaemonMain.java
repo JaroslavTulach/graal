@@ -24,6 +24,7 @@
  */
 package com.oracle.svm.test.jni.invocation;
 
+import java.lang.ref.Cleaner;
 import java.util.Timer;
 import java.util.TimerTask;
 
@@ -32,11 +33,12 @@ import java.util.TimerTask;
  * calls {@code DestroyJavaVM}.
  * <p>
  * It leaves behind a daemon thread that swallows {@link InterruptedException}. Which one depends
- * on the argument: {@code timer} starts a {@link Timer}, whose thread waits on its queue, and
- * {@code daemon} starts a thread that sleeps. HotSpot's {@code DestroyJavaVM} does not wait for
- * daemon threads, so a launcher can exit. Native Image tears down the isolate, which interrupts
- * the thread and, when that does not end it, makes its blocking operation throw
- * {@link ThreadDeath}; {@code DestroyJavaVM} must not block on it either.
+ * on the argument: {@code timer} starts a {@link Timer}, whose thread waits on its queue,
+ * {@code daemon} starts a thread that sleeps, and {@code cleaner} starts a {@link Cleaner}, whose
+ * thread catches every {@link Throwable} around the wait on its reference queue. HotSpot's
+ * {@code DestroyJavaVM} does not wait for daemon threads, so a launcher can exit. Native Image
+ * tears down the isolate, which interrupts the thread and, when that does not end it, makes its
+ * blocking operation throw {@link ThreadDeath}; {@code DestroyJavaVM} must not block on it either.
  * <p>
  * The cases are separate so that a fix for one of them can be verified on its own.
  */
@@ -44,11 +46,12 @@ public class DaemonMain {
 
     public static void main(String[] args) {
         if (args.length != 1) {
-            throw new IllegalArgumentException("Expected one argument: timer or daemon");
+            throw new IllegalArgumentException("Expected one argument: timer, daemon or cleaner");
         }
         switch (args[0]) {
             case "timer" -> startTimer();
             case "daemon" -> startDaemon();
+            case "cleaner" -> startCleaner();
             default -> throw new IllegalArgumentException("Unknown case: " + args[0]);
         }
         System.out.println("main returns: " + args[0]);
@@ -75,5 +78,16 @@ public class DaemonMain {
         }, "interrupt-swallowing-daemon");
         daemon.setDaemon(true);
         daemon.start();
+    }
+
+    /** Keep the cleaner and the registered object reachable so that the cleaner thread runs on. */
+    private static Cleaner cleaner;
+    private static Object cleanerReferent;
+
+    private static void startCleaner() {
+        cleaner = Cleaner.create();
+        cleanerReferent = new Object();
+        cleaner.register(cleanerReferent, () -> {
+        });
     }
 }
